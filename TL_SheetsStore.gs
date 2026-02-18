@@ -1,39 +1,43 @@
 /**
- * TL_SheetsStore - client sheet is the source of truth for tasks.
- * Tabs: OPEN, PENDING, REVISION, ARCHIVE, AUDIT_LOG, SETTINGS
+ * TL_SheetsStore - Storage layer for TaskLess POC.
  *
- * NOTE: Set Script Property TL_CFG_STORE_SHEET_ID to your bound sheet id (later).
+ * IMPORTANT:
+ * - If TL_CFG_STORE_SHEET_ID is NOT set, we default to the *bound* spreadsheet.
+ * - This unblocks local POC without extra configuration.
+ *
+ * POC Tabs (current target):
+ * - SETTINGS
+ * - TASKS
+ * - CONTACTS
+ * - AUDIT_LOG
+ * - COMMANDS_INBOX
+ * - EVENTS_LOG
+ * - OUTBOX_QUEUE
+ * - ERRORS
  */
 function TL_Sheets_getStore_() {
-  const sheetId = TL_Config_get_("TL_CFG_STORE_SHEET_ID", "");
-  if (!sheetId) return null;
-  return SpreadsheetApp.openById(sheetId);
+  const sheetId = String(TL_Config_get_("TL_CFG_STORE_SHEET_ID", "") || "").trim();
+  if (sheetId) return SpreadsheetApp.openById(sheetId);
+
+  // Default to bound spreadsheet for POC
+  return SpreadsheetApp.getActiveSpreadsheet();
 }
 
 function TL_Sheets_ensureTab_(ss, tabName, headers) {
   let sh = ss.getSheetByName(tabName);
   if (!sh) sh = ss.insertSheet(tabName);
+
   if (headers && headers.length) {
-    const firstRow = sh.getRange(1,1,1,Math.max(1, sh.getLastColumn())).getValues()[0] || [];
+    const lastCol = Math.max(1, sh.getLastColumn());
+    const firstRow = sh.getRange(1, 1, 1, lastCol).getValues()[0] || [];
     const hasHeader = firstRow.join("|").includes(headers[0]);
     if (!hasHeader) {
       sh.clear();
-      sh.getRange(1,1,1,headers.length).setValues([headers]);
+      sh.getRange(1, 1, 1, headers.length).setValues([headers]);
       sh.setFrozenRows(1);
     }
   }
   return sh;
-}
-
-function TL_Sheets_bootstrapTabs_() {
-  const ss = TL_Sheets_getStore_();
-  if (!ss) throw new Error("Missing TL_CFG_STORE_SHEET_ID script property");
-  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"), TL_Sheets_taskHeaders_());
-  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"), TL_Sheets_taskHeaders_());
-  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_REVISION","REVISION"), TL_Sheets_taskHeaders_());
-  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_ARCHIVE","ARCHIVE"), TL_Sheets_taskHeaders_());
-  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_AUDIT","AUDIT_LOG"), ["ts","actor","eventType","userE164","refId","chunkId","payload"]);
-  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_SETTINGS","SETTINGS"), ["key","value"]);
 }
 
 function TL_Sheets_taskHeaders_() {
@@ -45,9 +49,40 @@ function TL_Sheets_taskHeaders_() {
   ];
 }
 
+/**
+ * Bootstraps the bound spreadsheet to the minimal POC schema.
+ * Safe to run repeatedly.
+ */
+function TL_Sheets_bootstrapPOC_() {
+  const ss = TL_Sheets_getStore_();
+  if (!ss) throw new Error("No spreadsheet store available");
+
+  // Existing tabs we already saw in bound sheet
+  TL_Sheets_ensureTab_(ss, "TASKS", TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, "CONTACTS", ["key","valueJson","updatedAt"]);
+  TL_Sheets_ensureTab_(ss, "SETTINGS", ["key","value"]);
+  TL_Sheets_ensureTab_(ss, "AUDIT_LOG", ["ts","actor","eventType","payloadJson"]);
+
+  // New POC router tabs required for webhook routing
+  TL_Sheets_ensureTab_(ss, "COMMANDS_INBOX", ["ts","userId","text","rawJson"]);
+  TL_Sheets_ensureTab_(ss, "EVENTS_LOG", ["ts","type","ref","payloadJson"]);
+  TL_Sheets_ensureTab_(ss, "OUTBOX_QUEUE", ["ts","to","type","payloadJson","status"]);
+  TL_Sheets_ensureTab_(ss, "ERRORS", ["ts","where","error","payloadJson"]);
+
+  return { ok:true, spreadsheetId:ss.getId(), spreadsheetName:ss.getName() };
+}
+
+/**
+ * Backward-compatible bootstrap (older naming).
+ * Keep it, but point it to POC bootstrap for now.
+ */
+function TL_Sheets_bootstrapTabs_() {
+  return TL_Sheets_bootstrapPOC_();
+}
+
 function TL_Sheets_upsertTask_(tabName, rowObj, keyField, keyValue) {
   const ss = TL_Sheets_getStore_();
-  if (!ss) throw new Error("Missing TL_CFG_STORE_SHEET_ID script property");
+  if (!ss) throw new Error("No spreadsheet store available");
 
   const sh = TL_Sheets_ensureTab_(ss, tabName, TL_Sheets_taskHeaders_());
   const headers = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
@@ -84,7 +119,9 @@ function TL_Sheets_writeTaskRow_(sh, headers, rowNumber, rowObj) {
 function TL_Sheets_findOpenTasks_(userE164, limit) {
   const ss = TL_Sheets_getStore_();
   if (!ss) return [];
-  const tabs = [TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"), TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"), TL_Config_get_("TL_CFG_TAB_REVISION","REVISION")];
+
+  // POC tabs for tasks
+  const tabs = ["TASKS"];
   const out = [];
   const max = limit || 10;
 
@@ -117,4 +154,3 @@ function TL_Sheets_findOpenTasks_(userE164, limit) {
 
   return out;
 }
-
