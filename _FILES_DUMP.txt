@@ -1,0 +1,110 @@
+## TaskLess file dump  2026-02-15T10:22:21
+root: C:\dev\TaskLess
+
+==============================
+FILE: docs\ARCHITECTURE.md
+==============================
+# Architecture (v0)
+
+Components:
+- WhatsApp Cloud API Webhook â†’ Google Apps Script Web App
+- Parser â†’ Plan Builder â†’ Approve/Cancel Commands
+- Google Workspace Executors (Gmail/Calendar/Sheets)
+
+Rules:
+- Only messages containing deterministic markers trigger actions.
+- Outbound assistant text must never contain trigger markers.
+- Store idempotency keys (message_id) to prevent double-processing.
+
+Next: Implement Code.gs and marker spec.
+
+
+==============================
+FILE: README.md
+==============================
+# TaskLess
+
+Voice â†’ AI â†’ Plan â†’ Confirm â†’ Execute (WhatsApp-first).
+
+
+==============================
+FILE: scripts\dump-files.ps1
+==============================
+param(
+  [string]$Root = "C:\dev\TaskLess",
+  [string]$OutFile = "C:\dev\TaskLess\_FILES_DUMP.txt"
+)
+
+$ErrorActionPreference="Stop"
+
+$include = @("*.md","*.gs","*.js","*.json","*.ps1","*.txt")
+$files = Get-ChildItem -Path $Root -Recurse -File | Where-Object {
+  $name = $_.Name.ToLowerInvariant()
+  ($include | ForEach-Object { $name -like $_ }) -contains $true
+} | Where-Object {
+  $_.FullName -notmatch "\\\.git\\"
+} | Sort-Object FullName
+
+$sb = New-Object System.Text.StringBuilder
+$null = $sb.AppendLine("## TaskLess file dump  " + (Get-Date).ToString("s"))
+$null = $sb.AppendLine("root: " + $Root)
+$null = $sb.AppendLine("")
+
+foreach ($f in $files) {
+  $rel = $f.FullName.Substring($Root.Length).TrimStart("\")
+  $null = $sb.AppendLine("==============================")
+  $null = $sb.AppendLine("FILE: " + $rel)
+  $null = $sb.AppendLine("==============================")
+  $null = $sb.AppendLine((Get-Content -Raw -Path $f.FullName))
+  $null = $sb.AppendLine("")
+}
+
+$sb.ToString() | Set-Content -Encoding UTF8 -Path $OutFile
+Write-Host "Wrote: $OutFile"
+
+
+==============================
+FILE: scripts\README.md
+==============================
+# scripts
+
+This folder is for helper scripts / runbooks.
+
+- dump-files.ps1: emits a single combined text snapshot of the repo files
+
+
+==============================
+FILE: src\gas\Code.gs
+==============================
+/**
+ * TaskLess v0 (placeholder)
+ * Codex will replace this entire file with a working implementation.
+ */
+function doGet(e) {
+  return ContentService.createTextOutput("ok");
+}
+function doPost(e) {
+  return ContentService.createTextOutput("ok");
+}
+
+
+==============================
+FILE: src\spec\TL_MARKERS.md
+==============================
+# TL Markers
+
+Allowed markers (machine-only):
+- [TL:TRIGGER:VOICE]
+- [TL:TRIGGER:TEXT]
+- [TL:CMD:APPROVE:<REF>]
+- [TL:CMD:CANCEL:<REF>]
+- [TL:CMD:EDIT:<REF>]
+
+Rules:
+1) Only inbound messages containing [TL:TRIGGER:*] or [TL:CMD:*] are actionable.
+2) The system must never output [TL:TRIGGER:*] or [TL:CMD:*] in normal user-facing responses.
+3) Always log: ref_id, message_id, from, type, parsed_text, action_taken, result.
+
+
+
+
