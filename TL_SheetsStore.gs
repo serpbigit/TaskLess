@@ -1,25 +1,16 @@
 /**
- * TL_SheetsStore - Storage layer for TaskLess POC.
+ * TL_SheetsStore - bounded sheet store + bootstrap helpers (POC)
+ * Default store: bound spreadsheet (getActiveSpreadsheet)
+ * Optional override: Script Property TL_CFG_STORE_SHEET_ID
  *
- * IMPORTANT:
- * - If TL_CFG_STORE_SHEET_ID is NOT set, we default to the *bound* spreadsheet.
- * - This unblocks local POC without extra configuration.
- *
- * POC Tabs (current target):
- * - SETTINGS
- * - TASKS
- * - CONTACTS
- * - AUDIT_LOG
- * - COMMANDS_INBOX
- * - EVENTS_LOG
- * - OUTBOX_QUEUE
- * - ERRORS
+ * Tabs we may create:
+ * OPEN, PENDING, REVISION, ARCHIVE, AUDIT_LOG, SETTINGS, COMMANDS_INBOX
  */
-function TL_Sheets_getStore_() {
-  const sheetId = String(TL_Config_get_("TL_CFG_STORE_SHEET_ID", "") || "").trim();
-  if (sheetId) return SpreadsheetApp.openById(sheetId);
 
-  // Default to bound spreadsheet for POC
+function TL_Sheets_getStore_() {
+  const sheetId = TL_Config_get_("TL_CFG_STORE_SHEET_ID", "");
+  if (sheetId) return SpreadsheetApp.openById(sheetId);
+  // default to bound sheet
   return SpreadsheetApp.getActiveSpreadsheet();
 }
 
@@ -49,43 +40,40 @@ function TL_Sheets_taskHeaders_() {
   ];
 }
 
-/**
- * Bootstraps the bound spreadsheet to the minimal POC schema.
- * Safe to run repeatedly.
- */
-function TL_Sheets_bootstrapPOC_() {
+function TL_Sheets_bootstrapTabs_() {
   const ss = TL_Sheets_getStore_();
-  if (!ss) throw new Error("No spreadsheet store available");
 
-  // Existing tabs we already saw in bound sheet
-  TL_Sheets_ensureTab_(ss, "TASKS", TL_Sheets_taskHeaders_());
-  TL_Sheets_ensureTab_(ss, "CONTACTS", ["key","valueJson","updatedAt"]);
-  TL_Sheets_ensureTab_(ss, "SETTINGS", ["key","value"]);
-  TL_Sheets_ensureTab_(ss, "AUDIT_LOG", ["ts","actor","eventType","payloadJson"]);
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_REVISION","REVISION"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_ARCHIVE","ARCHIVE"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_AUDIT","AUDIT_LOG"), ["ts","actor","eventType","userE164","refId","chunkId","payload"]);
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_SETTINGS","SETTINGS"), ["key","value"]);
 
-  // New POC router tabs required for webhook routing
-  TL_Sheets_ensureTab_(ss, "COMMANDS_INBOX", ["ts","userId","text","rawJson"]);
-  TL_Sheets_ensureTab_(ss, "EVENTS_LOG", ["ts","type","ref","payloadJson"]);
-  TL_Sheets_ensureTab_(ss, "OUTBOX_QUEUE", ["ts","to","type","payloadJson","status"]);
-  TL_Sheets_ensureTab_(ss, "ERRORS", ["ts","where","error","payloadJson"]);
+  // Router currently expects this to exist (quick unblock)
+  TL_Sheets_ensureTab_(ss, "COMMANDS_INBOX", ["ts","userE164","text","batchVersion","payloadJson"]);
 
-  return { ok:true, spreadsheetId:ss.getId(), spreadsheetName:ss.getName() };
+  return {
+    ok: true,
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tabs: ss.getSheets().map(sh => sh.getName())
+  };
 }
 
 /**
- * Backward-compatible bootstrap (older naming).
- * Keep it, but point it to POC bootstrap for now.
+ * Public runner to bootstrap required store tabs.
+ * Safe to run multiple times.
  */
-function TL_Sheets_bootstrapTabs_() {
-  return TL_Sheets_bootstrapPOC_();
+function TL_Sheets_bootstrapPOC() {
+  return TL_Sheets_bootstrapTabs_();
 }
 
 function TL_Sheets_upsertTask_(tabName, rowObj, keyField, keyValue) {
   const ss = TL_Sheets_getStore_();
-  if (!ss) throw new Error("No spreadsheet store available");
-
   const sh = TL_Sheets_ensureTab_(ss, tabName, TL_Sheets_taskHeaders_());
-  const headers = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+
   const keyCol = headers.indexOf(keyField) + 1;
   if (keyCol <= 0) throw new Error("Key field not found: " + keyField);
 
@@ -95,7 +83,7 @@ function TL_Sheets_upsertTask_(tabName, rowObj, keyField, keyValue) {
     return;
   }
 
-  const keyVals = sh.getRange(2, keyCol, lastRow-1, 1).getValues().map(r => String(r[0] || ""));
+  const keyVals = sh.getRange(2, keyCol, lastRow - 1, 1).getValues().map(r => String(r[0] || ""));
   const idx = keyVals.indexOf(String(keyValue));
   if (idx === -1) {
     TL_Sheets_appendTask_(sh, headers, rowObj);
@@ -120,8 +108,12 @@ function TL_Sheets_findOpenTasks_(userE164, limit) {
   const ss = TL_Sheets_getStore_();
   if (!ss) return [];
 
-  // POC tabs for tasks
-  const tabs = ["TASKS"];
+  const tabs = [
+    TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"),
+    TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"),
+    TL_Config_get_("TL_CFG_TAB_REVISION","REVISION")
+  ];
+
   const out = [];
   const max = limit || 10;
 
@@ -129,25 +121,28 @@ function TL_Sheets_findOpenTasks_(userE164, limit) {
     if (out.length >= max) return;
     const sh = ss.getSheetByName(tab);
     if (!sh) return;
+
     const lastRow = sh.getLastRow();
     if (lastRow < 2) return;
-    const values = sh.getRange(1,1,lastRow,sh.getLastColumn()).getValues();
+
+    const values = sh.getRange(1, 1, lastRow, sh.getLastColumn()).getValues();
     const headers = values[0];
+
     const idxUser = headers.indexOf("userE164");
     const idxTitle = headers.indexOf("title");
     const idxChunk = headers.indexOf("chunkId");
     const idxRef = headers.indexOf("refId");
     const idxStatus = headers.indexOf("status");
 
-    for (let r=1; r<values.length && out.length<max; r++) {
+    for (let r = 1; r < values.length && out.length < max; r++) {
       const row = values[r];
-      if (String(row[idxUser]||"") !== String(userE164||"")) continue;
+      if (String(row[idxUser] || "") !== String(userE164 || "")) continue;
       out.push({
         tab,
-        refId: String(row[idxRef]||""),
-        chunkId: String(row[idxChunk]||""),
-        title: String(row[idxTitle]||""),
-        status: String(row[idxStatus]||"")
+        refId: String(row[idxRef] || ""),
+        chunkId: String(row[idxChunk] || ""),
+        title: String(row[idxTitle] || ""),
+        status: String(row[idxStatus] || "")
       });
     }
   });
