@@ -1,3 +1,30 @@
+﻿## TaskLess file dump  2026-02-18T12:56:10
+root: C:\dev\gas\TaskLess
+
+==============================
+FILE: .clasp.json
+==============================
+{
+  "scriptId": "1vEORnUgBjlCacJ5fhAKzB8M6s8UeLPC482Bw9HHbwBfRT9nXUh4xW-sq",
+  "rootDir": "",
+  "scriptExtensions": [
+    ".js",
+    ".gs"
+  ],
+  "htmlExtensions": [
+    ".html"
+  ],
+  "jsonExtensions": [
+    ".json"
+  ],
+  "filePushOrder": [],
+  "skipSubdirectories": false
+}
+
+
+==============================
+FILE: _FILES_DUMP.txt
+==============================
 ## TaskLess file dump  2026-02-15T10:22:21
 root: C:\dev\TaskLess
 
@@ -7,8 +34,8 @@ FILE: docs\ARCHITECTURE.md
 # Architecture (v0)
 
 Components:
-- WhatsApp Cloud API Webhook â†’ Google Apps Script Web App
-- Parser â†’ Plan Builder â†’ Approve/Cancel Commands
+- WhatsApp Cloud API Webhook Ã¢â€ â€™ Google Apps Script Web App
+- Parser Ã¢â€ â€™ Plan Builder Ã¢â€ â€™ Approve/Cancel Commands
 - Google Workspace Executors (Gmail/Calendar/Sheets)
 
 Rules:
@@ -24,7 +51,7 @@ FILE: README.md
 ==============================
 # TaskLess
 
-Voice â†’ AI â†’ Plan â†’ Confirm â†’ Execute (WhatsApp-first).
+Voice Ã¢â€ â€™ AI Ã¢â€ â€™ Plan Ã¢â€ â€™ Confirm Ã¢â€ â€™ Execute (WhatsApp-first).
 
 
 ==============================
@@ -104,6 +131,1012 @@ Rules:
 1) Only inbound messages containing [TL:TRIGGER:*] or [TL:CMD:*] are actionable.
 2) The system must never output [TL:TRIGGER:*] or [TL:CMD:*] in normal user-facing responses.
 3) Always log: ref_id, message_id, from, type, parsed_text, action_taken, result.
+
+
+
+
+
+
+==============================
+FILE: appsscript.json
+==============================
+{
+  "timeZone": "Asia/Jerusalem",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8"
+}
+
+
+
+==============================
+FILE: docs\ARCHITECTURE.md
+==============================
+# Architecture (v0)
+
+Components:
+- WhatsApp Cloud API Webhook â†’ Google Apps Script Web App
+- Parser â†’ Plan Builder â†’ Approve/Cancel Commands
+- Google Workspace Executors (Gmail/Calendar/Sheets)
+
+Rules:
+- Only messages containing deterministic markers trigger actions (future).
+- Outbound assistant text must never contain trigger markers.
+- Store idempotency keys (message_id) to prevent double-processing.
+- Always log raw webhook payload for audit/debug.
+
+Current scope:
+- Receive webhook (GET verify + POST events)
+- Append to WEBHOOK_LOG sheet (idempotent by message_id)
+- Provide COEX_checkPhoneNumberState() helper to query Graph phone health/state
+
+
+
+==============================
+FILE: README.md
+==============================
+# TaskLess
+
+Voice â†’ AI â†’ Plan â†’ Confirm â†’ Execute (WhatsApp-first).
+
+
+
+==============================
+FILE: scripts\dump-files.ps1
+==============================
+param(
+  [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+  [string]$OutFile = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")).Path "_FILES_DUMP.txt")
+)
+
+$ErrorActionPreference="Stop"
+
+$include = @("*.md","*.gs","*.js","*.json","*.ps1","*.txt")
+$files = Get-ChildItem -Path $Root -Recurse -File | Where-Object {
+  $name = $_.Name.ToLowerInvariant()
+  ($include | ForEach-Object { $name -like $_ }) -contains $true
+} | Where-Object {
+  $_.FullName -notmatch "\\\.git\\"
+} | Sort-Object FullName
+
+$sb = New-Object System.Text.StringBuilder
+$null = $sb.AppendLine("## TaskLess file dump  " + (Get-Date).ToString("s"))
+$null = $sb.AppendLine("root: " + $Root)
+$null = $sb.AppendLine("")
+
+foreach ($f in $files) {
+  $rel = $f.FullName.Substring($Root.Length).TrimStart("\")
+  $null = $sb.AppendLine("==============================")
+  $null = $sb.AppendLine("FILE: " + $rel)
+  $null = $sb.AppendLine("==============================")
+  $null = $sb.AppendLine((Get-Content -Raw -Path $f.FullName))
+  $null = $sb.AppendLine("")
+}
+
+$sb.ToString() | Set-Content -Encoding UTF8 -Path $OutFile
+Write-Host "Wrote: $OutFile"
+
+
+
+
+==============================
+FILE: scripts\README.md
+==============================
+# scripts
+
+This folder is for helper scripts / runbooks.
+
+- dump-files.ps1: emits a single combined text snapshot of the repo files
+
+
+
+==============================
+FILE: src\gas\Code.gs
+==============================
+/**
+ * TaskLess v0 â€” GAS Webhook Receiver + Logger
+ *
+ * Script Properties required:
+ * - TL_VERIFY_TOKEN        (string)  Used for webhook verification GET
+ * - TL_SHEET_ID            (string)  Spreadsheet ID containing WEBHOOK_LOG tab
+ * - META_USER_ACCESS_TOKEN (string)  Graph API token (user/system user token with WA perms)
+ *
+ * Sheets:
+ * - WEBHOOK_LOG (auto-created) with columns:
+ *   ts, event_type, display_phone_number, phone_number_id, from, message_id,
+ *   message_type, text, statuses_count, raw_json
+ *
+ * Notes:
+ * - Idempotency: we avoid appending duplicate message_id rows.
+ * - We always return 200 quickly for POST to avoid webhook retries.
+ * - Coexist markers are future; this file only logs + provides phone state checks.
+ */
+
+const TL = {
+  LOG_SHEET: "WEBHOOK_LOG",
+  HEADERS: [
+    "ts",
+    "event_type",
+    "display_phone_number",
+    "phone_number_id",
+    "from",
+    "message_id",
+    "message_type",
+    "text",
+    "statuses_count",
+    "raw_json"
+  ],
+  MAX_IDEMPOTENCY_SCAN_ROWS: 2000 // scan last N rows for message_id set
+};
+
+function doGet(e) {
+  try {
+    const p = (e && e.parameter) ? e.parameter : {};
+    const mode = String(p["hub.mode"] || "");
+    const token = String(p["hub.verify_token"] || "");
+    const challenge = String(p["hub.challenge"] || "");
+
+    const expected = String(PropertiesService.getScriptProperties().getProperty("TL_VERIFY_TOKEN") || "");
+    if (mode === "subscribe" && expected && token === expected) {
+      return ContentService.createTextOutput(challenge).setMimeType(ContentService.MimeType.TEXT);
+    }
+    return ContentService.createTextOutput("forbidden").setMimeType(ContentService.MimeType.TEXT);
+  } catch (err) {
+    // Never throw on webhook verify
+    return ContentService.createTextOutput("error").setMimeType(ContentService.MimeType.TEXT);
+  }
+}
+
+function doPost(e) {
+  const started = new Date();
+  try {
+    const raw = (e && e.postData && typeof e.postData.contents === "string") ? e.postData.contents : "";
+    if (!raw) {
+      logDebug_("empty_post", { when: started.toISOString() });
+      return json_(200, { ok: true, empty: true });
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(raw);
+    } catch (parseErr) {
+      logDebug_("invalid_json", { err: String(parseErr), raw: raw.slice(0, 500) });
+      return json_(200, { ok: true, parse_error: true });
+    }
+
+    const events = tlExtractWebhookEvents_(payload);
+    if (!events.length) {
+      // Still log a meta row so you can see something arrived
+      appendWebhookRow_({
+        ts: new Date(),
+        event_type: "webhook_no_events",
+        display_phone_number: "",
+        phone_number_id: "",
+        from: "",
+        message_id: "",
+        message_type: "",
+        text: "",
+        statuses_count: 0,
+        raw_json: safeStringify_(payload, 4000)
+      }, { allowDuplicate: true });
+      return json_(200, { ok: true, events: 0 });
+    }
+
+    const idSet = getRecentMessageIdSet_(); // idempotency window
+    let appended = 0;
+    let skipped = 0;
+
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i];
+      const messageId = String(ev.message_id || "");
+
+      if (messageId && idSet.has(messageId)) {
+        skipped++;
+        continue;
+      }
+
+      appendWebhookRow_({
+        ts: new Date(),
+        event_type: ev.event_type || "messages",
+        display_phone_number: ev.display_phone_number || "",
+        phone_number_id: ev.phone_number_id || "",
+        from: ev.from || "",
+        message_id: messageId,
+        message_type: ev.message_type || "",
+        text: ev.text || "",
+        statuses_count: ev.statuses_count || 0,
+        raw_json: safeStringify_(payload, 8000)
+      }, { allowDuplicate: false });
+
+      if (messageId) idSet.add(messageId);
+      appended++;
+    }
+
+    return json_(200, { ok: true, appended: appended, skipped: skipped });
+  } catch (err) {
+    logDebug_("doPost_error", { err: String(err && err.message ? err.message : err) });
+    // Still 200 to avoid webhook retry storms
+    return json_(200, { ok: true, error: true });
+  }
+}
+
+/** --------- Public utilities --------- */
+
+function runSelfTest() {
+  appendWebhookRow_({
+    ts: new Date(),
+    event_type: "debug_append_row",
+    display_phone_number: "",
+    phone_number_id: "",
+    from: "",
+    message_id: "",
+    message_type: "",
+    text: "If you see this row, sheet write works.",
+    statuses_count: 0,
+    raw_json: JSON.stringify({ ok: true })
+  }, { allowDuplicate: true });
+
+  Logger.log("Self test appended.");
+}
+
+function COEX_checkPhoneNumberState(phoneNumberId) {
+  const id = String(phoneNumberId || "").trim();
+  if (!id) throw new Error("Missing phoneNumberId");
+
+  const token = String(PropertiesService.getScriptProperties().getProperty("META_USER_ACCESS_TOKEN") || "").trim();
+  if (!token) throw new Error("Missing Script Property META_USER_ACCESS_TOKEN");
+
+  const fields = [
+    "id",
+    "display_phone_number",
+    "verified_name",
+    "status",
+    "platform_type",
+    "code_verification_status",
+    "name_status",
+    "quality_rating",
+    "health_status"
+  ].join(",");
+
+  const url = "https://graph.facebook.com/v24.0/" + encodeURIComponent(id) + "?fields=" + encodeURIComponent(fields);
+  const res = UrlFetchApp.fetch(url, {
+    method: "get",
+    muteHttpExceptions: true,
+    headers: { Authorization: "Bearer " + token }
+  });
+
+  const status = res.getResponseCode();
+  const body = res.getContentText();
+
+  appendWebhookRow_({
+    ts: new Date(),
+    event_type: "coex_check_state",
+    display_phone_number: "",
+    phone_number_id: id,
+    from: "",
+    message_id: "",
+    message_type: "HTTP_" + status,
+    text: "",
+    statuses_count: 0,
+    raw_json: body
+  }, { allowDuplicate: true });
+
+  Logger.log("COEX_checkPhoneNumberState HTTP " + status + ": " + body);
+  return { status: status, body: body };
+}
+
+/** --------- Parsing --------- */
+
+function tlExtractWebhookEvents_(payload) {
+  const out = [];
+  if (!payload || !payload.entry || !payload.entry.length) return out;
+
+  for (let i = 0; i < payload.entry.length; i++) {
+    const entry = payload.entry[i];
+    const changes = entry && entry.changes ? entry.changes : [];
+    for (let j = 0; j < changes.length; j++) {
+      const ch = changes[j];
+      const field = String(ch.field || "");
+      const val = ch.value || {};
+
+      const meta = val.metadata || {};
+      const displayPhone = String(meta.display_phone_number || "");
+      const phoneId = String(meta.phone_number_id || "");
+
+      // Messages
+      if (field === "messages" && val.messages && val.messages.length) {
+        const contacts = (val.contacts && val.contacts.length) ? val.contacts : [];
+        for (let k = 0; k < val.messages.length; k++) {
+          const m = val.messages[k];
+          const from = String(m.from || "");
+          const msgId = String(m.id || "");
+          const type = String(m.type || "");
+          const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
+
+          out.push({
+            event_type: "messages",
+            display_phone_number: displayPhone,
+            phone_number_id: phoneId,
+            from: from,
+            message_id: msgId,
+            message_type: type,
+            text: text,
+            statuses_count: 0
+          });
+        }
+      }
+
+      // Status updates
+      const statuses = val.statuses || [];
+      if (statuses && statuses.length) {
+        out.push({
+          event_type: "statuses",
+          display_phone_number: displayPhone,
+          phone_number_id: phoneId,
+          from: "",
+          message_id: "",
+          message_type: "status_update",
+          text: "",
+          statuses_count: statuses.length
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** --------- Logging + Sheets --------- */
+
+function appendWebhookRow_(obj, opts) {
+  const options = opts || {};
+  const allowDuplicate = !!options.allowDuplicate;
+
+  const sh = getOrCreateSheet_(TL.LOG_SHEET);
+  ensureHeaders_(sh, TL.HEADERS);
+
+  const messageId = String(obj.message_id || "");
+  if (!allowDuplicate && messageId) {
+    const idSet = getRecentMessageIdSet_();
+    if (idSet.has(messageId)) return;
+  }
+
+  const row = [
+    obj.ts || new Date(),
+    String(obj.event_type || ""),
+    String(obj.display_phone_number || ""),
+    String(obj.phone_number_id || ""),
+    String(obj.from || ""),
+    String(obj.message_id || ""),
+    String(obj.message_type || ""),
+    String(obj.text || ""),
+    Number(obj.statuses_count || 0),
+    String(obj.raw_json || "")
+  ];
+
+  sh.appendRow(row);
+}
+
+function logDebug_(label, data) {
+  appendWebhookRow_({
+    ts: new Date(),
+    event_type: "debug_" + String(label || "log"),
+    display_phone_number: "",
+    phone_number_id: "",
+    from: "",
+    message_id: "",
+    message_type: "",
+    text: "",
+    statuses_count: 0,
+    raw_json: safeStringify_(data, 4000)
+  }, { allowDuplicate: true });
+}
+
+function getOrCreateSheet_(name) {
+  const ss = getSpreadsheet_();
+  let sh = ss.getSheetByName(name);
+  if (!sh) sh = ss.insertSheet(name);
+  return sh;
+}
+
+function getSpreadsheet_() {
+  const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+  if (!sheetId) throw new Error("Missing Script Property TL_SHEET_ID");
+  return SpreadsheetApp.openById(sheetId);
+}
+
+function ensureHeaders_(sh, headers) {
+  const range = sh.getRange(1, 1, 1, headers.length);
+  const existing = range.getValues()[0];
+  const needs = existing.some((v, i) => String(v || "") !== String(headers[i] || ""));
+  if (needs) {
+    range.setValues([headers]);
+    sh.setFrozenRows(1);
+  }
+}
+
+function getRecentMessageIdSet_() {
+  const set = new Set();
+  try {
+    const sh = getOrCreateSheet_(TL.LOG_SHEET);
+    ensureHeaders_(sh, TL.HEADERS);
+
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return set;
+
+    const start = Math.max(2, lastRow - TL.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
+    const count = lastRow - start + 1;
+
+    // message_id column = 6 (F)
+    const values = sh.getRange(start, 6, count, 1).getValues();
+    for (let i = 0; i < values.length; i++) {
+      const id = String(values[i][0] || "").trim();
+      if (id) set.add(id);
+    }
+  } catch (err) {
+    // If idempotency scan fails, we still prefer logging over failing the webhook.
+    // We'll just return an empty set.
+  }
+  return set;
+}
+
+/** --------- Helpers --------- */
+
+function safeStringify_(obj, maxLen) {
+  const lim = (typeof maxLen === "number" && isFinite(maxLen)) ? maxLen : 4000;
+  let s = "";
+  try {
+    s = JSON.stringify(obj);
+  } catch (err) {
+    s = String(obj);
+  }
+  if (s.length > lim) return s.slice(0, lim) + "â€¦";
+  return s;
+}
+
+function json_(code, obj) {
+  const out = ContentService
+    .createTextOutput(JSON.stringify(obj || {}))
+    .setMimeType(ContentService.MimeType.JSON);
+  // Apps Script doesn't let us set status codes directly in ContentService;
+  // returning 200 is fine for webhook usage.
+  return out;
+}
+
+
+
+==============================
+FILE: src\spec\TL_MARKERS.md
+==============================
+# TL Markers
+
+Allowed markers (machine-only):
+- [TL:TRIGGER:VOICE]
+- [TL:TRIGGER:TEXT]
+- [TL:CMD:APPROVE:<REF>]
+- [TL:CMD:CANCEL:<REF>]
+- [TL:CMD:EDIT:<REF>]
+
+Rules:
+1) Only inbound messages containing [TL:TRIGGER:*] or [TL:CMD:*] are actionable.
+2) The system must never output [TL:TRIGGER:*] or [TL:CMD:*] in normal user-facing responses.
+3) Always log: ref_id, message_id, from, type, parsed_text, action_taken, result.
+
+
+
+==============================
+FILE: TL_Calendar.gs
+==============================
+/**
+ * TL_Calendar - high-frequency Calendar ops (MVP)
+ */
+function TL_Calendar_createEvent_(title, startIso, endIso, options) {
+  const calId = (options && options.calendarId) ? options.calendarId : "primary";
+  const cal = CalendarApp.getCalendarById(calId);
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const ev = cal.createEvent(String(title||""), start, end, {
+    description: options && options.description ? String(options.description) : "",
+    location: options && options.location ? String(options.location) : ""
+  });
+  return { eventId: ev.getId(), htmlLink: ev.getHtmlLink ? ev.getHtmlLink() : "" };
+}
+
+function TL_Calendar_search_(query, startIso, endIso, options) {
+  const calId = (options && options.calendarId) ? options.calendarId : "primary";
+  const cal = CalendarApp.getCalendarById(calId);
+  const start = startIso ? new Date(startIso) : new Date(Date.now() - 7*24*60*60*1000);
+  const end = endIso ? new Date(endIso) : new Date(Date.now() + 30*24*60*60*1000);
+
+  const events = cal.getEvents(start, end, { search: String(query||"") });
+  return events.slice(0, (options && options.maxResults) ? options.maxResults : 20).map(ev => ({
+    eventId: ev.getId(),
+    title: ev.getTitle(),
+    start: ev.getStartTime().toISOString(),
+    end: ev.getEndTime().toISOString(),
+    location: ev.getLocation(),
+    description: ev.getDescription()
+  }));
+}
+
+function TL_Calendar_deleteEvent_(eventId, options) {
+  const calId = (options && options.calendarId) ? options.calendarId : "primary";
+  const cal = CalendarApp.getCalendarById(calId);
+  const ev = cal.getEventById(eventId);
+  if (!ev) throw new Error("Event not found: " + eventId);
+  ev.deleteEvent();
+  return { ok: true, deleted: true, eventId };
+}
+
+
+
+==============================
+FILE: TL_Config.gs
+==============================
+/**
+ * TL_Config - Script Properties helper (minimal)
+ * Keep secrets/config here: sheetId, WA token, router/biz numbers, etc.
+ */
+function TL_Config_get_(key, fallback) {
+  const v = PropertiesService.getScriptProperties().getProperty(key);
+  return (v === null || v === undefined || v === "") ? fallback : v;
+}
+function TL_Config_set_(key, value) {
+  PropertiesService.getScriptProperties().setProperty(key, String(value));
+}
+
+
+
+==============================
+FILE: TL_Dedupe.gs
+==============================
+/**
+ * TL_Dedupe - prevent double processing due to webhook retries.
+ */
+function TL_Dedupe_seen_(msgId) {
+  const props = PropertiesService.getScriptProperties();
+  const key = "TL_SEEN_" + msgId;
+  if (props.getProperty(key)) return true;
+  props.setProperty(key, String(Date.now()));
+
+  // light cleanup every ~30 messages
+  const n = Number(props.getProperty("TL_SEEN_CLEAN_COUNTER") || "0") + 1;
+  props.setProperty("TL_SEEN_CLEAN_COUNTER", String(n));
+  if (n % 30 === 0) TL_Dedupe_cleanup_();
+  return false;
+}
+
+function TL_Dedupe_cleanup_() {
+  const props = PropertiesService.getScriptProperties();
+  const all = props.getProperties();
+  const now = Date.now();
+  const ttlMs = 24 * 60 * 60 * 1000;
+
+  Object.keys(all).forEach(k => {
+    if (!k.startsWith("TL_SEEN_")) return;
+    if (k === "TL_SEEN_CLEAN_COUNTER") return;
+    const ts = Number(all[k] || "0");
+    if (ts && (now - ts) > ttlMs) props.deleteProperty(k);
+  });
+}
+
+
+
+==============================
+FILE: TL_Gmail.gs
+==============================
+/**
+ * TL_Gmail - high-frequency Gmail ops (MVP)
+ */
+function TL_Gmail_search_(query, maxResults) {
+  const threads = GmailApp.search(query, 0, maxResults || 10);
+  return threads.map(t => ({
+    threadId: t.getId(),
+    subject: t.getFirstMessageSubject(),
+    messageCount: t.getMessageCount(),
+    lastUpdated: t.getLastMessageDate().toISOString()
+  }));
+}
+
+function TL_Gmail_readThread_(threadId, maxMessages) {
+  const thread = GmailApp.getThreadById(threadId);
+  const msgs = thread.getMessages().slice(-1 * (maxMessages || 5));
+  return msgs.map(m => ({
+    messageId: m.getId(),
+    from: m.getFrom(),
+    to: m.getTo(),
+    date: m.getDate().toISOString(),
+    subject: m.getSubject(),
+    body: m.getPlainBody()
+  }));
+}
+
+function TL_Gmail_createDraft_(to, subject, body) {
+  const draft = GmailApp.createDraft(String(to||""), String(subject||""), String(body||""));
+  return { draftId: draft.getId() };
+}
+
+function TL_Gmail_sendDraft_(draftId) {
+  const drafts = GmailApp.getDrafts();
+  const d = drafts.find(x => x.getId() === draftId);
+  if (!d) throw new Error("Draft not found: " + draftId);
+  d.send();
+  return { ok: true, sent: true, draftId };
+}
+
+function TL_Gmail_deleteDraft_(draftId) {
+  const drafts = GmailApp.getDrafts();
+  const d = drafts.find(x => x.getId() === draftId);
+  if (!d) throw new Error("Draft not found: " + draftId);
+  d.moveToTrash();
+  return { ok: true, trashed: true, draftId };
+}
+
+
+
+==============================
+FILE: TL_Log.gs
+==============================
+/**
+ * TL_Log - append-only audit log (client sheet, tab AUDIT_LOG by default).
+ * Keep 30 days via TL_Retention_prune30Days_().
+ */
+function TL_Log_append_(actor, eventType, env, extra) {
+  try {
+    const ss = TL_Sheets_getStore_();
+    if (!ss) return;
+
+    const tab = TL_Config_get_("TL_CFG_TAB_AUDIT", "AUDIT_LOG");
+    const sh = TL_Sheets_ensureTab_(ss, tab, [
+      "ts","actor","eventType","userE164","refId","chunkId","payload"
+    ]);
+
+    const ts = new Date().toISOString();
+    const userE164 = (env && env.from) ? env.from : "";
+    const refId = (extra && extra.refId) ? extra.refId : "";
+    const chunkId = (extra && extra.chunkId) ? extra.chunkId : "";
+    const payload = JSON.stringify({
+      text: env ? env.text : "",
+      interactive: env ? env.interactive : null,
+      extra: extra || {}
+    });
+
+    sh.appendRow([ts, actor, eventType, userE164, refId, chunkId, payload]);
+  } catch (e) {
+    // swallow logging errors (never block core flow)
+  }
+}
+
+
+
+==============================
+FILE: TL_Main.gs
+==============================
+/**
+ * TL_Main - entrypoints
+ */
+function doGet() {
+  return ContentService.createTextOutput("TaskLess ok").setMimeType(ContentService.MimeType.TEXT);
+}
+
+function doPost(e) {
+  try {
+    const raw = (e && e.postData && e.postData.contents) ? e.postData.contents : "";
+    const payload = raw ? JSON.parse(raw) : {};
+    const env = TL_Parse_envelope_(payload);
+
+    if (TL_Dedupe_seen_(env.msgId)) {
+      return _json_({ ok:true, noop:true, reason:"duplicate", msgId: env.msgId });
+    }
+
+    return TL_Router_handle_(env);
+  } catch (err) {
+    return _json_({ ok:false, error:String(err && err.stack ? err.stack : err) });
+  }
+}
+
+function _json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+
+==============================
+FILE: TL_Menu.gs
+==============================
+/**
+ * TL_Menu - always-first menu + numbered replies.
+ */
+function TL_Menu_text_() {
+  return [
+    "What would you like to do?",
+    "1) Send a command (voice or text) â€” I will propose actions for your confirmation",
+    "2) Review open tasks",
+    "3) Future features",
+    "",
+    "Reply with 1, 2, or 3."
+  ].join("\n");
+}
+
+
+
+==============================
+FILE: TL_Parse.gs
+==============================
+/**
+ * TL_Parse - normalize inbound payload.
+ * This stays tolerant until we lock the Meta webhook schema.
+ */
+function TL_Parse_envelope_(payload) {
+  payload = payload || {};
+  const text = String(payload.text || payload.body || payload.message || "");
+
+  const msgId =
+    payload.msgId ||
+    payload.messageId ||
+    (payload.messages && payload.messages[0] && payload.messages[0].id) ||
+    (payload.entry && payload.entry[0] && payload.entry[0].changes && payload.entry[0].changes[0] &&
+      payload.entry[0].changes[0].value && payload.entry[0].changes[0].value.messages &&
+      payload.entry[0].changes[0].value.messages[0] && payload.entry[0].changes[0].value.messages[0].id) ||
+    ("local-" + Utilities.getUuid());
+
+  const from =
+    payload.from ||
+    payload.sender ||
+    (payload.messages && payload.messages[0] && payload.messages[0].from) ||
+    (payload.entry && payload.entry[0] && payload.entry[0].changes && payload.entry[0].changes[0] &&
+      payload.entry[0].changes[0].value && payload.entry[0].changes[0].value.messages &&
+      payload.entry[0].changes[0].value.messages[0] && payload.entry[0].changes[0].value.messages[0].from) ||
+    "";
+
+  const hasAudio =
+    Boolean(payload.audio || payload.voice || payload.mediaUrl) ||
+    (payload.messages && payload.messages[0] && payload.messages[0].type === "audio") ||
+    (payload.entry && payload.entry[0] && payload.entry[0].changes && payload.entry[0].changes[0] &&
+      payload.entry[0].changes[0].value && payload.entry[0].changes[0].value.messages &&
+      payload.entry[0].changes[0].value.messages[0] &&
+      payload.entry[0].changes[0].value.messages[0].type === "audio");
+
+  // Interactive payload (future: Meta interactive replies)
+  const interactive =
+    payload.interactive ||
+    payload.button ||
+    payload.listReply ||
+    payload.payload ||
+    null;
+
+  return {
+    msgId,
+    from: String(from || ""),
+    text,
+    hasAudio,
+    interactive,
+    raw: payload
+  };
+}
+
+
+
+==============================
+FILE: TL_Retention.gs
+==============================
+/**
+ * TL_Retention - prune ARCHIVE + AUDIT_LOG rows older than 30 days.
+ * Run daily via time trigger.
+ */
+function TL_Retention_prune30Days_() {
+  const ss = TL_Sheets_getStore_();
+  if (!ss) return;
+
+  const cutoff = Date.now() - (30 * 24 * 60 * 60 * 1000);
+  const tabs = [
+    TL_Config_get_("TL_CFG_TAB_ARCHIVE","ARCHIVE"),
+    TL_Config_get_("TL_CFG_TAB_AUDIT","AUDIT_LOG")
+  ];
+
+  tabs.forEach(tab => {
+    const sh = ss.getSheetByName(tab);
+    if (!sh) return;
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return;
+
+    const values = sh.getRange(2,1,lastRow-1,1).getValues(); // createdAt/ts assumed in col 1
+    const toDelete = [];
+    for (let i=0;i<values.length;i++){
+      const v = values[i][0];
+      const ts = (v instanceof Date) ? v.getTime() : Date.parse(String(v||""));
+      if (ts && ts < cutoff) toDelete.push(2+i);
+    }
+    // delete from bottom to top
+    toDelete.reverse().forEach(r => sh.deleteRow(r));
+  });
+}
+
+
+
+==============================
+FILE: TL_Router.gs
+==============================
+/**
+ * TL_Router - minimal routing for now.
+ * IMPORTANT invariant: free text/voice only generates proposals. Button payloads commit.
+ */
+function TL_Router_handle_(env) {
+  // 1) Button payloads would be parsed here later (interactive)
+  if (env.interactive) {
+    TL_Log_append_("USER","BTN_CLICK",env,{});
+    return _json_({ ok:true, note:"interactive handling not wired yet", interactive: env.interactive });
+  }
+
+  const t = String(env.text||"").trim().toLowerCase();
+
+  // Always-first menu behavior
+  if (!t || t === "hi" || t === "hello" || t === "hey" || t === "×©×œ×•×" || t === "×”×™×™") {
+    TL_Log_append_("SYSTEM","MENU_SHOWN",env,{});
+    return _json_({ ok:true, menu: TL_Menu_text_() });
+  }
+
+  // Menu numbers (MVP)
+  if (t === "1") return _json_({ ok:true, next:"Send your command now (voice or text). I will propose actions for confirmation." });
+  if (t === "2") {
+    const tasks = TL_Sheets_findOpenTasks_(env.from, 10);
+    return _json_({ ok:true, openTasks: tasks });
+  }
+  if (t === "3") return _json_({ ok:true, future:["Premium features","WhatsApp templates","Google Tasks mirror","Multi-user roles"] });
+
+  // Default: treat as command text (proposal generation will be wired later to AI)
+  TL_Log_append_("USER","USER_MSG",env,{});
+  return _json_({
+    ok:true,
+    note:"Received command text. Next: wire AI planner -> create OPEN tasks + per-task proposal cards.",
+    received: env.text
+  });
+}
+
+
+
+==============================
+FILE: TL_SheetsStore.gs
+==============================
+/**
+ * TL_SheetsStore - client sheet is the source of truth for tasks.
+ * Tabs: OPEN, PENDING, REVISION, ARCHIVE, AUDIT_LOG, SETTINGS
+ *
+ * NOTE: Set Script Property TL_CFG_STORE_SHEET_ID to your bound sheet id (later).
+ */
+function TL_Sheets_getStore_() {
+  const sheetId = TL_Config_get_("TL_CFG_STORE_SHEET_ID", "");
+  if (!sheetId) return null;
+  return SpreadsheetApp.openById(sheetId);
+}
+
+function TL_Sheets_ensureTab_(ss, tabName, headers) {
+  let sh = ss.getSheetByName(tabName);
+  if (!sh) sh = ss.insertSheet(tabName);
+  if (headers && headers.length) {
+    const firstRow = sh.getRange(1,1,1,Math.max(1, sh.getLastColumn())).getValues()[0] || [];
+    const hasHeader = firstRow.join("|").includes(headers[0]);
+    if (!hasHeader) {
+      sh.clear();
+      sh.getRange(1,1,1,headers.length).setValues([headers]);
+      sh.setFrozenRows(1);
+    }
+  }
+  return sh;
+}
+
+function TL_Sheets_bootstrapTabs_() {
+  const ss = TL_Sheets_getStore_();
+  if (!ss) throw new Error("Missing TL_CFG_STORE_SHEET_ID script property");
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_REVISION","REVISION"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_ARCHIVE","ARCHIVE"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_AUDIT","AUDIT_LOG"), ["ts","actor","eventType","userE164","refId","chunkId","payload"]);
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_SETTINGS","SETTINGS"), ["key","value"]);
+}
+
+function TL_Sheets_taskHeaders_() {
+  return [
+    "createdAt","updatedAt","userE164",
+    "refId","chunkId","title","kind","channel",
+    "status","askedAt","answeredAt","executedAt",
+    "draftOrPromptJson","lastAction","lastActionAt"
+  ];
+}
+
+function TL_Sheets_upsertTask_(tabName, rowObj, keyField, keyValue) {
+  const ss = TL_Sheets_getStore_();
+  if (!ss) throw new Error("Missing TL_CFG_STORE_SHEET_ID script property");
+
+  const sh = TL_Sheets_ensureTab_(ss, tabName, TL_Sheets_taskHeaders_());
+  const headers = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+  const keyCol = headers.indexOf(keyField) + 1;
+  if (keyCol <= 0) throw new Error("Key field not found: " + keyField);
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) {
+    TL_Sheets_appendTask_(sh, headers, rowObj);
+    return;
+  }
+
+  const keyVals = sh.getRange(2, keyCol, lastRow-1, 1).getValues().map(r => String(r[0] || ""));
+  const idx = keyVals.indexOf(String(keyValue));
+  if (idx === -1) {
+    TL_Sheets_appendTask_(sh, headers, rowObj);
+    return;
+  }
+
+  const rowNumber = 2 + idx;
+  TL_Sheets_writeTaskRow_(sh, headers, rowNumber, rowObj);
+}
+
+function TL_Sheets_appendTask_(sh, headers, rowObj) {
+  const row = headers.map(h => (rowObj[h] !== undefined ? rowObj[h] : ""));
+  sh.appendRow(row);
+}
+
+function TL_Sheets_writeTaskRow_(sh, headers, rowNumber, rowObj) {
+  const row = headers.map(h => (rowObj[h] !== undefined ? rowObj[h] : ""));
+  sh.getRange(rowNumber, 1, 1, row.length).setValues([row]);
+}
+
+function TL_Sheets_findOpenTasks_(userE164, limit) {
+  const ss = TL_Sheets_getStore_();
+  if (!ss) return [];
+  const tabs = [TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"), TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"), TL_Config_get_("TL_CFG_TAB_REVISION","REVISION")];
+  const out = [];
+  const max = limit || 10;
+
+  tabs.forEach(tab => {
+    if (out.length >= max) return;
+    const sh = ss.getSheetByName(tab);
+    if (!sh) return;
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return;
+    const values = sh.getRange(1,1,lastRow,sh.getLastColumn()).getValues();
+    const headers = values[0];
+    const idxUser = headers.indexOf("userE164");
+    const idxTitle = headers.indexOf("title");
+    const idxChunk = headers.indexOf("chunkId");
+    const idxRef = headers.indexOf("refId");
+    const idxStatus = headers.indexOf("status");
+
+    for (let r=1; r<values.length && out.length<max; r++) {
+      const row = values[r];
+      if (String(row[idxUser]||"") !== String(userE164||"")) continue;
+      out.push({
+        tab,
+        refId: String(row[idxRef]||""),
+        chunkId: String(row[idxChunk]||""),
+        title: String(row[idxTitle]||""),
+        status: String(row[idxStatus]||"")
+      });
+    }
+  });
+
+  return out;
+}
+
+
+
+==============================
+FILE: TL_WA.gs
+==============================
+/**
+ * TL_WA - WhatsApp (Cloud API) send scaffold.
+ * You will set:
+ *  TL_CFG_WA_TOKEN
+ *  TL_CFG_WA_PHONE_NUMBER_ID
+ *  TL_CFG_WA_API_VERSION (default v20.0)
+ */
+function TL_WA_sendText_(toE164, text) {
+  // Scaffold: return what would be sent. Replace with UrlFetchApp call.
+  return { ok: true, stub: true, to: String(toE164||""), text: String(text||"") };
+}
+
+function TL_WA_build3Buttons_(title, body, buttons) {
+  // buttons: [{id:"appr|A142-3", title:"Confirm send"}, ...] max 3
+  return { title, body, buttons };
+}
 
 
 

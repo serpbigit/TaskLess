@@ -1,6 +1,6 @@
 param(
-  [string]$Root = "C:\dev\TaskLess",
-  [string]$OutFile = "C:\dev\TaskLess\_FILES_DUMP.txt"
+  [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+  [string]$OutFile = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")).Path "_FILES_DUMP.txt")
 )
 
 $ErrorActionPreference="Stop"
@@ -29,4 +29,5 @@ foreach ($f in $files) {
 
 $sb.ToString() | Set-Content -Encoding UTF8 -Path $OutFile
 Write-Host "Wrote: $OutFile"
+
 
