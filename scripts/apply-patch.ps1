@@ -14,11 +14,11 @@ function Read-PatchText {
 }
 
 function Normalize-RelPath([string]$p) {
-  $p = ($p ?? "").Trim()
+  if (-not $p) { $p = "" }; $p = $p.Trim()
   if (-not $p) { throw "Empty file path in patch bundle." }
   $p = $p -replace "/","\"
   if ($p.StartsWith("\")) { $p = $p.TrimStart("\") }
-  if ($p -match "^\w:\") { throw "Patch path must be repo-relative, got absolute: $p" }
+  if ($p -match '^[A-Za-z]:\\') { throw "Patch path must be repo-relative, got absolute: $p" }
   if ($p -match "\.\.") { throw "Patch path may not contain .. : $p" }
   return $p
 }
@@ -75,4 +75,5 @@ foreach ($p in $plan) {
 }
 
 Write-Host "Patch applied."
+
 
