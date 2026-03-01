@@ -1,0 +1,43 @@
+{
+  "version": "sheet-export-1",
+  "exported_iso": "2026-03-01T19:02:51.453Z",
+  "sheet_id": "",
+  "tabs": [
+    {
+      "tab": "TASKS",
+      "headers": ["createdAt","updatedAt","taskId","batchId","userE164","channel","title","status","missingFieldsJson","proposalJson","actionJson","resultJson","lastPresentedAt","lastError"]
+    },
+    {
+      "tab": "OPEN",
+      "headers": ["createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel","status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"]
+    },
+    {
+      "tab": "PENDING",
+      "headers": ["createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel","status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"]
+    },
+    {
+      "tab": "REVISION",
+      "headers": ["createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel","status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"]
+    },
+    {
+      "tab": "ARCHIVE",
+      "headers": ["createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel","status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"]
+    },
+    {
+      "tab": "COMMANDS_INBOX",
+      "headers": ["ts","userE164","text","batchVersion","payloadJson"]
+    },
+    {
+      "tab": "CONTACTS",
+      "headers": ["createdAt","updatedAt","contactId","displayName","aliasesCsv","e164","email","notes"]
+    },
+    {
+      "tab": "SETTINGS",
+      "headers": ["key","value"]
+    },
+    {
+      "tab": "AUDIT_LOG",
+      "headers": ["ts","actor","eventType","payloadJson","taskId","batchId","payloadJson"]
+    }
+  ]
+}
