@@ -250,4 +250,7 @@ if (Test-Path ".\src\gas\Code.gs") { Remove-Item ".\src\gas\Code.gs" -Force }
 # --- 4) Re-generate snapshot dump (local only)
 powershell -ExecutionPolicy Bypass -File ".\scripts\dump-files.ps1"
 
+# --- 5) Generate PACK (clipboard)
+powershell -ExecutionPolicy Bypass -File ".\scripts\pack.ps1" | Out-Null
+
 Write-Host "Bootstrap done."
