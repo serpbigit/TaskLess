@@ -1,3 +1,4 @@
+<<<FILE BUSINESS_LOGIC.md>>>
 # TaskLess — Business Logic (Canonical Spec)
 
 ## 1) Purpose
@@ -69,4 +70,4 @@ A deterministic action run by GAS (send email, send WhatsApp, etc.), optionally 
 - Exact “task kind” taxonomy (email, WhatsApp, calendar, reminder)
 - Where scheduled items live (TASKS vs EXECUTIONS tab)
 
-
+<<<END>>>
