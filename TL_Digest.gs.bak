@@ -109,8 +109,3 @@ function TL_Digest_suggestNextStep_(triage, payload) {
 function TL_Digest_POC_RunEmailBrief() {
   return TL_Digest_buildEmailSecretaryBrief_A0({ maxItems: 8 });
 }
-function TL_Digest_POC_RunEmailBrief_Debug() {
-  const result = TL_Digest_POC_RunEmailBrief();
-  Logger.log(JSON.stringify(result, null, 2));
-  return result;
-}

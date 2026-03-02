@@ -1,0 +1,10 @@
+# Normalize line endings to avoid "LF will be replaced by CRLF" spam
+* text=auto eol=lf
+
+# GAS / config files
+*.gs  text eol=lf
+*.json text eol=lf
+.clasp* text eol=lf
+
+# Docs
+*.md text eol=lf
