@@ -1,6 +1,21 @@
+# backups
+*.bak
+*.tmp
+*.backup
 
-# Local snapshots
+# OS junk
+.DS_Store
+Thumbs.db
 
+# editor files
+*.swp
+*.swo
 
-# Local snapshots
-_FILES_DUMP.txt
+# clasp local artifacts
+.claspignore
+
+# node modules if ever added
+node_modules/
+
+# logs
+*.log
