@@ -67,8 +67,8 @@ When the user approves an AI suggestion:
 
 - TaskLess executes the action through integrations
 - WhatsApp messages
-- emails
-- calendar updates
+- Emails
+- Calendar updates
 - CRM updates
 
 The user does not manually operate the CRM.
