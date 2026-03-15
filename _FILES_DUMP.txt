@@ -1,0 +1,5658 @@
+===== FILE: C:\dev\gas\TaskLess\_bootstrap.ps1 =====
+# TaskLess bootstrap (safe overwrite)
+$ErrorActionPreference="Stop"
+Set-Location "C:\dev\gas\TaskLess"
+
+# --- 1) Ensure .gitignore includes local dump
+if (!(Test-Path ".\.gitignore")) { New-Item -ItemType File ".\.gitignore" | Out-Null }
+$gi = Get-Content -Raw ".\.gitignore"
+if ($gi -notmatch "_FILES_DUMP\.txt") {
+  Add-Content ".\.gitignore" "`n# Local snapshots`n_FILES_DUMP.txt`n"
+}
+
+# --- 2) TL_Webhook.gs (the real webhook entrypoint) - overwrites
+@"
+/**
+ * TL_Webhook - WhatsApp Cloud API webhook entry (GET verify + POST events)
+ *
+ * Required Script Properties:
+ * - TL_VERIFY_TOKEN        (string)  webhook verify token
+ * - TL_SHEET_ID            (string)  spreadsheet ID containing WEBHOOK_LOG
+ * - META_USER_ACCESS_TOKEN (string)  Graph API token (optional for COEX_checkPhoneNumberState)
+ *
+ * Tabs:
+ * - WEBHOOK_LOG (auto-created)
+ */
+const TL_WEBHOOK = {
+  LOG_SHEET: "WEBHOOK_LOG",
+  HEADERS: [
+    "ts","event_type","display_phone_number","phone_number_id",
+    "from","message_id","message_type","text","statuses_count","raw_json"
+  ],
+  MAX_IDEMPOTENCY_SCAN_ROWS: 2000
+};
+
+function doGet(e) {
+  try {
+    const p = (e && e.parameter) ? e.parameter : {};
+    const mode = String(p["hub.mode"] || "");
+    const token = String(p["hub.verify_token"] || "");
+    const challenge = String(p["hub.challenge"] || "");
+
+    const expected = String(PropertiesService.getScriptProperties().getProperty("TL_VERIFY_TOKEN") || "");
+    if (mode === "subscribe" && expected && token === expected) {
+      return ContentService.createTextOutput(challenge).setMimeType(ContentService.MimeType.TEXT);
+    }
+    return ContentService.createTextOutput("forbidden").setMimeType(ContentService.MimeType.TEXT);
+  } catch (err) {
+    return ContentService.createTextOutput("error").setMimeType(ContentService.MimeType.TEXT);
+  }
+}
+
+function doPost(e) {
+  const started = new Date();
+  try {
+    const raw = (e && e.postData && typeof e.postData.contents === "string") ? e.postData.contents : "";
+    if (!raw) {
+      TLW_logDebug_("empty_post", { when: started.toISOString() });
+      return TLW_json_({ ok:true, empty:true });
+    }
+
+    let payload = {};
+    try { payload = JSON.parse(raw); }
+    catch (parseErr) {
+      TLW_logDebug_("invalid_json", { err:String(parseErr), raw: raw.slice(0,500) });
+      return TLW_json_({ ok:true, parse_error:true });
+    }
+
+    const events = TLW_extractEvents_(payload);
+    if (!events.length) {
+      TLW_appendRow_({
+        ts:new Date(), event_type:"webhook_no_events",
+        display_phone_number:"", phone_number_id:"", from:"",
+        message_id:"", message_type:"", text:"",
+        statuses_count:0, raw_json: TLW_safeStringify_(payload, 4000)
+      }, true);
+      return TLW_json_({ ok:true, events:0 });
+    }
+
+    const idSet = TLW_getRecentMessageIdSet_();
+    let appended=0, skipped=0;
+
+    events.forEach(ev => {
+      const messageId = String(ev.message_id || "");
+      if (messageId && idSet.has(messageId)) { skipped++; return; }
+
+      TLW_appendRow_({
+        ts:new Date(),
+        event_type: ev.event_type || "messages",
+        display_phone_number: ev.display_phone_number || "",
+        phone_number_id: ev.phone_number_id || "",
+        from: ev.from || "",
+        message_id: messageId,
+        message_type: ev.message_type || "",
+        text: ev.text || "",
+        statuses_count: ev.statuses_count || 0,
+        raw_json: TLW_safeStringify_(payload, 8000)
+      }, false);
+
+      if (messageId) idSet.add(messageId);
+      appended++;
+    });
+
+    return TLW_json_({ ok:true, appended, skipped });
+  } catch (err) {
+    TLW_logDebug_("doPost_error", { err:String(err && err.stack ? err.stack : err) });
+    return TLW_json_({ ok:true, error:true });
+  }
+}
+
+/** ---- Optional helper: check phone state (coexist) ---- */
+function COEX_checkPhoneNumberState(phoneNumberId) {
+  const id = String(phoneNumberId || "").trim();
+  if (!id) throw new Error("Missing phoneNumberId");
+
+  const token = String(PropertiesService.getScriptProperties().getProperty("META_USER_ACCESS_TOKEN") || "").trim();
+  if (!token) throw new Error("Missing Script Property META_USER_ACCESS_TOKEN");
+
+  const fields = [
+    "id","display_phone_number","verified_name","status","platform_type",
+    "code_verification_status","name_status","quality_rating","health_status"
+  ].join(",");
+
+  const url = "https://graph.facebook.com/v24.0/" + encodeURIComponent(id) + "?fields=" + encodeURIComponent(fields);
+  const res = UrlFetchApp.fetch(url, { method:"get", muteHttpExceptions:true, headers:{ Authorization:"Bearer " + token } });
+
+  const status = res.getResponseCode();
+  const body = res.getContentText();
+
+  TLW_appendRow_({
+    ts:new Date(), event_type:"coex_check_state",
+    display_phone_number:"", phone_number_id:id, from:"",
+    message_id:"", message_type:"HTTP_" + status, text:"",
+    statuses_count:0, raw_json: body
+  }, true);
+
+  return { status, body };
+}
+
+/** ---- internals ---- */
+function TLW_extractEvents_(payload) {
+  const out = [];
+  if (!payload || !payload.entry || !payload.entry.length) return out;
+
+  payload.entry.forEach(entry => {
+    const changes = entry && entry.changes ? entry.changes : [];
+    changes.forEach(ch => {
+      const field = String(ch.field || "");
+      const val = ch.value || {};
+      const meta = val.metadata || {};
+      const displayPhone = String(meta.display_phone_number || "");
+      const phoneId = String(meta.phone_number_id || "");
+
+      if (field === "messages" && val.messages && val.messages.length) {
+        val.messages.forEach(m => {
+          const from = String(m.from || "");
+          const msgId = String(m.id || "");
+          const type = String(m.type || "");
+          const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
+          out.push({ event_type:"messages", display_phone_number:displayPhone, phone_number_id:phoneId, from, message_id:msgId, message_type:type, text, statuses_count:0 });
+        });
+      }
+
+      const statuses = val.statuses || [];
+      if (statuses && statuses.length) {
+        out.push({ event_type:"statuses", display_phone_number:displayPhone, phone_number_id:phoneId, from:"", message_id:"", message_type:"status_update", text:"", statuses_count: statuses.length });
+      }
+    });
+  });
+
+  return out;
+}
+
+function TLW_appendRow_(obj, allowDuplicate) {
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  if (!ss) throw new Error("Missing Script Property TL_SHEET_ID");
+
+  let sh = ss.getSheetByName(TL_WEBHOOK.LOG_SHEET);
+  if (!sh) sh = ss.insertSheet(TL_WEBHOOK.LOG_SHEET);
+
+  const range = sh.getRange(1,1,1,TL_WEBHOOK.HEADERS.length);
+  const existing = range.getValues()[0];
+  const needs = existing.some((v,i)=>String(v||"")!==String(TL_WEBHOOK.HEADERS[i]||""));
+  if (needs) { range.setValues([TL_WEBHOOK.HEADERS]); sh.setFrozenRows(1); }
+
+  const messageId = String(obj.message_id || "");
+  if (!allowDuplicate && messageId) {
+    const set = TLW_getRecentMessageIdSet_();
+    if (set.has(messageId)) return;
+  }
+
+  sh.appendRow([
+    obj.ts || new Date(),
+    String(obj.event_type||""),
+    String(obj.display_phone_number||""),
+    String(obj.phone_number_id||""),
+    String(obj.from||""),
+    String(obj.message_id||""),
+    String(obj.message_type||""),
+    String(obj.text||""),
+    Number(obj.statuses_count||0),
+    String(obj.raw_json||"")
+  ]);
+}
+
+function TLW_getRecentMessageIdSet_() {
+  const set = new Set();
+  try {
+    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+    const sh = ss.getSheetByName(TL_WEBHOOK.LOG_SHEET);
+    if (!sh) return set;
+
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return set;
+
+    const start = Math.max(2, lastRow - TL_WEBHOOK.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
+    const count = lastRow - start + 1;
+    const values = sh.getRange(start, 6, count, 1).getValues(); // message_id col
+    values.forEach(r => { const id = String(r[0]||"").trim(); if (id) set.add(id); });
+  } catch (e) {}
+  return set;
+}
+
+function TLW_logDebug_(label, data) {
+  try {
+    TLW_appendRow_({
+      ts:new Date(), event_type:"debug_" + String(label||"log"),
+      display_phone_number:"", phone_number_id:"", from:"",
+      message_id:"", message_type:"", text:"",
+      statuses_count:0, raw_json: TLW_safeStringify_(data, 4000)
+    }, true);
+  } catch(e) {}
+}
+
+function TLW_safeStringify_(obj, maxLen) {
+  const lim = (typeof maxLen==="number" && isFinite(maxLen)) ? maxLen : 4000;
+  let s="";
+  try { s = JSON.stringify(obj); } catch(e){ s = String(obj); }
+  if (s.length > lim) return s.slice(0, lim) + "...";
+  return s;
+}
+
+function TLW_json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj||{})).setMimeType(ContentService.MimeType.JSON);
+}
+"@ | Set-Content -Encoding UTF8 -Path ".\TL_Webhook.gs"
+
+# --- 3) Remove the old src\gas\Code.gs from "real usage" (optional: keep file, but we stop tracking it)
+# If you want hard delete:
+if (Test-Path ".\src\gas\Code.gs") { Remove-Item ".\src\gas\Code.gs" -Force }
+
+# --- 4) Re-generate snapshot dump (local only)
+powershell -ExecutionPolicy Bypass -File ".\scripts\dump-files.ps1"
+
+# --- 5) Generate PACK (clipboard)
+powershell -ExecutionPolicy Bypass -File ".\scripts\pack.ps1" | Out-Null
+
+Write-Host "Bootstrap done."
+
+
+===== FILE: C:\dev\gas\TaskLess\_FILES_DUMP.txt =====
+## TaskLess file dump  2026-03-01T16:02:50
+root: C:\dev\gas\TaskLess
+
+==============================
+FILE: .clasp.json
+==============================
+{
+  "scriptId": "1CeJ_zFTrpgtl4Tn7FiDZanSHfwCJb6HQwo564wou6cK3RsB2_wOkoUOW",
+  "rootDir": "",
+  "scriptExtensions": [
+    ".js",
+    ".gs"
+  ],
+  "htmlExtensions": [
+    ".html"
+  ],
+  "jsonExtensions": [
+    ".json"
+  ],
+  "filePushOrder": [],
+  "skipSubdirectories": false
+}
+
+
+==============================
+FILE: _bootstrap.ps1
+==============================
+# TaskLess bootstrap (safe overwrite)
+$ErrorActionPreference="Stop"
+Set-Location "C:\dev\gas\TaskLess"
+
+# --- 1) Ensure .gitignore includes local dump
+if (!(Test-Path ".\.gitignore")) { New-Item -ItemType File ".\.gitignore" | Out-Null }
+$gi = Get-Content -Raw ".\.gitignore"
+if ($gi -notmatch "_FILES_DUMP\.txt") {
+  Add-Content ".\.gitignore" "`n# Local snapshots`n_FILES_DUMP.txt`n"
+}
+
+# --- 2) TL_Webhook.gs (the real webhook entrypoint) - overwrites
+@"
+/**
+ * TL_Webhook - WhatsApp Cloud API webhook entry (GET verify + POST events)
+ *
+ * Required Script Properties:
+ * - TL_VERIFY_TOKEN        (string)  webhook verify token
+ * - TL_SHEET_ID            (string)  spreadsheet ID containing WEBHOOK_LOG
+ * - META_USER_ACCESS_TOKEN (string)  Graph API token (optional for COEX_checkPhoneNumberState)
+ *
+ * Tabs:
+ * - WEBHOOK_LOG (auto-created)
+ */
+const TL_WEBHOOK = {
+  LOG_SHEET: "WEBHOOK_LOG",
+  HEADERS: [
+    "ts","event_type","display_phone_number","phone_number_id",
+    "from","message_id","message_type","text","statuses_count","raw_json"
+  ],
+  MAX_IDEMPOTENCY_SCAN_ROWS: 2000
+};
+
+function doGet(e) {
+  try {
+    const p = (e && e.parameter) ? e.parameter : {};
+    const mode = String(p["hub.mode"] || "");
+    const token = String(p["hub.verify_token"] || "");
+    const challenge = String(p["hub.challenge"] || "");
+
+    const expected = String(PropertiesService.getScriptProperties().getProperty("TL_VERIFY_TOKEN") || "");
+    if (mode === "subscribe" && expected && token === expected) {
+      return ContentService.createTextOutput(challenge).setMimeType(ContentService.MimeType.TEXT);
+    }
+    return ContentService.createTextOutput("forbidden").setMimeType(ContentService.MimeType.TEXT);
+  } catch (err) {
+    return ContentService.createTextOutput("error").setMimeType(ContentService.MimeType.TEXT);
+  }
+}
+
+function doPost(e) {
+  const started = new Date();
+  try {
+    const raw = (e && e.postData && typeof e.postData.contents === "string") ? e.postData.contents : "";
+    if (!raw) {
+      TLW_logDebug_("empty_post", { when: started.toISOString() });
+      return TLW_json_({ ok:true, empty:true });
+    }
+
+    let payload = {};
+    try { payload = JSON.parse(raw); }
+    catch (parseErr) {
+      TLW_logDebug_("invalid_json", { err:String(parseErr), raw: raw.slice(0,500) });
+      return TLW_json_({ ok:true, parse_error:true });
+    }
+
+    const events = TLW_extractEvents_(payload);
+    if (!events.length) {
+      TLW_appendRow_({
+        ts:new Date(), event_type:"webhook_no_events",
+        display_phone_number:"", phone_number_id:"", from:"",
+        message_id:"", message_type:"", text:"",
+        statuses_count:0, raw_json: TLW_safeStringify_(payload, 4000)
+      }, true);
+      return TLW_json_({ ok:true, events:0 });
+    }
+
+    const idSet = TLW_getRecentMessageIdSet_();
+    let appended=0, skipped=0;
+
+    events.forEach(ev => {
+      const messageId = String(ev.message_id || "");
+      if (messageId && idSet.has(messageId)) { skipped++; return; }
+
+      TLW_appendRow_({
+        ts:new Date(),
+        event_type: ev.event_type || "messages",
+        display_phone_number: ev.display_phone_number || "",
+        phone_number_id: ev.phone_number_id || "",
+        from: ev.from || "",
+        message_id: messageId,
+        message_type: ev.message_type || "",
+        text: ev.text || "",
+        statuses_count: ev.statuses_count || 0,
+        raw_json: TLW_safeStringify_(payload, 8000)
+      }, false);
+
+      if (messageId) idSet.add(messageId);
+      appended++;
+    });
+
+    return TLW_json_({ ok:true, appended, skipped });
+  } catch (err) {
+    TLW_logDebug_("doPost_error", { err:String(err && err.stack ? err.stack : err) });
+    return TLW_json_({ ok:true, error:true });
+  }
+}
+
+/** ---- Optional helper: check phone state (coexist) ---- */
+function COEX_checkPhoneNumberState(phoneNumberId) {
+  const id = String(phoneNumberId || "").trim();
+  if (!id) throw new Error("Missing phoneNumberId");
+
+  const token = String(PropertiesService.getScriptProperties().getProperty("META_USER_ACCESS_TOKEN") || "").trim();
+  if (!token) throw new Error("Missing Script Property META_USER_ACCESS_TOKEN");
+
+  const fields = [
+    "id","display_phone_number","verified_name","status","platform_type",
+    "code_verification_status","name_status","quality_rating","health_status"
+  ].join(",");
+
+  const url = "https://graph.facebook.com/v24.0/" + encodeURIComponent(id) + "?fields=" + encodeURIComponent(fields);
+  const res = UrlFetchApp.fetch(url, { method:"get", muteHttpExceptions:true, headers:{ Authorization:"Bearer " + token } });
+
+  const status = res.getResponseCode();
+  const body = res.getContentText();
+
+  TLW_appendRow_({
+    ts:new Date(), event_type:"coex_check_state",
+    display_phone_number:"", phone_number_id:id, from:"",
+    message_id:"", message_type:"HTTP_" + status, text:"",
+    statuses_count:0, raw_json: body
+  }, true);
+
+  return { status, body };
+}
+
+/** ---- internals ---- */
+function TLW_extractEvents_(payload) {
+  const out = [];
+  if (!payload || !payload.entry || !payload.entry.length) return out;
+
+  payload.entry.forEach(entry => {
+    const changes = entry && entry.changes ? entry.changes : [];
+    changes.forEach(ch => {
+      const field = String(ch.field || "");
+      const val = ch.value || {};
+      const meta = val.metadata || {};
+      const displayPhone = String(meta.display_phone_number || "");
+      const phoneId = String(meta.phone_number_id || "");
+
+      if (field === "messages" && val.messages && val.messages.length) {
+        val.messages.forEach(m => {
+          const from = String(m.from || "");
+          const msgId = String(m.id || "");
+          const type = String(m.type || "");
+          const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
+          out.push({ event_type:"messages", display_phone_number:displayPhone, phone_number_id:phoneId, from, message_id:msgId, message_type:type, text, statuses_count:0 });
+        });
+      }
+
+      const statuses = val.statuses || [];
+      if (statuses && statuses.length) {
+        out.push({ event_type:"statuses", display_phone_number:displayPhone, phone_number_id:phoneId, from:"", message_id:"", message_type:"status_update", text:"", statuses_count: statuses.length });
+      }
+    });
+  });
+
+  return out;
+}
+
+function TLW_appendRow_(obj, allowDuplicate) {
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  if (!ss) throw new Error("Missing Script Property TL_SHEET_ID");
+
+  let sh = ss.getSheetByName(TL_WEBHOOK.LOG_SHEET);
+  if (!sh) sh = ss.insertSheet(TL_WEBHOOK.LOG_SHEET);
+
+  const range = sh.getRange(1,1,1,TL_WEBHOOK.HEADERS.length);
+  const existing = range.getValues()[0];
+  const needs = existing.some((v,i)=>String(v||"")!==String(TL_WEBHOOK.HEADERS[i]||""));
+  if (needs) { range.setValues([TL_WEBHOOK.HEADERS]); sh.setFrozenRows(1); }
+
+  const messageId = String(obj.message_id || "");
+  if (!allowDuplicate && messageId) {
+    const set = TLW_getRecentMessageIdSet_();
+    if (set.has(messageId)) return;
+  }
+
+  sh.appendRow([
+    obj.ts || new Date(),
+    String(obj.event_type||""),
+    String(obj.display_phone_number||""),
+    String(obj.phone_number_id||""),
+    String(obj.from||""),
+    String(obj.message_id||""),
+    String(obj.message_type||""),
+    String(obj.text||""),
+    Number(obj.statuses_count||0),
+    String(obj.raw_json||"")
+  ]);
+}
+
+function TLW_getRecentMessageIdSet_() {
+  const set = new Set();
+  try {
+    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+    const sh = ss.getSheetByName(TL_WEBHOOK.LOG_SHEET);
+    if (!sh) return set;
+
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return set;
+
+    const start = Math.max(2, lastRow - TL_WEBHOOK.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
+    const count = lastRow - start + 1;
+    const values = sh.getRange(start, 6, count, 1).getValues(); // message_id col
+    values.forEach(r => { const id = String(r[0]||"").trim(); if (id) set.add(id); });
+  } catch (e) {}
+  return set;
+}
+
+function TLW_logDebug_(label, data) {
+  try {
+    TLW_appendRow_({
+      ts:new Date(), event_type:"debug_" + String(label||"log"),
+      display_phone_number:"", phone_number_id:"", from:"",
+      message_id:"", message_type:"", text:"",
+      statuses_count:0, raw_json: TLW_safeStringify_(data, 4000)
+    }, true);
+  } catch(e) {}
+}
+
+function TLW_safeStringify_(obj, maxLen) {
+  const lim = (typeof maxLen==="number" && isFinite(maxLen)) ? maxLen : 4000;
+  let s="";
+  try { s = JSON.stringify(obj); } catch(e){ s = String(obj); }
+  if (s.length > lim) return s.slice(0, lim) + "...";
+  return s;
+}
+
+function TLW_json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj||{})).setMimeType(ContentService.MimeType.JSON);
+}
+"@ | Set-Content -Encoding UTF8 -Path ".\TL_Webhook.gs"
+
+# --- 3) Remove the old src\gas\Code.gs from "real usage" (optional: keep file, but we stop tracking it)
+# If you want hard delete:
+if (Test-Path ".\src\gas\Code.gs") { Remove-Item ".\src\gas\Code.gs" -Force }
+
+# --- 4) Re-generate snapshot dump (local only)
+powershell -ExecutionPolicy Bypass -File ".\scripts\dump-files.ps1"
+
+# --- 5) Generate PACK (clipboard)
+powershell -ExecutionPolicy Bypass -File ".\scripts\pack.ps1" | Out-Null
+
+Write-Host "Bootstrap done."
+
+
+==============================
+FILE: appsscript.json
+==============================
+{
+  "timeZone": "Asia/Jerusalem",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8"
+}
+
+
+
+==============================
+FILE: BUSINESS_LOGIC.md
+==============================
+# TaskLess â€” Secretary Mode Business Logic (Numbered Spec)
+
+## 1.0 Phase 1 Build Spec
+This file mirrors the numbered spec agreed in chat.
+Edits must preserve numbering for revision-friendly diffs.
+
+> TODO: Paste the full numbered spec here (weâ€™ll do it in the next patch).
+
+
+
+==============================
+FILE: DEV_TASKS.md
+==============================
+# TaskLess â€” Dev Tasks (Living List)
+
+## Now (Infra Lock)
+- [ ] Create SCHEMA.json from sheet export and commit it
+- [ ] Add a codebase inventory runner (file list + functions) and commit it
+- [ ] Add scheduling fields to TASKS schema (planned) and decide sweep strategy
+- [ ] Add REMINDERS sheet stub schema (planned)
+
+## Next (Phase-1 Engine Migration)
+- [ ] Align tabs to Phase-1 spec (SETTINGS, CONTACTS, COMMUNICATION_LOG, TASKS, EXECUTIONS, DEPENDENT_ACTIONS, SYSTEM_LOG)
+- [ ] Implement digest mapping stored durably
+- [ ] Implement execution snapshots + invalidation (idempotent)
+
+## Parking Lot
+- [ ] .gitattributes newline normalization
+- [ ] Optional PS menu command: sync "msg" (pull->commit->push->clasp push)
+
+
+
+==============================
+FILE: docs\ARCHITECTURE.md
+==============================
+# Architecture (v0)
+
+Components:
+- WhatsApp Cloud API Webhook â†’ Google Apps Script Web App
+- Parser â†’ Plan Builder â†’ Approve/Cancel Commands
+- Google Workspace Executors (Gmail/Calendar/Sheets)
+
+Rules:
+- Only messages containing deterministic markers trigger actions (future).
+- Outbound assistant text must never contain trigger markers.
+- Store idempotency keys (message_id) to prevent double-processing.
+- Always log raw webhook payload for audit/debug.
+
+Current scope:
+- Receive webhook (GET verify + POST events)
+- Append to WEBHOOK_LOG sheet (idempotent by message_id)
+- Provide COEX_checkPhoneNumberState() helper to query Graph phone health/state
+
+
+
+==============================
+FILE: patches\PATCH_STATE_FILES_20260301_154332.txt
+==============================
+### FILE: STATE.md
+# TaskLess â€” Project State (Source of Truth)
+
+## 1) Rule: Source of Truth
+This file is the single source of truth for project state (replaces chat footers).
+If chat and this file conflict, this file wins.
+
+## 2) Current Goal (One-liner)
+Lock infra so schema + codebase + business logic stay in sync, then implement snapshot-based execution safely.
+
+## 3) Working Mode
+- Engineering Mode: GAS + Sheets + Git/Clasp + deterministic tests
+- Product Mode: business logic + flows + schema + safety model
+Rule: Only one mode per sprint.
+
+## 4) Workflow (Mandatory Order)
+1. Edit locally (preferred via patch files)
+2. git add -A
+3. git commit -m "<message>"
+4. git push
+5. clasp push
+Rule: avoid editing in GAS UI. If you do, immediately clasp pull + commit.
+
+## 5) Sheet Schema (Canonical)
+- Canonical schema artifact: SCHEMA.json
+- Export from GAS: TL_Sheets_ExportSchemaJson()
+- Apply/Verify schema from GAS: TL_Sheets_ApplySchema(...)
+
+## 6) Current Tabs (as of last export)
+See SCHEMA.json (authoritative).
+
+## 7) Sprint Log (append-only)
+- 2026-03-01: Added schema export + rebuild utilities; established patch-based infra.
+
+### END FILE
+
+### FILE: DEV_TASKS.md
+# TaskLess â€” Dev Tasks (Living List)
+
+## Now (Infra Lock)
+- [ ] Create SCHEMA.json from sheet export and commit it
+- [ ] Add a codebase inventory runner (file list + functions) and commit it
+- [ ] Add scheduling fields to TASKS schema (planned) and decide sweep strategy
+- [ ] Add REMINDERS sheet stub schema (planned)
+
+## Next (Phase-1 Engine Migration)
+- [ ] Align tabs to Phase-1 spec (SETTINGS, CONTACTS, COMMUNICATION_LOG, TASKS, EXECUTIONS, DEPENDENT_ACTIONS, SYSTEM_LOG)
+- [ ] Implement digest mapping stored durably
+- [ ] Implement execution snapshots + invalidation (idempotent)
+
+## Parking Lot
+- [ ] .gitattributes newline normalization
+- [ ] Optional PS menu command: sync "msg" (pull->commit->push->clasp push)
+
+### END FILE
+
+### FILE: BUSINESS_LOGIC.md
+# TaskLess â€” Secretary Mode Business Logic (Numbered Spec)
+
+## 1.0 Phase 1 Build Spec
+This file mirrors the numbered spec agreed in chat.
+Edits must preserve numbering for revision-friendly diffs.
+
+## 1.1 Goal
+Build a Google Apps Script + Google Sheets â€œSecretary Modeâ€ system...
+(Keep the full spec here; this is a placeholder header.)
+
+## 1.2 Core Invariants
+AI never executes...
+(Keep full spec here.)
+
+## 1.3 External Inputs Supported
+Text + Voice...
+(Keep full spec here.)
+
+## 2.0 Spreadsheet Tabs and Column Schemas
+(Keep full spec here.)
+
+## 3.0 Apps Script Core Functions
+(Keep full spec here.)
+
+## 4.0 Operational Wiring
+(Keep full spec here.)
+
+## 5.0 Testing Plan
+(Keep full spec here.)
+
+## 6.0 Completion Criteria
+(Keep full spec here.)
+
+### END FILE
+
+
+==============================
+FILE: patches\PATCH_STATE_FILES_20260301_154550.txt
+==============================
+<<<FILE STATE.md>>>
+# TaskLess â€” Project State (Source of Truth)
+
+## 1) Rule: Source of Truth
+This file is the single source of truth for project state (replaces chat footers).
+If chat and this file conflict, this file wins.
+
+## 2) Current Goal (One-liner)
+Lock infra so schema + codebase + business logic stay in sync, then implement snapshot-based execution safely.
+
+## 3) Working Mode
+- Engineering Mode: GAS + Sheets + Git/Clasp + deterministic tests
+- Product Mode: business logic + flows + schema + safety model
+Rule: Only one mode per sprint.
+
+## 4) Workflow (Mandatory Order)
+1. Edit locally (preferred via patch files)
+2. git add -A
+3. git commit -m "<message>"
+4. git push
+5. clasp push
+Rule: avoid editing in GAS UI. If you do, immediately clasp pull + commit.
+
+## 5) Sheet Schema (Canonical)
+- Canonical schema artifact: SCHEMA.json
+- Export from GAS: TL_Sheets_ExportSchemaJson()
+- Apply/Verify schema from GAS: TL_Sheets_ApplySchema(...)
+
+## 6) Current Tabs (authoritative)
+See SCHEMA.json.
+
+## 7) Sprint Log (append-only)
+- 2026-03-01: Added schema export + rebuild utilities; established patch-based infra.
+<<<END>>>
+
+<<<FILE DEV_TASKS.md>>>
+# TaskLess â€” Dev Tasks (Living List)
+
+## Now (Infra Lock)
+- [ ] Create SCHEMA.json from sheet export and commit it
+- [ ] Add a codebase inventory runner (file list + functions) and commit it
+- [ ] Add scheduling fields to TASKS schema (planned) and decide sweep strategy
+- [ ] Add REMINDERS sheet stub schema (planned)
+
+## Next (Phase-1 Engine Migration)
+- [ ] Align tabs to Phase-1 spec (SETTINGS, CONTACTS, COMMUNICATION_LOG, TASKS, EXECUTIONS, DEPENDENT_ACTIONS, SYSTEM_LOG)
+- [ ] Implement digest mapping stored durably
+- [ ] Implement execution snapshots + invalidation (idempotent)
+
+## Parking Lot
+- [ ] .gitattributes newline normalization
+- [ ] Optional PS menu command: sync "msg" (pull->commit->push->clasp push)
+<<<END>>>
+
+<<<FILE BUSINESS_LOGIC.md>>>
+# TaskLess â€” Secretary Mode Business Logic (Numbered Spec)
+
+## 1.0 Phase 1 Build Spec
+This file mirrors the numbered spec agreed in chat.
+Edits must preserve numbering for revision-friendly diffs.
+
+> TODO: Paste the full numbered spec here (weâ€™ll do it in the next patch).
+<<<END>>>
+
+
+==============================
+FILE: README.md
+==============================
+# TaskLess
+
+Voice â†’ AI â†’ Plan â†’ Confirm â†’ Execute (WhatsApp-first).
+
+
+
+==============================
+FILE: scripts\apply-patch.ps1
+==============================
+param(
+  [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+  [switch]$FromClipboard,
+  [string]$PatchFile,
+  [switch]$DryRun
+)
+
+$ErrorActionPreference = "Stop"
+
+function Read-PatchText {
+  if ($PatchFile) { return (Get-Content -Raw -Path $PatchFile) }
+  if ($FromClipboard) { return (Get-Clipboard -Raw) }
+  throw "Provide -FromClipboard or -PatchFile <path>"
+}
+
+function Normalize-RelPath([string]$p) {
+  if (-not $p) { $p = "" }; $p = $p.Trim()
+  if (-not $p) { throw "Empty file path in patch bundle." }
+  $p = $p -replace "/","\"
+  if ($p.StartsWith("\")) { $p = $p.TrimStart("\") }
+  if ($p -match '^[A-Za-z]:\\') { throw "Patch path must be repo-relative, got absolute: $p" }
+  if ($p -match "\.\.") { throw "Patch path may not contain .. : $p" }
+  return $p
+}
+
+$txt = Read-PatchText
+
+# Patch bundle format:
+# <<<FILE relative\path.ext>>>
+# <full file contents...>
+# <<<END>>>
+$re = [regex]'(?s)<<<FILE\s+([^\r\n>]+)\s*>>>(.*?)<<<END>>>'
+$matches = $re.Matches($txt)
+
+if ($matches.Count -eq 0) {
+  throw "No files found. Expected blocks like: <<<FILE path>>> ... <<<END>>>"
+}
+
+$plan = @()
+foreach ($m in $matches) {
+  $rel = Normalize-RelPath $m.Groups[1].Value
+  $content = $m.Groups[2].Value
+
+  # Preserve exact content, but remove one leading newline if present (common formatting artifact)
+  if ($content.StartsWith("`r`n")) { $content = $content.Substring(2) }
+  elseif ($content.StartsWith("`n")) { $content = $content.Substring(1) }
+
+  $abs = Join-Path $RepoRoot $rel
+  $dir = Split-Path -Parent $abs
+  $plan += [pscustomobject]@{ Rel=$rel; Abs=$abs; Dir=$dir; Bytes=([Text.Encoding]::UTF8.GetByteCount($content)); Content=$content }
+}
+
+# Safety: ensure all target files are under repo root
+$repoFull = (Resolve-Path $RepoRoot).Path.TrimEnd("\")
+foreach ($p in $plan) {
+  $absFull = (Resolve-Path -LiteralPath $p.Dir -ErrorAction SilentlyContinue)
+  if (-not $absFull) { } # dir may not exist yet
+  $target = [IO.Path]::GetFullPath($p.Abs)
+  if (-not ($target.StartsWith($repoFull + "\", [System.StringComparison]::OrdinalIgnoreCase) -or $target -eq $repoFull)) {
+    throw "Unsafe target outside repo root: $($p.Rel) => $target"
+  }
+}
+
+Write-Host "Patch plan ($($plan.Count) files) against repo: $RepoRoot"
+$plan | Select-Object Rel,Bytes | Format-Table -AutoSize | Out-String | Write-Host
+
+if ($DryRun) {
+  Write-Host "DryRun: no files written."
+  exit 0
+}
+
+foreach ($p in $plan) {
+  if (!(Test-Path -LiteralPath $p.Dir)) { New-Item -ItemType Directory -Path $p.Dir -Force | Out-Null }
+  Set-Content -LiteralPath $p.Abs -Value $p.Content -Encoding UTF8
+}
+
+Write-Host "Patch applied."
+
+
+
+
+==============================
+FILE: scripts\dump-files.ps1
+==============================
+param(
+  [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+  [string]$OutFile = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")).Path "_FILES_DUMP.txt")
+)
+
+$ErrorActionPreference="Stop"
+
+$include = @("*.md","*.gs","*.js","*.json","*.ps1","*.txt","*.html","*.css")
+
+$files = Get-ChildItem -Path $Root -Recurse -File |
+  Where-Object {
+    $name = $_.Name.ToLowerInvariant()
+    ($include | ForEach-Object { $name -like $_ }) -contains $true
+  } |
+  Where-Object {
+    $_.FullName -notmatch "\\\.git\\" -and
+    $_.FullName -notmatch "\\node_modules\\" -and
+    $_.Name -ne "_FILES_DUMP.txt"
+  } |
+  Sort-Object FullName
+
+$sb = New-Object System.Text.StringBuilder
+$null = $sb.AppendLine("## TaskLess file dump  " + (Get-Date).ToString("s"))
+$null = $sb.AppendLine("root: " + $Root)
+$null = $sb.AppendLine("")
+
+foreach ($f in $files) {
+  $rel = $f.FullName.Substring($Root.Length).TrimStart("\")
+  $null = $sb.AppendLine("==============================")
+  $null = $sb.AppendLine("FILE: " + $rel)
+  $null = $sb.AppendLine("==============================")
+  $null = $sb.AppendLine((Get-Content -Raw -Path $f.FullName))
+  $null = $sb.AppendLine("")
+}
+
+$sb.ToString() | Set-Content -Encoding UTF8 -Path $OutFile
+Write-Host "Wrote: $OutFile"
+
+
+==============================
+FILE: scripts\pack.ps1
+==============================
+param(
+  [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+  [int]$TreeDepth = 4,
+  [int]$MaxFileChars = 12000
+)
+
+$ErrorActionPreference="Stop"
+
+function SafeRead([string]$path, [int]$limit) {
+  if (!(Test-Path -LiteralPath $path)) { return "[MISSING] $path" }
+  $t = Get-Content -Raw -LiteralPath $path
+  if ($t.Length -le $limit) { return $t }
+  return $t.Substring(0,$limit) + "`r`n...[TRUNCATED]..."
+}
+
+$git = ""
+try { $git = (git rev-parse HEAD 2>$null).Trim() } catch { $git = "[no-git]" }
+
+$tree = ""
+try {
+  # limited depth tree (fast)
+  $tree = (Get-ChildItem -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notmatch "\\\.git\\" -and $_.FullName -notmatch "\\node_modules\\" } |
+    ForEach-Object {
+      $rel = $_.FullName.Substring($Root.Length).TrimStart("\")
+      $depth = ($rel -split "\\").Count - 1
+      if ($depth -le $TreeDepth) { $rel }
+    } |
+    Sort-Object |
+    Out-String).Trim()
+} catch {
+  $tree = "[tree failed] " + $_.Exception.Message
+}
+
+$filesDump = Join-Path $Root "_FILES_DUMP.txt"
+$dumpHint = if (Test-Path -LiteralPath $filesDump) { "Exists: $filesDump" } else { "Missing: $filesDump (run scripts\dump-files.ps1)" }
+
+$statePath  = Join-Path $Root "STATE.md"
+$tasksPath  = Join-Path $Root "DEV_TASKS.md"
+$logicPath  = Join-Path $Root "BUSINESS_LOGIC.md"
+$schemaPath = Join-Path $Root "SCHEMA.json"
+
+$pack = @()
+$pack += "===== TASKLESS PACK ====="
+$pack += ("Generated: " + (Get-Date).ToString("s"))
+$pack += ("RepoRoot: " + $Root)
+$pack += ("GitHead: " + $git)
+$pack += ""
+$pack += "----- TREE (depth " + $TreeDepth + ") -----"
+$pack += $tree
+$pack += ""
+$pack += "----- KEY FILES (truncated) -----"
+$pack += "## STATE.md"
+$pack += (SafeRead $statePath $MaxFileChars)
+$pack += ""
+$pack += "## DEV_TASKS.md"
+$pack += (SafeRead $tasksPath $MaxFileChars)
+$pack += ""
+$pack += "## BUSINESS_LOGIC.md"
+$pack += (SafeRead $logicPath $MaxFileChars)
+$pack += ""
+$pack += "## SCHEMA.json"
+$pack += (SafeRead $schemaPath $MaxFileChars)
+$pack += ""
+$pack += "----- FILE DUMP -----"
+$pack += $dumpHint
+$pack += "TIP: paste _FILES_DUMP.txt separately only if needed (it can be huge)."
+$pack += ""
+$pack += "----- NEXT DEBUG HOOKS (GAS) -----"
+$pack += "Run in Apps Script editor (when utilities exist):"
+$pack += "- TL_Code_Inventory()"
+$pack += "- TL_Sheets_ExportSchemaJson()"
+$pack += "- TL_Sheets_ListTabsAndHeaders()"
+$pack += ""
+$pack += "===== END PACK ====="
+
+($pack -join "`r`n") | Set-Clipboard
+Write-Host "PACK copied to clipboard."
+
+
+==============================
+FILE: scripts\README.md
+==============================
+# scripts
+
+This folder is for helper scripts / runbooks.
+
+- dump-files.ps1: emits a single combined text snapshot of the repo files
+
+
+
+==============================
+FILE: src\spec\TL_MARKERS.md
+==============================
+# TL Markers
+
+Allowed markers (machine-only):
+- [TL:TRIGGER:VOICE]
+- [TL:TRIGGER:TEXT]
+- [TL:CMD:APPROVE:<REF>]
+- [TL:CMD:CANCEL:<REF>]
+- [TL:CMD:EDIT:<REF>]
+
+Rules:
+1) Only inbound messages containing [TL:TRIGGER:*] or [TL:CMD:*] are actionable.
+2) The system must never output [TL:TRIGGER:*] or [TL:CMD:*] in normal user-facing responses.
+3) Always log: ref_id, message_id, from, type, parsed_text, action_taken, result.
+
+
+
+==============================
+FILE: STATE.md
+==============================
+# TaskLess â€” Project State (Source of Truth)
+
+## 1) Rule: Source of Truth
+This file is the single source of truth for project state (replaces chat footers).
+If chat and this file conflict, this file wins.
+
+## 2) Current Goal (One-liner)
+Lock infra so schema + codebase + business logic stay in sync, then implement snapshot-based execution safely.
+
+## 3) Working Mode
+- Engineering Mode: GAS + Sheets + Git/Clasp + deterministic tests
+- Product Mode: business logic + flows + schema + safety model
+Rule: Only one mode per sprint.
+
+## 4) Workflow (Mandatory Order)
+1. Edit locally (preferred via patch files)
+2. git add -A
+3. git commit -m "<message>"
+4. git push
+5. clasp push
+Rule: avoid editing in GAS UI. If you do, immediately clasp pull + commit.
+
+## 5) Sheet Schema (Canonical)
+- Canonical schema artifact: SCHEMA.json
+- Export from GAS: TL_Sheets_ExportSchemaJson()
+- Apply/Verify schema from GAS: TL_Sheets_ApplySchema(...)
+
+## 6) Current Tabs (authoritative)
+See SCHEMA.json.
+
+## 7) Sprint Log (append-only)
+- 2026-03-01: Added schema export + rebuild utilities; established patch-based infra.
+
+
+
+==============================
+FILE: TL_Audit.gs
+==============================
+/**
+ * TL_Audit - append-only audit log for bounded sheet POC
+ * Tab: AUDIT_LOG
+ * Columns: ts, actor, eventType, payloadJson
+ */
+
+function TL_Audit_append_(actor, eventType, payloadObj) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName("AUDIT_LOG");
+  if (!sh) sh = ss.insertSheet("AUDIT_LOG");
+
+  // ensure headers
+  var headers = ["ts","actor","eventType","payloadJson"];
+  var rng = sh.getRange(1, 1, 1, headers.length);
+  var cur = rng.getValues()[0];
+  var needs = false;
+  for (var i = 0; i < headers.length; i++) {
+    if (String(cur[i] || "") !== String(headers[i] || "")) { needs = true; break; }
+  }
+  if (needs) {
+    rng.setValues([headers]);
+    sh.setFrozenRows(1);
+  }
+
+  sh.appendRow([
+    new Date().toISOString(),
+    String(actor || ""),
+    String(eventType || ""),
+    JSON.stringify(payloadObj || {})
+  ]);
+}
+
+
+==============================
+FILE: TL_Audit.js
+==============================
+/**
+ * TL_Audit - append-only audit log for bounded sheet POC
+ * Tab: AUDIT_LOG
+ * Columns: ts, actor, eventType, payloadJson
+ */
+
+function TL_Audit_append_(actor, eventType, payloadObj) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName("AUDIT_LOG");
+  if (!sh) sh = ss.insertSheet("AUDIT_LOG");
+
+  // ensure headers
+  var headers = ["ts","actor","eventType","payloadJson"];
+  var rng = sh.getRange(1, 1, 1, headers.length);
+  var cur = rng.getValues()[0];
+  var needs = false;
+  for (var i = 0; i < headers.length; i++) {
+    if (String(cur[i] || "") !== String(headers[i] || "")) { needs = true; break; }
+  }
+  if (needs) {
+    rng.setValues([headers]);
+    sh.setFrozenRows(1);
+  }
+
+  sh.appendRow([
+    new Date().toISOString(),
+    String(actor || ""),
+    String(eventType || ""),
+    JSON.stringify(payloadObj || {})
+  ]);
+}
+
+
+==============================
+FILE: TL_Config.gs
+==============================
+/**
+ * TL_Config - Script Properties helper + SETTINGS sheet helpers (POC)
+ * - ScriptProperties: secrets/config (tokens, ids)
+ * - SETTINGS tab: non-secret knobs (controller mode, owner number, etc.)
+ *
+ * IMPORTANT:
+ * - SETTINGS values are "digits-only" for WhatsApp numbers (no +).
+ * - Bootstrap only ADDS missing keys; it NEVER overwrites existing user values.
+ */
+
+function TL_Config_get_(key, fallback) {
+  const v = PropertiesService.getScriptProperties().getProperty(key);
+  return (v === null || v === undefined || v === "") ? fallback : v;
+}
+
+function TL_Config_set_(key, value) {
+  PropertiesService.getScriptProperties().setProperty(key, String(value));
+}
+
+/** Digits-only normalization (WhatsApp webhook "from" is digits-only). */
+function TL_Normalize_digits_(v) {
+  return String(v || "").replace(/[^\d]/g, "").trim();
+}
+
+/** Returns the bound spreadsheet SETTINGS sheet (creates sheet + headers if missing). */
+function TL_Settings_getSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet(); // bound sheet
+  const tabName = TL_Config_get_("TL_CFG_TAB_SETTINGS", "SETTINGS");
+
+  let sh = ss.getSheetByName(tabName);
+  if (!sh) sh = ss.insertSheet(tabName);
+
+  // Ensure header row exists: ["key","value"]
+  const lastRow = sh.getLastRow();
+  const lastCol = Math.max(1, sh.getLastColumn());
+  const firstRow = sh.getRange(1, 1, 1, lastCol).getValues()[0] || [];
+  const hasHeader = (firstRow[0] === "key" && firstRow[1] === "value");
+
+  if (lastRow === 0 || !hasHeader) {
+    sh.clear();
+    sh.getRange(1, 1, 1, 2).setValues([["key", "value"]]);
+    sh.setFrozenRows(1);
+  }
+
+  return sh;
+}
+
+/**
+ * Bootstrap REQUIRED SETTINGS keys (adds missing only; never overwrite).
+ * Call this after creating a new sheet / or before wiring logic.
+ */
+function TL_Settings_bootstrapRequired_() {
+  const sh = TL_Settings_getSheet_();
+
+  const required = [
+    // Controller flags
+    ["TL_CTRL_DIRECT_MODE", "NO"],            // YES/NO
+    ["TL_CTRL_OWNER_E164", ""],               // digits-only (no +)
+    // Future (kept as placeholders so schema is ready)
+    ["TL_CTRL_ROUTER_MODE", "NO"],            // YES/NO (future)
+    ["TL_CTRL_ROUTER_E164", ""],              // digits-only (future)
+    // Environment knobs (future safe defaults)
+    ["TL_ENV_MODE", "DEV"]                    // DEV/PROD
+  ];
+
+  const lastRow = sh.getLastRow();
+  const existing = {};
+
+  if (lastRow >= 2) {
+    const vals = sh.getRange(2, 1, lastRow - 1, 2).getValues();
+    vals.forEach(r => {
+      const k = String(r[0] || "").trim();
+      if (k) existing[k] = true;
+    });
+  }
+
+  const toAppend = required
+    .filter(pair => !existing[String(pair[0])])
+    .map(pair => [String(pair[0]), String(pair[1])]);
+
+  if (toAppend.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, toAppend.length, 2).setValues(toAppend);
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  return {
+    ok: true,
+    added: toAppend.map(r => r[0]),
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tab: sh.getName()
+  };
+}
+
+/** Read SETTINGS into { key: value } object (keys preserved; values trimmed). */
+function TL_Settings_getAll_() {
+  const sh = TL_Settings_getSheet_();
+  const lastRow = sh.getLastRow();
+  const out = {};
+
+  if (lastRow < 2) return out;
+
+  const vals = sh.getRange(2, 1, lastRow - 1, 2).getValues();
+  vals.forEach(r => {
+    const k = String(r[0] || "").trim();
+    if (!k) return;
+    out[k] = String(r[1] || "").trim();
+  });
+
+  return out;
+}
+
+/**
+ * Validate SETTINGS consistency (throws actionable errors).
+ * Use this before enabling real routing/execution logic.
+ */
+function TL_Settings_validate_() {
+  const s = TL_Settings_getAll_();
+
+  const direct = String(s["TL_CTRL_DIRECT_MODE"] || "NO").toUpperCase();
+  const owner = TL_Normalize_digits_(s["TL_CTRL_OWNER_E164"] || "");
+
+  if (direct === "YES" && !owner) {
+    throw new Error("SETTINGS invalid: TL_CTRL_DIRECT_MODE=YES but TL_CTRL_OWNER_E164 is empty (must be digits-only, e.g. 97250...)");
+  }
+
+  const routerMode = String(s["TL_CTRL_ROUTER_MODE"] || "NO").toUpperCase();
+  const router = TL_Normalize_digits_(s["TL_CTRL_ROUTER_E164"] || "");
+  if (routerMode === "YES" && !router) {
+    throw new Error("SETTINGS invalid: TL_CTRL_ROUTER_MODE=YES but TL_CTRL_ROUTER_E164 is empty (digits-only)");
+  }
+
+  return { ok: true, directMode: direct, ownerE164: owner, routerMode: routerMode, routerE164: router };
+}
+
+/**
+ * Export compact JSON for copy/paste into chat (so AI can align wiring).
+ * Includes spreadsheet identity, tabs list, and SETTINGS map.
+ */
+function TL_Settings_exportJson_(rowLimitPerTab) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const tabs = ss.getSheets().map(sh => sh.getName());
+
+  const out = {
+    ok: true,
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tabs: tabs,
+    settings: TL_Settings_getAll_()
+  };
+
+  // Optional: lightweight sanity peek into key tabs (no heavy dumps)
+  const limit = Number(rowLimitPerTab || 0);
+  if (limit > 0) {
+    out.peek = {};
+    tabs.forEach(name => {
+      const sh = ss.getSheetByName(name);
+      if (!sh) return;
+      const lr = sh.getLastRow();
+      const lc = sh.getLastColumn();
+      const rows = Math.min(lr, limit);
+      if (rows <= 0 || lc <= 0) { out.peek[name] = { rows: 0, cols: 0, values: [] }; return; }
+      out.peek[name] = { rows: rows, cols: lc, values: sh.getRange(1, 1, rows, lc).getValues() };
+    });
+  }
+
+  return JSON.stringify(out);
+}
+
+
+==============================
+FILE: TL_Config.js
+==============================
+/**
+ * TL_Config - Script Properties helper + SETTINGS sheet helpers (POC)
+ * - ScriptProperties: secrets/config (tokens, ids)
+ * - SETTINGS tab: non-secret knobs (controller mode, owner number, etc.)
+ *
+ * IMPORTANT:
+ * - SETTINGS values are "digits-only" for WhatsApp numbers (no +).
+ * - Bootstrap only ADDS missing keys; it NEVER overwrites existing user values.
+ */
+
+function TL_Config_get_(key, fallback) {
+  const v = PropertiesService.getScriptProperties().getProperty(key);
+  return (v === null || v === undefined || v === "") ? fallback : v;
+}
+
+function TL_Config_set_(key, value) {
+  PropertiesService.getScriptProperties().setProperty(key, String(value));
+}
+
+/** Digits-only normalization (WhatsApp webhook "from" is digits-only). */
+function TL_Normalize_digits_(v) {
+  return String(v || "").replace(/[^\d]/g, "").trim();
+}
+
+/** Returns the bound spreadsheet SETTINGS sheet (creates sheet + headers if missing). */
+function TL_Settings_getSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet(); // bound sheet
+  const tabName = TL_Config_get_("TL_CFG_TAB_SETTINGS", "SETTINGS");
+
+  let sh = ss.getSheetByName(tabName);
+  if (!sh) sh = ss.insertSheet(tabName);
+
+  // Ensure header row exists: ["key","value"]
+  const lastRow = sh.getLastRow();
+  const lastCol = Math.max(1, sh.getLastColumn());
+  const firstRow = sh.getRange(1, 1, 1, lastCol).getValues()[0] || [];
+  const hasHeader = (firstRow[0] === "key" && firstRow[1] === "value");
+
+  if (lastRow === 0 || !hasHeader) {
+    sh.clear();
+    sh.getRange(1, 1, 1, 2).setValues([["key", "value"]]);
+    sh.setFrozenRows(1);
+  }
+
+  return sh;
+}
+
+/**
+ * Bootstrap REQUIRED SETTINGS keys (adds missing only; never overwrite).
+ * Call this after creating a new sheet / or before wiring logic.
+ */
+function TL_Settings_bootstrapRequired_() {
+  const sh = TL_Settings_getSheet_();
+
+  const required = [
+    // Controller flags
+    ["TL_CTRL_DIRECT_MODE", "NO"],            // YES/NO
+    ["TL_CTRL_OWNER_E164", ""],               // digits-only (no +)
+    // Future (kept as placeholders so schema is ready)
+    ["TL_CTRL_ROUTER_MODE", "NO"],            // YES/NO (future)
+    ["TL_CTRL_ROUTER_E164", ""],              // digits-only (future)
+    // Environment knobs (future safe defaults)
+    ["TL_ENV_MODE", "DEV"]                    // DEV/PROD
+  ];
+
+  const lastRow = sh.getLastRow();
+  const existing = {};
+
+  if (lastRow >= 2) {
+    const vals = sh.getRange(2, 1, lastRow - 1, 2).getValues();
+    vals.forEach(r => {
+      const k = String(r[0] || "").trim();
+      if (k) existing[k] = true;
+    });
+  }
+
+  const toAppend = required
+    .filter(pair => !existing[String(pair[0])])
+    .map(pair => [String(pair[0]), String(pair[1])]);
+
+  if (toAppend.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, toAppend.length, 2).setValues(toAppend);
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  return {
+    ok: true,
+    added: toAppend.map(r => r[0]),
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tab: sh.getName()
+  };
+}
+
+/** Read SETTINGS into { key: value } object (keys preserved; values trimmed). */
+function TL_Settings_getAll_() {
+  const sh = TL_Settings_getSheet_();
+  const lastRow = sh.getLastRow();
+  const out = {};
+
+  if (lastRow < 2) return out;
+
+  const vals = sh.getRange(2, 1, lastRow - 1, 2).getValues();
+  vals.forEach(r => {
+    const k = String(r[0] || "").trim();
+    if (!k) return;
+    out[k] = String(r[1] || "").trim();
+  });
+
+  return out;
+}
+
+/**
+ * Validate SETTINGS consistency (throws actionable errors).
+ * Use this before enabling real routing/execution logic.
+ */
+function TL_Settings_validate_() {
+  const s = TL_Settings_getAll_();
+
+  const direct = String(s["TL_CTRL_DIRECT_MODE"] || "NO").toUpperCase();
+  const owner = TL_Normalize_digits_(s["TL_CTRL_OWNER_E164"] || "");
+
+  if (direct === "YES" && !owner) {
+    throw new Error("SETTINGS invalid: TL_CTRL_DIRECT_MODE=YES but TL_CTRL_OWNER_E164 is empty (must be digits-only, e.g. 97250...)");
+  }
+
+  const routerMode = String(s["TL_CTRL_ROUTER_MODE"] || "NO").toUpperCase();
+  const router = TL_Normalize_digits_(s["TL_CTRL_ROUTER_E164"] || "");
+  if (routerMode === "YES" && !router) {
+    throw new Error("SETTINGS invalid: TL_CTRL_ROUTER_MODE=YES but TL_CTRL_ROUTER_E164 is empty (digits-only)");
+  }
+
+  return { ok: true, directMode: direct, ownerE164: owner, routerMode: routerMode, routerE164: router };
+}
+
+/**
+ * Export compact JSON for copy/paste into chat (so AI can align wiring).
+ * Includes spreadsheet identity, tabs list, and SETTINGS map.
+ */
+function TL_Settings_exportJson_(rowLimitPerTab) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const tabs = ss.getSheets().map(sh => sh.getName());
+
+  const out = {
+    ok: true,
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tabs: tabs,
+    settings: TL_Settings_getAll_()
+  };
+
+  // Optional: lightweight sanity peek into key tabs (no heavy dumps)
+  const limit = Number(rowLimitPerTab || 0);
+  if (limit > 0) {
+    out.peek = {};
+    tabs.forEach(name => {
+      const sh = ss.getSheetByName(name);
+      if (!sh) return;
+      const lr = sh.getLastRow();
+      const lc = sh.getLastColumn();
+      const rows = Math.min(lr, limit);
+      if (rows <= 0 || lc <= 0) { out.peek[name] = { rows: 0, cols: 0, values: [] }; return; }
+      out.peek[name] = { rows: rows, cols: lc, values: sh.getRange(1, 1, rows, lc).getValues() };
+    });
+  }
+
+  return JSON.stringify(out);
+}
+
+
+==============================
+FILE: TL_Dedupe.gs
+==============================
+/**
+ * TL_Dedupe - prevent double processing due to webhook retries.
+ */
+function TL_Dedupe_seen_(msgId) {
+  const props = PropertiesService.getScriptProperties();
+  const key = "TL_SEEN_" + msgId;
+  if (props.getProperty(key)) return true;
+  props.setProperty(key, String(Date.now()));
+
+  // light cleanup every ~30 messages
+  const n = Number(props.getProperty("TL_SEEN_CLEAN_COUNTER") || "0") + 1;
+  props.setProperty("TL_SEEN_CLEAN_COUNTER", String(n));
+  if (n % 30 === 0) TL_Dedupe_cleanup_();
+  return false;
+}
+
+function TL_Dedupe_cleanup_() {
+  const props = PropertiesService.getScriptProperties();
+  const all = props.getProperties();
+  const now = Date.now();
+  const ttlMs = 24 * 60 * 60 * 1000;
+
+  Object.keys(all).forEach(k => {
+    if (!k.startsWith("TL_SEEN_")) return;
+    if (k === "TL_SEEN_CLEAN_COUNTER") return;
+    const ts = Number(all[k] || "0");
+    if (ts && (now - ts) > ttlMs) props.deleteProperty(k);
+  });
+}
+
+
+
+==============================
+FILE: TL_Dedupe.js
+==============================
+/**
+ * TL_Dedupe - prevent double processing due to webhook retries.
+ */
+function TL_Dedupe_seen_(msgId) {
+  const props = PropertiesService.getScriptProperties();
+  const key = "TL_SEEN_" + msgId;
+  if (props.getProperty(key)) return true;
+  props.setProperty(key, String(Date.now()));
+
+  // light cleanup every ~30 messages
+  const n = Number(props.getProperty("TL_SEEN_CLEAN_COUNTER") || "0") + 1;
+  props.setProperty("TL_SEEN_CLEAN_COUNTER", String(n));
+  if (n % 30 === 0) TL_Dedupe_cleanup_();
+  return false;
+}
+
+function TL_Dedupe_cleanup_() {
+  const props = PropertiesService.getScriptProperties();
+  const all = props.getProperties();
+  const now = Date.now();
+  const ttlMs = 24 * 60 * 60 * 1000;
+
+  Object.keys(all).forEach(k => {
+    if (!k.startsWith("TL_SEEN_")) return;
+    if (k === "TL_SEEN_CLEAN_COUNTER") return;
+    const ts = Number(all[k] || "0");
+    if (ts && (now - ts) > ttlMs) props.deleteProperty(k);
+  });
+}
+
+
+
+==============================
+FILE: TL_Log.gs
+==============================
+/**
+ * TL_Log.gs
+ * Compatibility shim so Router can call TL_Log_append_
+ * Internally delegates to TL_Audit_append_
+ */
+
+function TL_Log_append_(actor, eventType, payloadObj, taskId, batchId) {
+  if (typeof TL_Audit_append_ === "function") {
+    return TL_Audit_append_(actor, eventType, payloadObj, taskId, batchId);
+  }
+  // fallback no-op to avoid breaking pipeline
+  return;
+}
+
+
+==============================
+FILE: TL_Log.js
+==============================
+/**
+ * TL_Log.gs
+ * Compatibility shim so Router can call TL_Log_append_
+ * Internally delegates to TL_Audit_append_
+ */
+
+function TL_Log_append_(actor, eventType, payloadObj, taskId, batchId) {
+  if (typeof TL_Audit_append_ === "function") {
+    return TL_Audit_append_(actor, eventType, payloadObj, taskId, batchId);
+  }
+  // fallback no-op to avoid breaking pipeline
+  return;
+}
+
+
+==============================
+FILE: TL_Menu.gs
+==============================
+/**
+ * TL_Menu.gs
+ * POC shim: Router expects TL_Menu_text_ to render a human-readable menu string.
+ * For now we keep it minimal and deterministic (no buttons yet).
+ */
+function TL_Menu_text_(ctx) {
+  var lines = [];
+  lines.push("TaskLess POC");
+  if (ctx && ctx.batchId) lines.push("Batch: " + ctx.batchId);
+  if (ctx && ctx.taskId) lines.push("Task: " + ctx.taskId);
+  lines.push("");
+  lines.push("Menu:");
+  lines.push("1) Approve");
+  lines.push("2) Modify");
+  lines.push("3) Cancel");
+  return lines.join("\n");
+}
+
+
+==============================
+FILE: TL_Menu.js
+==============================
+/**
+ * TL_Menu.gs
+ * POC shim: Router expects TL_Menu_text_ to render a human-readable menu string.
+ * For now we keep it minimal and deterministic (no buttons yet).
+ */
+function TL_Menu_text_(ctx) {
+  var lines = [];
+  lines.push("TaskLess POC");
+  if (ctx && ctx.batchId) lines.push("Batch: " + ctx.batchId);
+  if (ctx && ctx.taskId) lines.push("Task: " + ctx.taskId);
+  lines.push("");
+  lines.push("Menu:");
+  lines.push("1) Approve");
+  lines.push("2) Modify");
+  lines.push("3) Cancel");
+  return lines.join("\n");
+}
+
+
+==============================
+FILE: TL_Parse.gs
+==============================
+/**
+ * TL_Parse.gs
+ * Minimal envelope parser for TaskLess POC.
+ */
+function TL_Parse_envelope_(raw) {
+  try {
+    var obj = raw;
+    if (typeof raw === "string") obj = JSON.parse(raw);
+    if (!obj || typeof obj !== "object") {
+      return { ok: false, error: "Parse: payload is not an object" };
+    }
+
+    var entry0  = (obj.entry && obj.entry[0]) ? obj.entry[0] : null;
+    var change0 = (entry0 && entry0.changes && entry0.changes[0]) ? entry0.changes[0] : null;
+    var value   = (change0 && change0.value) ? change0.value : null;
+    var msg0    = (value && value.messages && value.messages[0]) ? value.messages[0] : null;
+    var meta    = (value && value.metadata) ? value.metadata : {};
+
+    var textBody = null;
+    if (msg0 && msg0.type === "text" && msg0.text && typeof msg0.text.body === "string") {
+      textBody = msg0.text.body;
+    }
+
+    var messageId = msg0 && msg0.id ? String(msg0.id) : "";
+    var dedupeKey = messageId ? ("wa:" + messageId) : ("wa:nomsg:" + new Date().toISOString());
+
+    return {
+      ok: true,
+      envelope: {
+        source: "wa_cloud",
+        object: obj.object || "",
+        entryId: entry0 && entry0.id ? String(entry0.id) : "",
+        changeField: change0 && change0.field ? String(change0.field) : "",
+        meta: {
+          phone_number_id: meta.phone_number_id || "",
+          display_phone_number: meta.display_phone_number || ""
+        },
+        message: {
+          id: messageId,
+          from: msg0 && msg0.from ? String(msg0.from) : "",
+          timestamp: msg0 && msg0.timestamp ? String(msg0.timestamp) : "",
+          type: msg0 && msg0.type ? String(msg0.type) : "",
+          textBody: textBody,
+          raw: msg0 || null
+        },
+        dedupeKey: dedupeKey
+      }
+    };
+  } catch (e) {
+    return { ok: false, error: "Parse exception: " + (e && e.stack ? e.stack : e) };
+  }
+}
+
+
+==============================
+FILE: TL_Parse.js
+==============================
+/**
+ * TL_Parse.gs
+ * Minimal envelope parser for TaskLess POC.
+ */
+function TL_Parse_envelope_(raw) {
+  try {
+    var obj = raw;
+    if (typeof raw === "string") obj = JSON.parse(raw);
+    if (!obj || typeof obj !== "object") {
+      return { ok: false, error: "Parse: payload is not an object" };
+    }
+
+    var entry0  = (obj.entry && obj.entry[0]) ? obj.entry[0] : null;
+    var change0 = (entry0 && entry0.changes && entry0.changes[0]) ? entry0.changes[0] : null;
+    var value   = (change0 && change0.value) ? change0.value : null;
+    var msg0    = (value && value.messages && value.messages[0]) ? value.messages[0] : null;
+    var meta    = (value && value.metadata) ? value.metadata : {};
+
+    var textBody = null;
+    if (msg0 && msg0.type === "text" && msg0.text && typeof msg0.text.body === "string") {
+      textBody = msg0.text.body;
+    }
+
+    var messageId = msg0 && msg0.id ? String(msg0.id) : "";
+    var dedupeKey = messageId ? ("wa:" + messageId) : ("wa:nomsg:" + new Date().toISOString());
+
+    return {
+      ok: true,
+      envelope: {
+        source: "wa_cloud",
+        object: obj.object || "",
+        entryId: entry0 && entry0.id ? String(entry0.id) : "",
+        changeField: change0 && change0.field ? String(change0.field) : "",
+        meta: {
+          phone_number_id: meta.phone_number_id || "",
+          display_phone_number: meta.display_phone_number || ""
+        },
+        message: {
+          id: messageId,
+          from: msg0 && msg0.from ? String(msg0.from) : "",
+          timestamp: msg0 && msg0.timestamp ? String(msg0.timestamp) : "",
+          type: msg0 && msg0.type ? String(msg0.type) : "",
+          textBody: textBody,
+          raw: msg0 || null
+        },
+        dedupeKey: dedupeKey
+      }
+    };
+  } catch (e) {
+    return { ok: false, error: "Parse exception: " + (e && e.stack ? e.stack : e) };
+  }
+}
+
+
+==============================
+FILE: TL_Router.gs
+==============================
+/**
+ * TL_Router - minimal routing for now.
+ * IMPORTANT invariant: free text/voice only generates proposals. Button payloads commit.
+ */
+function TL_Router_handle_(env) {
+  // Normalize
+  var from = String(env && env.from ? env.from : "");
+  var text = String(env && env.text ? env.text : "");
+
+  // 1) Button payloads would be parsed here later (interactive)
+  if (env && env.interactive) {
+    TL_Log_append_("USER", "BTN_CLICK", env, "", "");
+    return _json_({ ok:true, note:"interactive handling not wired yet", interactive: env.interactive });
+  }
+
+  var t = String(text || "").trim();
+  var tl = t.toLowerCase();
+
+  // Always-first menu behavior
+  if (!t || tl === "hi" || tl === "hello" || tl === "hey" || t === "×©×œ×•×" || t === "×”×™×™") {
+    TL_Log_append_("SYSTEM", "MENU_SHOWN", env, "", "");
+    return _json_({ ok:true, menu: TL_Menu_text_() });
+  }
+
+  // Menu numbers (MVP)
+  if (tl === "1") {
+    TL_Log_append_("SYSTEM", "MENU_OPT_1", env, "", "");
+    return _json_({ ok:true, next:"Send your command now (voice or text). I will propose actions for confirmation." });
+  }
+
+  if (tl === "2") {
+    TL_Log_append_("SYSTEM", "MENU_OPT_2", env, "", "");
+    var tasks = (typeof TL_Sheets_findOpenTasks_ === "function")
+      ? TL_Sheets_findOpenTasks_(from, 10)
+      : [];
+    return _json_({ ok:true, openTasks: tasks });
+  }
+
+  if (tl === "3") {
+    TL_Log_append_("SYSTEM", "MENU_OPT_3", env, "", "");
+    return _json_({ ok:true, future:["Premium features","WhatsApp templates","Google Tasks mirror","Multi-user roles"] });
+  }
+
+  // Default: treat as command text -> create TASK row (proposal placeholder)
+  var batchId = TL_Router_newBatchId_();
+  var taskId  = TL_Router_newTaskId_(batchId);
+
+  var taskObj = {
+    taskId: taskId,
+    batchId: batchId,
+    from: from,
+    status: "NEEDS_APPROVAL",
+    kind: "PROPOSAL",
+    receivedText: text,
+    createdAt: (typeof _nowIso_ === "function") ? _nowIso_() : new Date().toISOString(),
+    rawEnv: env
+  };
+
+  TL_Router_appendTask_(taskObj);
+
+  TL_Log_append_("USER", "TASK_CREATED", { task: taskObj }, taskId, batchId);
+
+  return _json_({
+    ok:true,
+    batchId: batchId,
+    taskId: taskId,
+    status: "NEEDS_APPROVAL",
+    note: "Task created. Next: wire AI planner to generate proposal card(s) for confirmation.",
+    menu: TL_Menu_text_({ batchId: batchId, taskId: taskId })
+  });
+}
+
+/** Create short deterministic-ish batch id */
+function TL_Router_newBatchId_() {
+  var d = new Date();
+  // yyyymmdd-hhmmss
+  var pad = function(n){ return (n < 10 ? "0" : "") + n; };
+  return "B" +
+    d.getFullYear() +
+    pad(d.getMonth()+1) +
+    pad(d.getDate()) + "-" +
+    pad(d.getHours()) +
+    pad(d.getMinutes()) +
+    pad(d.getSeconds());
+}
+
+/** Create task id under batch */
+function TL_Router_newTaskId_(batchId) {
+  // In POC we keep it simple: one task per message
+  return String(batchId).replace(/^B/, "T") + "-1";
+}
+
+/**
+ * Append a TASK row.
+ * If TASKS has headers, we map known columns.
+ * Otherwise we append a default fixed schema row.
+ */
+function TL_Router_appendTask_(taskObj) {
+  if (typeof TL_Sheets_appendTask_ === "function") {
+    // preferred store-layer API if you add it later
+    TL_Sheets_appendTask_(taskObj);
+    return;
+  }
+
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName("TASKS");
+  if (!sh) throw new Error("TASKS sheet not found");
+
+  var lastCol = sh.getLastColumn();
+  var headers = [];
+  if (sh.getLastRow() >= 1 && lastCol > 0) {
+    headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function(x){ return String(x||"").trim(); });
+  }
+
+  var row = null;
+
+  // Header-mapped insert if headers exist
+  if (headers && headers.length && headers.join("").length) {
+    row = new Array(headers.length).fill("");
+
+    var set = function(colName, val) {
+      var idx = headers.indexOf(colName);
+      if (idx >= 0) row[idx] = val;
+    };
+
+    set("taskId", taskObj.taskId);
+    set("batchId", taskObj.batchId);
+    set("from", taskObj.from);
+    set("status", taskObj.status);
+    set("kind", taskObj.kind);
+    set("text", taskObj.receivedText);
+    set("createdAt", taskObj.createdAt);
+    set("updatedAt", taskObj.createdAt);
+
+    // Store raw json if column exists
+    if (headers.indexOf("payloadJson") >= 0) set("payloadJson", _json_(taskObj.rawEnv));
+    if (headers.indexOf("rawJson") >= 0) set("rawJson", _json_(taskObj.rawEnv));
+
+    sh.appendRow(row);
+    return;
+  }
+
+  // Fallback fixed row (no headers defined yet)
+  // Columns: createdAt, taskId, batchId, from, status, kind, text, payloadJson
+  sh.appendRow([
+    taskObj.createdAt,
+    taskObj.taskId,
+    taskObj.batchId,
+    taskObj.from,
+    taskObj.status,
+    taskObj.kind,
+    taskObj.receivedText,
+    _json_(taskObj.rawEnv)
+  ]);
+}
+
+
+==============================
+FILE: TL_Router.js
+==============================
+/**
+ * TL_Router - minimal routing for now.
+ * IMPORTANT invariant: free text/voice only generates proposals. Button payloads commit.
+ */
+function TL_Router_handle_(env) {
+  // Normalize
+  var from = String(env && env.from ? env.from : "");
+  var text = String(env && env.text ? env.text : "");
+
+  // 1) Button payloads would be parsed here later (interactive)
+  if (env && env.interactive) {
+    TL_Log_append_("USER", "BTN_CLICK", env, "", "");
+    return _json_({ ok:true, note:"interactive handling not wired yet", interactive: env.interactive });
+  }
+
+  var t = String(text || "").trim();
+  var tl = t.toLowerCase();
+
+  // Always-first menu behavior
+  if (!t || tl === "hi" || tl === "hello" || tl === "hey" || t === "×©×œ×•×" || t === "×”×™×™") {
+    TL_Log_append_("SYSTEM", "MENU_SHOWN", env, "", "");
+    return _json_({ ok:true, menu: TL_Menu_text_() });
+  }
+
+  // Menu numbers (MVP)
+  if (tl === "1") {
+    TL_Log_append_("SYSTEM", "MENU_OPT_1", env, "", "");
+    return _json_({ ok:true, next:"Send your command now (voice or text). I will propose actions for confirmation." });
+  }
+
+  if (tl === "2") {
+    TL_Log_append_("SYSTEM", "MENU_OPT_2", env, "", "");
+    var tasks = (typeof TL_Sheets_findOpenTasks_ === "function")
+      ? TL_Sheets_findOpenTasks_(from, 10)
+      : [];
+    return _json_({ ok:true, openTasks: tasks });
+  }
+
+  if (tl === "3") {
+    TL_Log_append_("SYSTEM", "MENU_OPT_3", env, "", "");
+    return _json_({ ok:true, future:["Premium features","WhatsApp templates","Google Tasks mirror","Multi-user roles"] });
+  }
+
+  // Default: treat as command text -> create TASK row (proposal placeholder)
+  var batchId = TL_Router_newBatchId_();
+  var taskId  = TL_Router_newTaskId_(batchId);
+
+  var taskObj = {
+    taskId: taskId,
+    batchId: batchId,
+    from: from,
+    status: "NEEDS_APPROVAL",
+    kind: "PROPOSAL",
+    receivedText: text,
+    createdAt: (typeof _nowIso_ === "function") ? _nowIso_() : new Date().toISOString(),
+    rawEnv: env
+  };
+
+  TL_Router_appendTask_(taskObj);
+
+  TL_Log_append_("USER", "TASK_CREATED", { task: taskObj }, taskId, batchId);
+
+  return _json_({
+    ok:true,
+    batchId: batchId,
+    taskId: taskId,
+    status: "NEEDS_APPROVAL",
+    note: "Task created. Next: wire AI planner to generate proposal card(s) for confirmation.",
+    menu: TL_Menu_text_({ batchId: batchId, taskId: taskId })
+  });
+}
+
+/** Create short deterministic-ish batch id */
+function TL_Router_newBatchId_() {
+  var d = new Date();
+  // yyyymmdd-hhmmss
+  var pad = function(n){ return (n < 10 ? "0" : "") + n; };
+  return "B" +
+    d.getFullYear() +
+    pad(d.getMonth()+1) +
+    pad(d.getDate()) + "-" +
+    pad(d.getHours()) +
+    pad(d.getMinutes()) +
+    pad(d.getSeconds());
+}
+
+/** Create task id under batch */
+function TL_Router_newTaskId_(batchId) {
+  // In POC we keep it simple: one task per message
+  return String(batchId).replace(/^B/, "T") + "-1";
+}
+
+/**
+ * Append a TASK row.
+ * If TASKS has headers, we map known columns.
+ * Otherwise we append a default fixed schema row.
+ */
+function TL_Router_appendTask_(taskObj) {
+  if (typeof TL_Sheets_appendTask_ === "function") {
+    // preferred store-layer API if you add it later
+    TL_Sheets_appendTask_(taskObj);
+    return;
+  }
+
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName("TASKS");
+  if (!sh) throw new Error("TASKS sheet not found");
+
+  var lastCol = sh.getLastColumn();
+  var headers = [];
+  if (sh.getLastRow() >= 1 && lastCol > 0) {
+    headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function(x){ return String(x||"").trim(); });
+  }
+
+  var row = null;
+
+  // Header-mapped insert if headers exist
+  if (headers && headers.length && headers.join("").length) {
+    row = new Array(headers.length).fill("");
+
+    var set = function(colName, val) {
+      var idx = headers.indexOf(colName);
+      if (idx >= 0) row[idx] = val;
+    };
+
+    set("taskId", taskObj.taskId);
+    set("batchId", taskObj.batchId);
+    set("from", taskObj.from);
+    set("status", taskObj.status);
+    set("kind", taskObj.kind);
+    set("text", taskObj.receivedText);
+    set("createdAt", taskObj.createdAt);
+    set("updatedAt", taskObj.createdAt);
+
+    // Store raw json if column exists
+    if (headers.indexOf("payloadJson") >= 0) set("payloadJson", _json_(taskObj.rawEnv));
+    if (headers.indexOf("rawJson") >= 0) set("rawJson", _json_(taskObj.rawEnv));
+
+    sh.appendRow(row);
+    return;
+  }
+
+  // Fallback fixed row (no headers defined yet)
+  // Columns: createdAt, taskId, batchId, from, status, kind, text, payloadJson
+  sh.appendRow([
+    taskObj.createdAt,
+    taskObj.taskId,
+    taskObj.batchId,
+    taskObj.from,
+    taskObj.status,
+    taskObj.kind,
+    taskObj.receivedText,
+    _json_(taskObj.rawEnv)
+  ]);
+}
+
+
+==============================
+FILE: TL_SheetsStore.gs
+==============================
+/**
+ * TL_SheetsStore - bounded sheet store + bootstrap helpers (POC)
+ * Default store: bound spreadsheet (getActiveSpreadsheet)
+ * Optional override: Script Property TL_CFG_STORE_SHEET_ID
+ *
+ * Tabs we may create:
+ * OPEN, PENDING, REVISION, ARCHIVE, AUDIT_LOG, SETTINGS, COMMANDS_INBOX
+ */
+
+function TL_Sheets_getStore_() {
+  const sheetId = TL_Config_get_("TL_CFG_STORE_SHEET_ID", "");
+  if (sheetId) return SpreadsheetApp.openById(sheetId);
+  // default to bound sheet
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function TL_Sheets_ensureTab_(ss, tabName, headers) {
+  let sh = ss.getSheetByName(tabName);
+  if (!sh) sh = ss.insertSheet(tabName);
+
+  if (headers && headers.length) {
+    const lastCol = Math.max(1, sh.getLastColumn());
+    const firstRow = sh.getRange(1, 1, 1, lastCol).getValues()[0] || [];
+    const hasHeader = firstRow.join("|").includes(headers[0]);
+    if (!hasHeader) {
+      sh.clear();
+      sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sh.setFrozenRows(1);
+    }
+  }
+  return sh;
+}
+
+function TL_Sheets_taskHeaders_() {
+  return [
+    "createdAt","updatedAt","userE164",
+    "refId","chunkId","title","kind","channel",
+    "status","askedAt","answeredAt","executedAt",
+    "draftOrPromptJson","lastAction","lastActionAt"
+  ];
+}
+
+function TL_Sheets_bootstrapTabs_() {
+  const ss = TL_Sheets_getStore_();
+
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_REVISION","REVISION"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_ARCHIVE","ARCHIVE"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_AUDIT","AUDIT_LOG"), ["ts","actor","eventType","userE164","refId","chunkId","payload"]);
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_SETTINGS","SETTINGS"), ["key","value"]);
+
+  // Router currently expects this to exist (quick unblock)
+  TL_Sheets_ensureTab_(ss, "COMMANDS_INBOX", ["ts","userE164","text","batchVersion","payloadJson"]);
+
+  return {
+    ok: true,
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tabs: ss.getSheets().map(sh => sh.getName())
+  };
+}
+
+/**
+ * Public runner to bootstrap required store tabs.
+ * Safe to run multiple times.
+ */
+function TL_Sheets_bootstrapPOC() {
+  return TL_Sheets_bootstrapTabs_();
+}
+
+function TL_Sheets_upsertTask_(tabName, rowObj, keyField, keyValue) {
+  const ss = TL_Sheets_getStore_();
+  const sh = TL_Sheets_ensureTab_(ss, tabName, TL_Sheets_taskHeaders_());
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+
+  const keyCol = headers.indexOf(keyField) + 1;
+  if (keyCol <= 0) throw new Error("Key field not found: " + keyField);
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) {
+    TL_Sheets_appendTask_(sh, headers, rowObj);
+    return;
+  }
+
+  const keyVals = sh.getRange(2, keyCol, lastRow - 1, 1).getValues().map(r => String(r[0] || ""));
+  const idx = keyVals.indexOf(String(keyValue));
+  if (idx === -1) {
+    TL_Sheets_appendTask_(sh, headers, rowObj);
+    return;
+  }
+
+  const rowNumber = 2 + idx;
+  TL_Sheets_writeTaskRow_(sh, headers, rowNumber, rowObj);
+}
+
+function TL_Sheets_appendTask_(sh, headers, rowObj) {
+  const row = headers.map(h => (rowObj[h] !== undefined ? rowObj[h] : ""));
+  sh.appendRow(row);
+}
+
+function TL_Sheets_writeTaskRow_(sh, headers, rowNumber, rowObj) {
+  const row = headers.map(h => (rowObj[h] !== undefined ? rowObj[h] : ""));
+  sh.getRange(rowNumber, 1, 1, row.length).setValues([row]);
+}
+
+function TL_Sheets_findOpenTasks_(userE164, limit) {
+  const ss = TL_Sheets_getStore_();
+  if (!ss) return [];
+
+  const tabs = [
+    TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"),
+    TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"),
+    TL_Config_get_("TL_CFG_TAB_REVISION","REVISION")
+  ];
+
+  const out = [];
+  const max = limit || 10;
+
+  tabs.forEach(tab => {
+    if (out.length >= max) return;
+    const sh = ss.getSheetByName(tab);
+    if (!sh) return;
+
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return;
+
+    const values = sh.getRange(1, 1, lastRow, sh.getLastColumn()).getValues();
+    const headers = values[0];
+
+    const idxUser = headers.indexOf("userE164");
+    const idxTitle = headers.indexOf("title");
+    const idxChunk = headers.indexOf("chunkId");
+    const idxRef = headers.indexOf("refId");
+    const idxStatus = headers.indexOf("status");
+
+    for (let r = 1; r < values.length && out.length < max; r++) {
+      const row = values[r];
+      if (String(row[idxUser] || "") !== String(userE164 || "")) continue;
+      out.push({
+        tab,
+        refId: String(row[idxRef] || ""),
+        chunkId: String(row[idxChunk] || ""),
+        title: String(row[idxTitle] || ""),
+        status: String(row[idxStatus] || "")
+      });
+    }
+  });
+
+  return out;
+}
+
+
+==============================
+FILE: TL_SheetsStore.js
+==============================
+/**
+ * TL_SheetsStore - bounded sheet store + bootstrap helpers (POC)
+ * Default store: bound spreadsheet (getActiveSpreadsheet)
+ * Optional override: Script Property TL_CFG_STORE_SHEET_ID
+ *
+ * Tabs we may create:
+ * OPEN, PENDING, REVISION, ARCHIVE, AUDIT_LOG, SETTINGS, COMMANDS_INBOX
+ */
+
+function TL_Sheets_getStore_() {
+  const sheetId = TL_Config_get_("TL_CFG_STORE_SHEET_ID", "");
+  if (sheetId) return SpreadsheetApp.openById(sheetId);
+  // default to bound sheet
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function TL_Sheets_ensureTab_(ss, tabName, headers) {
+  let sh = ss.getSheetByName(tabName);
+  if (!sh) sh = ss.insertSheet(tabName);
+
+  if (headers && headers.length) {
+    const lastCol = Math.max(1, sh.getLastColumn());
+    const firstRow = sh.getRange(1, 1, 1, lastCol).getValues()[0] || [];
+    const hasHeader = firstRow.join("|").includes(headers[0]);
+    if (!hasHeader) {
+      sh.clear();
+      sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sh.setFrozenRows(1);
+    }
+  }
+  return sh;
+}
+
+function TL_Sheets_taskHeaders_() {
+  return [
+    "createdAt","updatedAt","userE164",
+    "refId","chunkId","title","kind","channel",
+    "status","askedAt","answeredAt","executedAt",
+    "draftOrPromptJson","lastAction","lastActionAt"
+  ];
+}
+
+function TL_Sheets_bootstrapTabs_() {
+  const ss = TL_Sheets_getStore_();
+
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_REVISION","REVISION"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_ARCHIVE","ARCHIVE"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_AUDIT","AUDIT_LOG"), ["ts","actor","eventType","userE164","refId","chunkId","payload"]);
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_SETTINGS","SETTINGS"), ["key","value"]);
+
+  // Router currently expects this to exist (quick unblock)
+  TL_Sheets_ensureTab_(ss, "COMMANDS_INBOX", ["ts","userE164","text","batchVersion","payloadJson"]);
+
+  return {
+    ok: true,
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tabs: ss.getSheets().map(sh => sh.getName())
+  };
+}
+
+/**
+ * Public runner to bootstrap required store tabs.
+ * Safe to run multiple times.
+ */
+function TL_Sheets_bootstrapPOC() {
+  return TL_Sheets_bootstrapTabs_();
+}
+
+function TL_Sheets_upsertTask_(tabName, rowObj, keyField, keyValue) {
+  const ss = TL_Sheets_getStore_();
+  const sh = TL_Sheets_ensureTab_(ss, tabName, TL_Sheets_taskHeaders_());
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+
+  const keyCol = headers.indexOf(keyField) + 1;
+  if (keyCol <= 0) throw new Error("Key field not found: " + keyField);
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) {
+    TL_Sheets_appendTask_(sh, headers, rowObj);
+    return;
+  }
+
+  const keyVals = sh.getRange(2, keyCol, lastRow - 1, 1).getValues().map(r => String(r[0] || ""));
+  const idx = keyVals.indexOf(String(keyValue));
+  if (idx === -1) {
+    TL_Sheets_appendTask_(sh, headers, rowObj);
+    return;
+  }
+
+  const rowNumber = 2 + idx;
+  TL_Sheets_writeTaskRow_(sh, headers, rowNumber, rowObj);
+}
+
+function TL_Sheets_appendTask_(sh, headers, rowObj) {
+  const row = headers.map(h => (rowObj[h] !== undefined ? rowObj[h] : ""));
+  sh.appendRow(row);
+}
+
+function TL_Sheets_writeTaskRow_(sh, headers, rowNumber, rowObj) {
+  const row = headers.map(h => (rowObj[h] !== undefined ? rowObj[h] : ""));
+  sh.getRange(rowNumber, 1, 1, row.length).setValues([row]);
+}
+
+function TL_Sheets_findOpenTasks_(userE164, limit) {
+  const ss = TL_Sheets_getStore_();
+  if (!ss) return [];
+
+  const tabs = [
+    TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"),
+    TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"),
+    TL_Config_get_("TL_CFG_TAB_REVISION","REVISION")
+  ];
+
+  const out = [];
+  const max = limit || 10;
+
+  tabs.forEach(tab => {
+    if (out.length >= max) return;
+    const sh = ss.getSheetByName(tab);
+    if (!sh) return;
+
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return;
+
+    const values = sh.getRange(1, 1, lastRow, sh.getLastColumn()).getValues();
+    const headers = values[0];
+
+    const idxUser = headers.indexOf("userE164");
+    const idxTitle = headers.indexOf("title");
+    const idxChunk = headers.indexOf("chunkId");
+    const idxRef = headers.indexOf("refId");
+    const idxStatus = headers.indexOf("status");
+
+    for (let r = 1; r < values.length && out.length < max; r++) {
+      const row = values[r];
+      if (String(row[idxUser] || "") !== String(userE164 || "")) continue;
+      out.push({
+        tab,
+        refId: String(row[idxRef] || ""),
+        chunkId: String(row[idxChunk] || ""),
+        title: String(row[idxTitle] || ""),
+        status: String(row[idxStatus] || "")
+      });
+    }
+  });
+
+  return out;
+}
+
+
+==============================
+FILE: TL_Util.gs
+==============================
+/**
+ * TL_Util.gs
+ * Utilities for bound-sheet inspection + compact dumping for sharing in chat.
+ * Also includes small safe helpers used by Router/Webhook.
+ */
+
+function _json_(obj) {
+  try { return JSON.stringify(obj); }
+  catch (e) {
+    try { return String(obj); } catch (e2) { return "[unstringifiable]"; }
+  }
+}
+
+function _nowIso_() {
+  return new Date().toISOString();
+}
+
+/**
+ * Returns bound spreadsheetId + all tab names.
+ * Safe to run from Apps Script editor.
+ */
+function TL_Util_listSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var names = ss.getSheets().map(function(sh){ return sh.getName(); });
+  var out = {
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tabs: names
+  };
+  Logger.log(_json_(out));
+  return out;
+}
+
+/**
+ * Dumps a sheet as 2D array (values), with optional row limit.
+ * @param {string} sheetName
+ * @param {number} rowLimit optional (default 50)
+ */
+function TL_Util_dumpSheet(sheetName, rowLimit) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(String(sheetName || ""));
+  if (!sh) return { ok:false, error:"sheet not found", sheetName: String(sheetName||"") };
+
+  var max = (rowLimit == null || rowLimit === "") ? 50 : Number(rowLimit);
+  if (!isFinite(max) || max <= 0) max = 50;
+
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow === 0 || lastCol === 0) {
+    return { ok:true, sheetName: sh.getName(), rows: 0, cols: 0, values: [] };
+  }
+
+  var rows = Math.min(lastRow, max);
+  var values = sh.getRange(1, 1, rows, lastCol).getValues();
+
+  return {
+    ok: true,
+    sheetName: sh.getName(),
+    rows: rows,
+    cols: lastCol,
+    lastRow: lastRow,
+    lastCol: lastCol,
+    values: values
+  };
+}
+
+/**
+ * Dumps multiple sheets into one compact object.
+ * @param {string} csvNames comma-separated sheet names. If omitted => all sheets.
+ * @param {number} rowLimit optional per sheet (default 25)
+ */
+function TL_Util_dumpSheets(csvNames, rowLimit) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var all = ss.getSheets().map(function(sh){ return sh.getName(); });
+
+  var names = String(csvNames || "").trim()
+    ? String(csvNames).split(",").map(function(s){ return s.trim(); }).filter(Boolean)
+    : all;
+
+  var out = {
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    requested: names,
+    dumps: {}
+  };
+
+  names.forEach(function(name){
+    out.dumps[name] = TL_Util_dumpSheet(name, rowLimit);
+  });
+
+  return out;
+}
+
+/**
+ * Returns a compact JSON string for copy/paste into chat.
+ * @param {string} csvNames optional
+ * @param {number} rowLimit optional
+ */
+function TL_Util_dumpSheetsJson(csvNames, rowLimit) {
+  var obj = TL_Util_dumpSheets(csvNames, rowLimit);
+  return _json_(obj);
+}
+
+
+==============================
+FILE: TL_Util.js
+==============================
+/**
+ * TL_Util.gs
+ * Utilities for bound-sheet inspection + compact dumping for sharing in chat.
+ * Also includes small safe helpers used by Router/Webhook.
+ */
+
+function _json_(obj) {
+  try { return JSON.stringify(obj); }
+  catch (e) {
+    try { return String(obj); } catch (e2) { return "[unstringifiable]"; }
+  }
+}
+
+function _nowIso_() {
+  return new Date().toISOString();
+}
+
+/**
+ * Returns bound spreadsheetId + all tab names.
+ * Safe to run from Apps Script editor.
+ */
+function TL_Util_listSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var names = ss.getSheets().map(function(sh){ return sh.getName(); });
+  var out = {
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tabs: names
+  };
+  Logger.log(_json_(out));
+  return out;
+}
+
+/**
+ * Dumps a sheet as 2D array (values), with optional row limit.
+ * @param {string} sheetName
+ * @param {number} rowLimit optional (default 50)
+ */
+function TL_Util_dumpSheet(sheetName, rowLimit) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(String(sheetName || ""));
+  if (!sh) return { ok:false, error:"sheet not found", sheetName: String(sheetName||"") };
+
+  var max = (rowLimit == null || rowLimit === "") ? 50 : Number(rowLimit);
+  if (!isFinite(max) || max <= 0) max = 50;
+
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow === 0 || lastCol === 0) {
+    return { ok:true, sheetName: sh.getName(), rows: 0, cols: 0, values: [] };
+  }
+
+  var rows = Math.min(lastRow, max);
+  var values = sh.getRange(1, 1, rows, lastCol).getValues();
+
+  return {
+    ok: true,
+    sheetName: sh.getName(),
+    rows: rows,
+    cols: lastCol,
+    lastRow: lastRow,
+    lastCol: lastCol,
+    values: values
+  };
+}
+
+/**
+ * Dumps multiple sheets into one compact object.
+ * @param {string} csvNames comma-separated sheet names. If omitted => all sheets.
+ * @param {number} rowLimit optional per sheet (default 25)
+ */
+function TL_Util_dumpSheets(csvNames, rowLimit) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var all = ss.getSheets().map(function(sh){ return sh.getName(); });
+
+  var names = String(csvNames || "").trim()
+    ? String(csvNames).split(",").map(function(s){ return s.trim(); }).filter(Boolean)
+    : all;
+
+  var out = {
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    requested: names,
+    dumps: {}
+  };
+
+  names.forEach(function(name){
+    out.dumps[name] = TL_Util_dumpSheet(name, rowLimit);
+  });
+
+  return out;
+}
+
+/**
+ * Returns a compact JSON string for copy/paste into chat.
+ * @param {string} csvNames optional
+ * @param {number} rowLimit optional
+ */
+function TL_Util_dumpSheetsJson(csvNames, rowLimit) {
+  var obj = TL_Util_dumpSheets(csvNames, rowLimit);
+  return _json_(obj);
+}
+
+
+==============================
+FILE: TL_Webhook.gs
+==============================
+/**
+ * TL_Webhook - WhatsApp Cloud API webhook entry (GET verify + POST events)
+ *
+ * Required Script Properties:
+ * - TL_VERIFY_TOKEN        (string)  webhook verify token
+ * - TL_SHEET_ID            (string)  spreadsheet ID containing WEBHOOK_LOG
+ * - META_USER_ACCESS_TOKEN (string)  Graph API token (optional for COEX_checkPhoneNumberState)
+ *
+ * Tabs:
+ * - WEBHOOK_LOG (auto-created)
+ */
+const TL_WEBHOOK = {
+  LOG_SHEET: "WEBHOOK_LOG",
+  HEADERS: [
+    "ts","event_type","display_phone_number","phone_number_id",
+    "from","message_id","message_type","text","statuses_count","raw_json"
+  ],
+  MAX_IDEMPOTENCY_SCAN_ROWS: 2000
+};
+
+function doGet(e) {
+  try {
+    const p = (e && e.parameter) ? e.parameter : {};
+    const mode = String(p["hub.mode"] || "");
+    const token = String(p["hub.verify_token"] || "");
+    const challenge = String(p["hub.challenge"] || "");
+
+    const expected = String(PropertiesService.getScriptProperties().getProperty("TL_VERIFY_TOKEN") || "");
+    if (mode === "subscribe" && expected && token === expected) {
+      return ContentService.createTextOutput(challenge).setMimeType(ContentService.MimeType.TEXT);
+    }
+    return ContentService.createTextOutput("forbidden").setMimeType(ContentService.MimeType.TEXT);
+  } catch (err) {
+    return ContentService.createTextOutput("error").setMimeType(ContentService.MimeType.TEXT);
+  }
+}
+
+function doPost(e) {
+  const started = new Date();
+  try {
+    const raw = (e && e.postData && typeof e.postData.contents === "string") ? e.postData.contents : "";
+    if (!raw) {
+      TLW_logDebug_("empty_post", { when: started.toISOString() });
+      return TLW_json_({ ok:true, empty:true });
+    }
+
+    let payload = {};
+    try { payload = JSON.parse(raw); }
+    catch (parseErr) {
+      TLW_logDebug_("invalid_json", { err:String(parseErr), raw: raw.slice(0,500) });
+      return TLW_json_({ ok:true, parse_error:true });
+    }
+
+    const events = TLW_extractEvents_(payload);
+    if (!events.length) {
+      TLW_appendRow_({
+        ts:new Date(), event_type:"webhook_no_events",
+        display_phone_number:"", phone_number_id:"", from:"",
+        message_id:"", message_type:"", text:"",
+        statuses_count:0, raw_json: TLW_safeStringify_(payload, 4000)
+      }, true);
+      return TLW_json_({ ok:true, events:0 });
+    }
+
+    const idSet = TLW_getRecentMessageIdSet_();
+    let appended=0, skipped=0;
+
+    events.forEach(ev => {
+      const messageId = String(ev.message_id || "");
+      if (messageId && idSet.has(messageId)) { skipped++; return; }
+
+      TLW_appendRow_({
+        ts:new Date(),
+        event_type: ev.event_type || "messages",
+        display_phone_number: ev.display_phone_number || "",
+        phone_number_id: ev.phone_number_id || "",
+        from: ev.from || "",
+        message_id: messageId,
+        message_type: ev.message_type || "",
+        text: ev.text || "",
+        statuses_count: ev.statuses_count || 0,
+        raw_json: TLW_safeStringify_(payload, 8000)
+      }, false);
+
+      if (messageId) idSet.add(messageId);
+      appended++;
+    });
+
+    return TLW_json_({ ok:true, appended, skipped });
+  } catch (err) {
+    TLW_logDebug_("doPost_error", { err:String(err && err.stack ? err.stack : err) });
+    return TLW_json_({ ok:true, error:true });
+  }
+}
+
+/** ---- Optional helper: check phone state (coexist) ---- */
+function COEX_checkPhoneNumberState(phoneNumberId) {
+  const id = String(phoneNumberId || "").trim();
+  if (!id) throw new Error("Missing phoneNumberId");
+
+  const token = String(PropertiesService.getScriptProperties().getProperty("META_USER_ACCESS_TOKEN") || "").trim();
+  if (!token) throw new Error("Missing Script Property META_USER_ACCESS_TOKEN");
+
+  const fields = [
+    "id","display_phone_number","verified_name","status","platform_type",
+    "code_verification_status","name_status","quality_rating","health_status"
+  ].join(",");
+
+  const url = "https://graph.facebook.com/v24.0/" + encodeURIComponent(id) + "?fields=" + encodeURIComponent(fields);
+  const res = UrlFetchApp.fetch(url, { method:"get", muteHttpExceptions:true, headers:{ Authorization:"Bearer " + token } });
+
+  const status = res.getResponseCode();
+  const body = res.getContentText();
+
+  TLW_appendRow_({
+    ts:new Date(), event_type:"coex_check_state",
+    display_phone_number:"", phone_number_id:id, from:"",
+    message_id:"", message_type:"HTTP_" + status, text:"",
+    statuses_count:0, raw_json: body
+  }, true);
+
+  return { status, body };
+}
+
+/** ---- internals ---- */
+function TLW_extractEvents_(payload) {
+  const out = [];
+  if (!payload || !payload.entry || !payload.entry.length) return out;
+
+  payload.entry.forEach(entry => {
+    const changes = entry && entry.changes ? entry.changes : [];
+    changes.forEach(ch => {
+      const field = String(ch.field || "");
+      const val = ch.value || {};
+      const meta = val.metadata || {};
+      const displayPhone = String(meta.display_phone_number || "");
+      const phoneId = String(meta.phone_number_id || "");
+
+      if (field === "messages" && val.messages && val.messages.length) {
+        val.messages.forEach(m => {
+          const from = String(m.from || "");
+          const msgId = String(m.id || "");
+          const type = String(m.type || "");
+          const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
+          out.push({ event_type:"messages", display_phone_number:displayPhone, phone_number_id:phoneId, from, message_id:msgId, message_type:type, text, statuses_count:0 });
+        });
+      }
+
+      const statuses = val.statuses || [];
+      if (statuses && statuses.length) {
+        out.push({ event_type:"statuses", display_phone_number:displayPhone, phone_number_id:phoneId, from:"", message_id:"", message_type:"status_update", text:"", statuses_count: statuses.length });
+      }
+    });
+  });
+
+  return out;
+}
+
+function TLW_appendRow_(obj, allowDuplicate) {
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  if (!ss) throw new Error("Missing Script Property TL_SHEET_ID");
+
+  let sh = ss.getSheetByName(TL_WEBHOOK.LOG_SHEET);
+  if (!sh) sh = ss.insertSheet(TL_WEBHOOK.LOG_SHEET);
+
+  const range = sh.getRange(1,1,1,TL_WEBHOOK.HEADERS.length);
+  const existing = range.getValues()[0];
+  const needs = existing.some((v,i)=>String(v||"")!==String(TL_WEBHOOK.HEADERS[i]||""));
+  if (needs) { range.setValues([TL_WEBHOOK.HEADERS]); sh.setFrozenRows(1); }
+
+  const messageId = String(obj.message_id || "");
+  if (!allowDuplicate && messageId) {
+    const set = TLW_getRecentMessageIdSet_();
+    if (set.has(messageId)) return;
+  }
+
+  sh.appendRow([
+    obj.ts || new Date(),
+    String(obj.event_type||""),
+    String(obj.display_phone_number||""),
+    String(obj.phone_number_id||""),
+    String(obj.from||""),
+    String(obj.message_id||""),
+    String(obj.message_type||""),
+    String(obj.text||""),
+    Number(obj.statuses_count||0),
+    String(obj.raw_json||"")
+  ]);
+}
+
+function TLW_getRecentMessageIdSet_() {
+  const set = new Set();
+  try {
+    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+    const sh = ss.getSheetByName(TL_WEBHOOK.LOG_SHEET);
+    if (!sh) return set;
+
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return set;
+
+    const start = Math.max(2, lastRow - TL_WEBHOOK.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
+    const count = lastRow - start + 1;
+    const values = sh.getRange(start, 6, count, 1).getValues(); // message_id col
+    values.forEach(r => { const id = String(r[0]||"").trim(); if (id) set.add(id); });
+  } catch (e) {}
+  return set;
+}
+
+function TLW_logDebug_(label, data) {
+  try {
+    TLW_appendRow_({
+      ts:new Date(), event_type:"debug_" + String(label||"log"),
+      display_phone_number:"", phone_number_id:"", from:"",
+      message_id:"", message_type:"", text:"",
+      statuses_count:0, raw_json: TLW_safeStringify_(data, 4000)
+    }, true);
+  } catch(e) {}
+}
+
+function TLW_safeStringify_(obj, maxLen) {
+  const lim = (typeof maxLen==="number" && isFinite(maxLen)) ? maxLen : 4000;
+  let s="";
+  try { s = JSON.stringify(obj); } catch(e){ s = String(obj); }
+  if (s.length > lim) return s.slice(0, lim) + "...";
+  return s;
+}
+
+function TLW_json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj||{})).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+==============================
+FILE: TL_Webhook.js
+==============================
+/**
+ * TL_Webhook â€” Sprint 1 Deterministic Command Router
+ * Minimal deterministic grammar enforcement.
+ * No AI. No parse layer. No TL_Router.
+ */
+
+function doGet(e) {
+  var p = (e && e.parameter) ? e.parameter : {};
+  var mode = String(p["hub.mode"] || "");
+  var token = String(p["hub.verify_token"] || "");
+  var challenge = String(p["hub.challenge"] || "");
+
+  if (mode) {
+    var expected = String(PropertiesService.getScriptProperties().getProperty("TL_VERIFY_TOKEN") || "");
+    if (mode === "subscribe" && expected && token === expected) {
+      return ContentService.createTextOutput(challenge)
+        .setMimeType(ContentService.MimeType.TEXT);
+    }
+    return ContentService.createTextOutput("forbidden")
+      .setMimeType(ContentService.MimeType.TEXT);
+  }
+
+  return ContentService.createTextOutput("TaskLess Deterministic Router OK")
+    .setMimeType(ContentService.MimeType.TEXT);
+}
+
+function doPost(e) {
+  try {
+
+    var raw = (e && e.postData && typeof e.postData.contents === "string")
+      ? e.postData.contents
+      : "";
+
+    if (!raw) {
+      return _reject_("EMPTY_BODY");
+    }
+
+    var payload = JSON.parse(raw);
+
+    var text = String(payload.text || "").trim();
+
+    if (!text.startsWith("TL:CMD:")) {
+      return _reject_("INVALID_GRAMMAR");
+    }
+
+    var userId = String(payload.userId || "");
+    var batchVersion = String(payload.batchVersion || "");
+
+    if (!userId) {
+      return _reject_("MISSING_USER");
+    }
+
+    var ss = SpreadsheetApp.getActive();
+    var sheet = ss.getSheetByName("COMMANDS_INBOX");
+
+    if (!sheet) {
+      throw new Error("COMMANDS_INBOX sheet missing");
+    }
+
+    sheet.appendRow([
+      new Date(),
+      userId,
+      text,
+      batchVersion,
+      "RECEIVED"
+    ]);
+
+    _logEvent_("CMD_RECEIVED", {
+      userId: userId,
+      text: text,
+      batchVersion: batchVersion
+    });
+
+    return ContentService
+      .createTextOutput(JSON.stringify({
+        ok: true,
+        status: "ACCEPTED",
+        command: text
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return _reject_(String(err && err.message ? err.message : err));
+  }
+}
+
+function _reject_(reason) {
+  _logEvent_("CMD_REJECTED", { reason: reason });
+
+  return ContentService
+    .createTextOutput(JSON.stringify({
+      ok: false,
+      error: reason
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function _logEvent_(type, data) {
+  try {
+    var ss = SpreadsheetApp.getActive();
+    var sheet = ss.getSheetByName("EVENTS_LOG");
+    if (!sheet) return;
+
+    sheet.appendRow([
+      new Date(),
+      type,
+      JSON.stringify(data || {})
+    ]);
+  } catch (e) {}
+}
+
+
+==============================
+FILE: UTIL_Sheets_ExportSchema.gs
+==============================
+/**
+ * UTIL_Sheets_ExportSchema
+ * - Exports spreadsheet tabs + headers as pasteable JSON
+ *
+ * Uses Script Property TL_SHEET_ID if set; otherwise uses active spreadsheet.
+ */
+
+function TL_Sheets_GetSpreadsheet_() {
+  var id = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+  if (id) return SpreadsheetApp.openById(id);
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function TL_Sheets_ListTabsAndHeaders() {
+  var ss = TL_Sheets_GetSpreadsheet_();
+  var sheets = ss.getSheets();
+  var out = [];
+  for (var i=0; i<sheets.length; i++) {
+    var sh = sheets[i];
+    var name = sh.getName();
+    var lastCol = sh.getLastColumn();
+    var headers = [];
+    if (lastCol > 0) {
+      headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||"").trim(); });
+      while (headers.length && !headers[headers.length-1]) headers.pop();
+    }
+    out.push({ tab:name, headers:headers, lastRow:sh.getLastRow(), lastCol:lastCol });
+  }
+  return out;
+}
+
+function TL_Sheets_ExportSchemaJson() {
+  var schema = {
+    version: "sheet-export-1",
+    exported_iso: new Date().toISOString(),
+    sheet_id: String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim(),
+    tabs: TL_Sheets_ListTabsAndHeaders()
+  };
+  var json = JSON.stringify(schema, null, 2);
+  try { Logger.log(json); } catch(e) {}
+  return json;
+}
+
+
+
+==============================
+FILE: UTIL_Sheets_ExportSchema.js
+==============================
+/**
+ * UTIL_Sheets_ExportSchema
+ * - Exports spreadsheet tabs + headers as pasteable JSON
+ *
+ * Uses Script Property TL_SHEET_ID if set; otherwise uses active spreadsheet.
+ */
+
+function TL_Sheets_GetSpreadsheet_() {
+  var id = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+  if (id) return SpreadsheetApp.openById(id);
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function TL_Sheets_ListTabsAndHeaders() {
+  var ss = TL_Sheets_GetSpreadsheet_();
+  var sheets = ss.getSheets();
+  var out = [];
+  for (var i=0; i<sheets.length; i++) {
+    var sh = sheets[i];
+    var name = sh.getName();
+    var lastCol = sh.getLastColumn();
+    var headers = [];
+    if (lastCol > 0) {
+      headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||"").trim(); });
+      while (headers.length && !headers[headers.length-1]) headers.pop();
+    }
+    out.push({ tab:name, headers:headers, lastRow:sh.getLastRow(), lastCol:lastCol });
+  }
+  return out;
+}
+
+function TL_Sheets_ExportSchemaJson() {
+  var schema = {
+    version: "sheet-export-1",
+    exported_iso: new Date().toISOString(),
+    sheet_id: String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim(),
+    tabs: TL_Sheets_ListTabsAndHeaders()
+  };
+  var json = JSON.stringify(schema, null, 2);
+  try { Logger.log(json); } catch(e) {}
+  return json;
+}
+
+
+
+==============================
+FILE: UTIL_Sheets_RebuildSchema.gs
+==============================
+/**
+ * UTIL_Sheets_RebuildSchema
+ * Applies a schema (tabs + headers) deterministically.
+ *
+ * Modes:
+ * - "verify_only": no changes; returns report
+ * - "create_missing": create missing tabs and fix header row if mismatched
+ */
+
+function TL_Sheets_ApplySchema(schemaJson, mode) {
+  var ss = TL_Sheets_GetSpreadsheet_();
+  var m = String(mode || "verify_only").trim();
+
+  var schema = schemaJson;
+  if (typeof schemaJson === "string") schema = JSON.parse(schemaJson);
+  if (!schema || !schema.tabs || !schema.tabs.length) throw new Error("Invalid schema: missing tabs");
+
+  var report = { applied_iso:new Date().toISOString(), mode:m, actions:[], ok:true };
+  function push(action, details) { report.actions.push({ action:action, details:details||{} }); }
+
+  schema.tabs.forEach(function(t){
+    var tab = String(t.tab || "").trim();
+    if (!tab) return;
+    var expectedHeaders = (t.headers || []).map(function(x){ return String(x||"").trim(); });
+
+    var sh = ss.getSheetByName(tab);
+    if (!sh) {
+      if (m === "create_missing") { sh = ss.insertSheet(tab); push("create_sheet", { tab:tab }); }
+      else { push("missing_sheet", { tab:tab }); report.ok=false; return; }
+    }
+
+    var lastCol = Math.max(sh.getLastColumn(), expectedHeaders.length);
+    if (lastCol < 1) lastCol = expectedHeaders.length;
+
+    var actual = [];
+    if (lastCol > 0) {
+      actual = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||"").trim(); });
+      while (actual.length && !actual[actual.length-1]) actual.pop();
+    }
+
+    var mismatch = (expectedHeaders.length !== actual.length);
+    if (!mismatch) {
+      for (var i=0; i<expectedHeaders.length; i++) {
+        if (String(expectedHeaders[i]||"") !== String(actual[i]||"")) { mismatch=true; break; }
+      }
+    }
+
+    if (mismatch) {
+      if (m === "create_missing") {
+        sh.getRange(1,1,1,expectedHeaders.length).setValues([expectedHeaders]);
+        sh.setFrozenRows(1);
+        push("set_headers", { tab:tab, expected:expectedHeaders, actual:actual });
+      } else {
+        push("headers_mismatch", { tab:tab, expected:expectedHeaders, actual:actual });
+        report.ok=false;
+      }
+    } else {
+      push("headers_ok", { tab:tab });
+    }
+  });
+
+  var json = JSON.stringify(report, null, 2);
+  try { Logger.log(json); } catch(e) {}
+  return json;
+}
+
+
+
+==============================
+FILE: UTIL_Sheets_RebuildSchema.js
+==============================
+/**
+ * UTIL_Sheets_RebuildSchema
+ * Applies a schema (tabs + headers) deterministically.
+ *
+ * Modes:
+ * - "verify_only": no changes; returns report
+ * - "create_missing": create missing tabs and fix header row if mismatched
+ */
+
+function TL_Sheets_ApplySchema(schemaJson, mode) {
+  var ss = TL_Sheets_GetSpreadsheet_();
+  var m = String(mode || "verify_only").trim();
+
+  var schema = schemaJson;
+  if (typeof schemaJson === "string") schema = JSON.parse(schemaJson);
+  if (!schema || !schema.tabs || !schema.tabs.length) throw new Error("Invalid schema: missing tabs");
+
+  var report = { applied_iso:new Date().toISOString(), mode:m, actions:[], ok:true };
+  function push(action, details) { report.actions.push({ action:action, details:details||{} }); }
+
+  schema.tabs.forEach(function(t){
+    var tab = String(t.tab || "").trim();
+    if (!tab) return;
+    var expectedHeaders = (t.headers || []).map(function(x){ return String(x||"").trim(); });
+
+    var sh = ss.getSheetByName(tab);
+    if (!sh) {
+      if (m === "create_missing") { sh = ss.insertSheet(tab); push("create_sheet", { tab:tab }); }
+      else { push("missing_sheet", { tab:tab }); report.ok=false; return; }
+    }
+
+    var lastCol = Math.max(sh.getLastColumn(), expectedHeaders.length);
+    if (lastCol < 1) lastCol = expectedHeaders.length;
+
+    var actual = [];
+    if (lastCol > 0) {
+      actual = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||"").trim(); });
+      while (actual.length && !actual[actual.length-1]) actual.pop();
+    }
+
+    var mismatch = (expectedHeaders.length !== actual.length);
+    if (!mismatch) {
+      for (var i=0; i<expectedHeaders.length; i++) {
+        if (String(expectedHeaders[i]||"") !== String(actual[i]||"")) { mismatch=true; break; }
+      }
+    }
+
+    if (mismatch) {
+      if (m === "create_missing") {
+        sh.getRange(1,1,1,expectedHeaders.length).setValues([expectedHeaders]);
+        sh.setFrozenRows(1);
+        push("set_headers", { tab:tab, expected:expectedHeaders, actual:actual });
+      } else {
+        push("headers_mismatch", { tab:tab, expected:expectedHeaders, actual:actual });
+        report.ok=false;
+      }
+    } else {
+      push("headers_ok", { tab:tab });
+    }
+  });
+
+  var json = JSON.stringify(report, null, 2);
+  try { Logger.log(json); } catch(e) {}
+  return json;
+}
+
+
+
+
+
+
+===== FILE: C:\dev\gas\TaskLess\.clasp.json =====
+{
+  "scriptId": "1CeJ_zFTrpgtl4Tn7FiDZanSHfwCJb6HQwo564wou6cK3RsB2_wOkoUOW",
+  "rootDir": "",
+  "scriptExtensions": [
+    ".gs"
+  ],
+  "htmlExtensions": [
+    ".html"
+  ],
+  "jsonExtensions": [
+    ".json"
+  ],
+  "filePushOrder": [],
+  "skipSubdirectories": false
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\.clasp.json.bak =====
+{
+  "scriptId": "1CeJ_zFTrpgtl4Tn7FiDZanSHfwCJb6HQwo564wou6cK3RsB2_wOkoUOW",
+  "rootDir": "",
+  "scriptExtensions": [
+    ".js",
+    ".gs"
+  ],
+  "htmlExtensions": [
+    ".html"
+  ],
+  "jsonExtensions": [
+    ".json"
+  ],
+  "filePushOrder": [],
+  "skipSubdirectories": false
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\.claspignore =====
+
+*.md
+
+**/*.js
+
+
+===== FILE: C:\dev\gas\TaskLess\.gitattributes =====
+# Normalize line endings to avoid "LF will be replaced by CRLF" spam
+* text=auto eol=lf
+
+# GAS / config files
+*.gs  text eol=lf
+*.json text eol=lf
+.clasp* text eol=lf
+
+# Docs
+*.md text eol=lf
+
+===== FILE: C:\dev\gas\TaskLess\.gitignore =====
+
+# Local snapshots
+
+
+# Local snapshots
+_FILES_DUMP.txt
+
+
+===== FILE: C:\dev\gas\TaskLess\appsscript.json =====
+{
+  "timeZone": "Asia/Jerusalem",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8"
+}
+
+
+
+===== FILE: C:\dev\gas\TaskLess\BUSINESS_LOGIC.md =====
+# TaskLess — Business Logic (Canonical Spec)
+
+## 1) Purpose
+TaskLess turns WhatsApp messages into **structured tasks**, asks for missing info, gets confirmation, and then **executes deterministically** (email, message, reminders, calendar, etc.) with auditability.
+
+---
+
+## 2) Core Objects
+
+### 2.1 User
+- Identified by `userE164`
+- Has settings (timezone, defaults, allowed channels)
+
+### 2.2 Task
+A unit of work created from one or more user messages.
+- Has a lifecycle: OPEN → PENDING → (REVISION) → EXECUTED → ARCHIVE
+- Has an execution plan (proposal/action/result JSON fields)
+
+### 2.3 Execution
+A deterministic action run by GAS (send email, send WhatsApp, etc.), optionally scheduled.
+
+---
+
+## 3) Message → Task Flow (Secretary Mode)
+
+### 3.1 Intake
+- Inbound message arrives (WhatsApp webhook or manual test insert)
+- System dedupes by message id / hash
+- System logs raw event to audit log
+
+### 3.2 Parse
+- Extract intent + entities into a draft object (title, kind, channel, targets)
+- Create/Upsert an OPEN task (by `refId`/`chunkId`)
+
+### 3.3 Ask / Clarify
+- If required fields missing, system asks targeted questions
+- Missing fields stored in `missingFieldsJson`
+- Each ask/answer updates task state + timestamps
+
+### 3.4 Proposal
+- Once enough info, system generates a proposal summary for user approval
+- Proposal stored in `proposalJson`
+- User can approve / revise / cancel
+
+### 3.5 Confirm → Execute
+- If approved, create an `actionJson` snapshot
+- Execution is deterministic (no AI at execution-time)
+- Result stored in `resultJson`, errors in `lastError`
+
+---
+
+## 4) Scheduling (Planned)
+
+### 4.1 Scheduled Execution
+- When user approves an action, allow optional schedule datetime
+- If scheduled, task is queued for later execution; GAS sweeper runs periodically
+
+### 4.2 Sweep Strategy (Planned)
+- Time-based trigger runs every N minutes (start with 5)
+- Finds due items where scheduledAt <= now AND status is “approved/pending_exec”
+- Executes idempotently (guard by executionId)
+
+---
+
+## 5) Reminders to Clients (Planned)
+
+### 5.1 REMINDERS sheet concept
+- Rows contain: contact reference + template name + AI-prepared JSON payload + schedule rules
+- GAS sweeper expands reminders into tasks/executions
+
+---
+
+## 6) Audit & Safety
+- Every state change logs to AUDIT_LOG with ts, actor, eventType, payload
+- STOP / opt-out should immediately prevent further sends to that user/target
+
+---
+
+## 7) Versioning Rules
+- BUSINESS_LOGIC.md is canonical (spec)
+- SCHEMA.json is derived from the running sheet export + spec
+- Code must not drift: changes are patch → git → push → clasp push
+
+---
+
+## 8) Open Questions
+- Exact “task kind” taxonomy (email, WhatsApp, calendar, reminder)
+- Where scheduled items live (TASKS vs EXECUTIONS tab)
+
+---
+
+# 9) Secretary Identity & Operating Philosophy (Canonical)
+
+TaskLess operates in **Secretary Mode**.
+
+It is not an autonomous agent.
+It does not act independently.
+It prepares, suggests, and waits.
+
+### 9.1 Role Definition
+TaskLess behaves as a **digital secretary**:
+
+- Reads inbound communication
+- Structures it into decision-ready units
+- Suggests summaries and replies
+- Waits for explicit confirmation
+- Executes only when instructed
+
+It does not replace the human decision-maker.
+It assists the human decision-maker.
+
+---
+
+## 9.2 Core Execution Invariant
+The system must always follow this sequence:
+
+Prepared → Reviewed → Confirmed → Executed → Receipted
+
+Rules:
+
+- Intent does not equal execution.
+- Proposal does not equal execution.
+- Only explicit confirmation creates an executable snapshot.
+- Execution must be deterministic and idempotent.
+- Every execution produces a receipt.
+
+No exceptions.
+
+---
+
+## 9.3 Language & UX Terminology
+To reinforce the human-controlled model, the system uses secretary-oriented terminology.
+
+Use:
+- “Secretary Brief”
+- “Suggested Reply”
+- “Suggested Action”
+- “Awaiting Your Confirmation”
+- “Execution Receipt”
+
+Avoid:
+- “Auto-sent”
+- “AI handled”
+- “Autonomous action”
+- “Agent executed”
+
+The product tone must reinforce assistance, not autonomy.
+
+---
+
+## 9.4 Decision-Ready Triage Model
+TaskLess does not aim to turn every message into an action.
+
+Instead, it turns every inbound thread into a **decision-ready brief** classified as:
+
+- ACTION — requires user response
+- WAITING — awaiting someone else
+- FYI — informational only
+- NOT_MINE — addressed to another person
+- SCHEDULE — contains scheduling intent
+
+Only ACTION and SCHEDULE items are eligible for approval and execution.
+
+All others reduce cognitive load by clarifying that no action is required.
+
+---
+
+## 9.5 Cognitive Load Reduction Principle
+The system’s primary value is not automation.
+
+It is reduction of:
+- Re-reading time
+- Context switching
+- Decision fatigue
+- Missed follow-ups
+
+If the digest increases cognitive friction, it fails.
+If the digest reduces mental overhead in under 2 minutes, it succeeds.
+
+---
+
+## 10) A0 Email-First Proof of Concept
+Phase A0 validates Secretary Mode using Gmail ingestion only.
+
+### 10.1 Scope
+- Pull important emails (initially: `is:important`)
+- Normalize threads into structured records
+- Generate Secretary Brief (summary + triage class + suggested reply if needed)
+- Present digest for human review
+- No execution until explicit approval
+
+### 10.2 Objective
+Prove that:
+- The system correctly distinguishes ACTION vs FYI/NOT_MINE
+- The user saves time by not re-reading full threads
+- The digest feels like a disciplined human secretary
+
+WhatsApp ingestion and scheduling are out of scope for A0.
+
+
+===== FILE: C:\dev\gas\TaskLess\DEV_TASKS.md =====
+# TaskLess — DEV_TASKS
+
+---
+
+## 1. Canonical Value Proposition
+
+TaskLess is a CRM that works for the user instead of forcing the user to work for the CRM.
+
+Traditional CRMs depend on manual entry, manual follow-up, and constant upkeep. TaskLess reverses this model by turning the user’s real communication activity into a living backend record.
+
+The core idea is simple:
+
+- incoming emails
+- incoming WhatsApp messages
+- scheduled events
+- future channels
+
+are imported into the backend through Google Apps Script and related integrations.
+
+An external AI layer, configurable by the user, acts as the user's AI secretary. It continuously checks inboxes, gathers context, and proposes suggested drafts or actions.
+
+The user does not need to manually operate the CRM. Instead:
+
+- TaskLess gathers communication history
+- AI reviews context
+- AI proposes next actions or reply drafts
+- the user either chooses a suggested option or writes directly
+- TaskLess executes through the correct backend channel
+
+The unique value proposition is not just reminders or automation. The unique value proposition is a living CRM that stays current by observing and processing the user’s real business communications.
+
+TaskLess may also support secondary automations such as reminders, sheet-driven actions, and workflow triggers, but the primary product is:
+
+**a CRM that works for you, with an AI secretary that reads context and helps you act.**
+
+---
+
+## 2. System Operating Model
+
+### 2.1 Ingestion
+TaskLess ingests communication and activity signals from:
+- WhatsApp
+- Gmail
+- Calendar
+- future business channels
+
+### 2.2 Context Layer
+The system stores and organizes activity so that AI can understand:
+- who the contact is
+- what happened recently
+- what the current thread or business context is
+- what the likely next action should be
+
+### 2.3 AI Secretary
+The AI secretary:
+- reads the latest context
+- proposes a draft or action
+- presents choices to the user
+- does not execute automatically unless the flow is explicitly approved
+
+### 2.4 Execution
+Approved actions are executed deterministically through backend systems such as:
+- WhatsApp messaging
+- email sending
+- calendar updates
+- sheet updates
+- CRM state changes
+
+### 2.5 Safety Principle
+Thinking is AI-driven.
+Execution is deterministic and system-controlled.
+
+---
+
+## 3. Current Sprint Focus
+
+Current focus is the WhatsApp Embedded Signup / onboarding POC.
+
+Goal:
+- successfully onboard a test WhatsApp number to the app
+- capture and verify onboarding outputs
+- confirm we can reliably obtain and store the identifiers needed for downstream messaging flows
+
+---
+
+## 4. What Has Been Established
+
+- TaskLess has its own dedicated repository separate from GLV.
+- PowerShell profile/menu workflow was updated to support project-specific selection.
+- Desktop and Termux are now treated as separate supported environments.
+- TaskLess repository can now be pushed from desktop and pulled from Termux.
+- We decided not to invest further right now in a general config helper abstraction.
+- For the current POC we prefer explicit, local property access where needed.
+- The phone is now ready for onboarding and shows the option to add a partner.
+- The immediate objective is to run a monitored onboarding attempt with logging.
+
+---
+
+## 5. Current Decisions
+
+- Do not optimize architecture before proving the onboarding POC.
+- Do not block progress on a generalized config/property helper.
+- Treat the user system token as the primary practical token for the POC.
+- Attempting to obtain an onboarding-derived user token is useful, but not critical for first success.
+- Capturing WhatsApp Business identifiers and phone identifiers is critical even if token exchange is incomplete.
+- If possible, capture identifiers separately so failure in access-code/token exchange does not prevent retaining the core onboarding outputs.
+
+---
+
+## 6. P0 — WhatsApp Embedded Signup POC
+
+- [ ] Confirm the current app system token exists and is available for testing
+- [ ] Verify the system token actually works against the expected Graph endpoint
+- [ ] Confirm the app secret stored in script properties matches the secret currently shown in Meta app settings
+- [ ] Confirm the worker and GAS handoff path still match the current onboarding implementation
+- [ ] Run one fresh onboarding attempt with worker logs open
+- [ ] Run the same attempt with GAS execution log open
+- [ ] Capture the first successful identifiers returned during onboarding
+- [ ] Confirm whether WABA ID is captured
+- [ ] Confirm whether phone number ID is captured
+- [ ] Confirm whether access code is captured
+- [ ] Confirm whether token exchange succeeds or fails
+- [ ] If token exchange fails, preserve all successfully captured IDs anyway
+- [ ] Document the exact failing phase if onboarding does not complete end-to-end
+
+---
+
+## 7. P1 — Identifier Capture and Persistence
+
+- [ ] Define the minimum identifier set required for first useful POC
+  - WABA ID
+  - phone number ID
+  - business/account linkage context
+- [ ] Decide where these values are persisted first
+  - worker log
+  - GAS log
+  - sheet
+  - script properties
+- [ ] Make identifier capture independent from optional token exchange wherever possible
+- [ ] Ensure logs clearly distinguish:
+  - SDK event received
+  - onboarding completed
+  - IDs captured
+  - access code captured
+  - token exchange attempted
+  - token exchange success/failure
+
+---
+
+## 8. P1 — Token Strategy
+
+- [ ] Verify the user system token path is available and usable for the POC
+- [ ] Treat onboarding access-code exchange as secondary, not blocking
+- [ ] Confirm which actions truly require exchanged user token versus existing system/user system token
+- [ ] Record a clear token strategy note inside the repo after verification
+
+---
+
+## 9. P2 — Cleanup After First Successful Trace
+
+- [ ] Clean up or deprecate outdated TaskLess legacy files if they conflict with DEV_TASKS.md
+- [ ] Decide whether BUSINESS_LOGIC.md and STATE.md remain historical only
+- [ ] Align README with the canonical value proposition
+- [ ] Add a concise onboarding trace summary to the repo after the first monitored run
+
+---
+
+## 10. Close Criteria For This Sprint
+
+- [ ] TaskLess DEV_TASKS.md reflects the real TaskLess product and sprint
+- [ ] App system token is confirmed working
+- [ ] Script secret is confirmed against Meta settings
+- [ ] One monitored onboarding run is completed
+- [ ] We know whether WABA ID and phone number ID were captured
+- [ ] We know whether access code and token exchange succeeded
+- [ ] If token exchange failed, the successful identifiers were still preserved
+- [ ] The first actual blocker is documented as a precise phase, not a guess
+
+
+===== FILE: C:\dev\gas\TaskLess\docs\ARCHITECTURE.md =====
+# Architecture (v0)
+
+Components:
+- WhatsApp Cloud API Webhook → Google Apps Script Web App
+- Parser → Plan Builder → Approve/Cancel Commands
+- Google Workspace Executors (Gmail/Calendar/Sheets)
+
+Rules:
+- Only messages containing deterministic markers trigger actions (future).
+- Outbound assistant text must never contain trigger markers.
+- Store idempotency keys (message_id) to prevent double-processing.
+- Always log raw webhook payload for audit/debug.
+
+Current scope:
+- Receive webhook (GET verify + POST events)
+- Append to WEBHOOK_LOG sheet (idempotent by message_id)
+- Provide COEX_checkPhoneNumberState() helper to query Graph phone health/state
+
+
+
+===== FILE: C:\dev\gas\TaskLess\patches\PATCH_BUSINESS_LOGIC_20260301_192606.txt =====
+<<<FILE BUSINESS_LOGIC.md>>>
+# TaskLess — Business Logic (Canonical Spec)
+
+## 1) Purpose
+TaskLess turns WhatsApp messages into **structured tasks**, asks for missing info, gets confirmation, and then **executes deterministically** (email, message, reminders, calendar, etc.) with auditability.
+
+## 2) Core Objects
+### 2.1 User
+- Identified by `userE164`
+- Has settings (timezone, defaults, allowed channels)
+
+### 2.2 Task
+A unit of work created from one or more user messages.
+- Has a lifecycle: OPEN → PENDING → (REVISION) → EXECUTED → ARCHIVE
+- Has an execution plan (proposal/action/result JSON fields)
+
+### 2.3 Execution
+A deterministic action run by GAS (send email, send WhatsApp, etc.), optionally scheduled.
+
+## 3) Message → Task Flow (Secretary Mode)
+### 3.1 Intake
+- Inbound message arrives (WhatsApp webhook or manual test insert)
+- System dedupes by message id / hash
+- System logs raw event to audit log
+
+### 3.2 Parse
+- Extract intent + entities into a draft object (title, kind, channel, targets)
+- Create/Upsert an OPEN task (by `refId`/`chunkId`)
+
+### 3.3 Ask / Clarify
+- If required fields missing, system asks targeted questions
+- Missing fields stored in `missingFieldsJson`
+- Each ask/answer updates task state + timestamps
+
+### 3.4 Proposal
+- Once enough info, system generates a proposal summary for user approval
+- Proposal stored in `proposalJson`
+- User can approve / revise / cancel
+
+### 3.5 Confirm → Execute
+- If approved, create an `actionJson` snapshot
+- Execution is deterministic (no AI at execution-time)
+- Result stored in `resultJson`, errors in `lastError`
+
+## 4) Scheduling (Planned)
+### 4.1 Scheduled Execution
+- When user approves an action, allow optional schedule datetime
+- If scheduled, task is queued for later execution; GAS sweeper runs periodically
+
+### 4.2 Sweep Strategy (Planned)
+- Time-based trigger runs every N minutes (start with 5)
+- Finds due items where scheduledAt <= now AND status is “approved/pending_exec”
+- Executes idempotently (guard by executionId)
+
+## 5) Reminders to Clients (Planned)
+### 5.1 REMINDERS sheet concept
+- Rows contain: contact reference + template name + AI-prepared JSON payload + schedule rules
+- GAS sweeper expands reminders into tasks/executions
+
+## 6) Audit & Safety
+- Every state change logs to AUDIT_LOG with ts, actor, eventType, payload
+- STOP / opt-out should immediately prevent further sends to that user/target
+
+## 7) Versioning Rules
+- BUSINESS_LOGIC.md is canonical (spec)
+- SCHEMA.json is derived from the running sheet export + spec
+- Code must not drift: changes are patch → git → push → clasp push
+
+## 8) Open Questions
+- Exact “task kind” taxonomy (email, WhatsApp, calendar, reminder)
+- Where scheduled items live (TASKS vs EXECUTIONS tab)
+
+<<<END>>>
+
+
+===== FILE: C:\dev\gas\TaskLess\patches\PATCH_STATE_FILES_20260301_154332.txt =====
+### FILE: STATE.md
+# TaskLess — Project State (Source of Truth)
+
+## 1) Rule: Source of Truth
+This file is the single source of truth for project state (replaces chat footers).
+If chat and this file conflict, this file wins.
+
+## 2) Current Goal (One-liner)
+Lock infra so schema + codebase + business logic stay in sync, then implement snapshot-based execution safely.
+
+## 3) Working Mode
+- Engineering Mode: GAS + Sheets + Git/Clasp + deterministic tests
+- Product Mode: business logic + flows + schema + safety model
+Rule: Only one mode per sprint.
+
+## 4) Workflow (Mandatory Order)
+1. Edit locally (preferred via patch files)
+2. git add -A
+3. git commit -m "<message>"
+4. git push
+5. clasp push
+Rule: avoid editing in GAS UI. If you do, immediately clasp pull + commit.
+
+## 5) Sheet Schema (Canonical)
+- Canonical schema artifact: SCHEMA.json
+- Export from GAS: TL_Sheets_ExportSchemaJson()
+- Apply/Verify schema from GAS: TL_Sheets_ApplySchema(...)
+
+## 6) Current Tabs (as of last export)
+See SCHEMA.json (authoritative).
+
+## 7) Sprint Log (append-only)
+- 2026-03-01: Added schema export + rebuild utilities; established patch-based infra.
+
+### END FILE
+
+### FILE: DEV_TASKS.md
+# TaskLess — Dev Tasks (Living List)
+
+## Now (Infra Lock)
+- [ ] Create SCHEMA.json from sheet export and commit it
+- [ ] Add a codebase inventory runner (file list + functions) and commit it
+- [ ] Add scheduling fields to TASKS schema (planned) and decide sweep strategy
+- [ ] Add REMINDERS sheet stub schema (planned)
+
+## Next (Phase-1 Engine Migration)
+- [ ] Align tabs to Phase-1 spec (SETTINGS, CONTACTS, COMMUNICATION_LOG, TASKS, EXECUTIONS, DEPENDENT_ACTIONS, SYSTEM_LOG)
+- [ ] Implement digest mapping stored durably
+- [ ] Implement execution snapshots + invalidation (idempotent)
+
+## Parking Lot
+- [ ] .gitattributes newline normalization
+- [ ] Optional PS menu command: sync "msg" (pull->commit->push->clasp push)
+
+### END FILE
+
+### FILE: BUSINESS_LOGIC.md
+# TaskLess — Secretary Mode Business Logic (Numbered Spec)
+
+## 1.0 Phase 1 Build Spec
+This file mirrors the numbered spec agreed in chat.
+Edits must preserve numbering for revision-friendly diffs.
+
+## 1.1 Goal
+Build a Google Apps Script + Google Sheets “Secretary Mode” system...
+(Keep the full spec here; this is a placeholder header.)
+
+## 1.2 Core Invariants
+AI never executes...
+(Keep full spec here.)
+
+## 1.3 External Inputs Supported
+Text + Voice...
+(Keep full spec here.)
+
+## 2.0 Spreadsheet Tabs and Column Schemas
+(Keep full spec here.)
+
+## 3.0 Apps Script Core Functions
+(Keep full spec here.)
+
+## 4.0 Operational Wiring
+(Keep full spec here.)
+
+## 5.0 Testing Plan
+(Keep full spec here.)
+
+## 6.0 Completion Criteria
+(Keep full spec here.)
+
+### END FILE
+
+
+===== FILE: C:\dev\gas\TaskLess\patches\PATCH_STATE_FILES_20260301_154550.txt =====
+<<<FILE STATE.md>>>
+# TaskLess — Project State (Source of Truth)
+
+## 1) Rule: Source of Truth
+This file is the single source of truth for project state (replaces chat footers).
+If chat and this file conflict, this file wins.
+
+## 2) Current Goal (One-liner)
+Lock infra so schema + codebase + business logic stay in sync, then implement snapshot-based execution safely.
+
+## 3) Working Mode
+- Engineering Mode: GAS + Sheets + Git/Clasp + deterministic tests
+- Product Mode: business logic + flows + schema + safety model
+Rule: Only one mode per sprint.
+
+## 4) Workflow (Mandatory Order)
+1. Edit locally (preferred via patch files)
+2. git add -A
+3. git commit -m "<message>"
+4. git push
+5. clasp push
+Rule: avoid editing in GAS UI. If you do, immediately clasp pull + commit.
+
+## 5) Sheet Schema (Canonical)
+- Canonical schema artifact: SCHEMA.json
+- Export from GAS: TL_Sheets_ExportSchemaJson()
+- Apply/Verify schema from GAS: TL_Sheets_ApplySchema(...)
+
+## 6) Current Tabs (authoritative)
+See SCHEMA.json.
+
+## 7) Sprint Log (append-only)
+- 2026-03-01: Added schema export + rebuild utilities; established patch-based infra.
+<<<END>>>
+
+<<<FILE DEV_TASKS.md>>>
+# TaskLess — Dev Tasks (Living List)
+
+## Now (Infra Lock)
+- [ ] Create SCHEMA.json from sheet export and commit it
+- [ ] Add a codebase inventory runner (file list + functions) and commit it
+- [ ] Add scheduling fields to TASKS schema (planned) and decide sweep strategy
+- [ ] Add REMINDERS sheet stub schema (planned)
+
+## Next (Phase-1 Engine Migration)
+- [ ] Align tabs to Phase-1 spec (SETTINGS, CONTACTS, COMMUNICATION_LOG, TASKS, EXECUTIONS, DEPENDENT_ACTIONS, SYSTEM_LOG)
+- [ ] Implement digest mapping stored durably
+- [ ] Implement execution snapshots + invalidation (idempotent)
+
+## Parking Lot
+- [ ] .gitattributes newline normalization
+- [ ] Optional PS menu command: sync "msg" (pull->commit->push->clasp push)
+<<<END>>>
+
+<<<FILE BUSINESS_LOGIC.md>>>
+# TaskLess — Secretary Mode Business Logic (Numbered Spec)
+
+## 1.0 Phase 1 Build Spec
+This file mirrors the numbered spec agreed in chat.
+Edits must preserve numbering for revision-friendly diffs.
+
+> TODO: Paste the full numbered spec here (we’ll do it in the next patch).
+<<<END>>>
+
+
+===== FILE: C:\dev\gas\TaskLess\rag_engine_owner_trace.sql =====
+-- Trace all costs that are tagged as RAG Engine billing,
+-- and show which resource_global_name / service / sku is responsible.
+SELECT
+  project.id AS project_id,
+  project.number AS project_number,
+  service.description AS service_desc,
+  sku.description AS sku_desc,
+  location.location AS loc,
+  resource.global_name AS resource_global_name,
+  resource.name AS resource_name,
+  SUM(cost) AS total_cost
+FROM dinai-tenant-internal-001.billing_export.gcp_billing_export_resource_v1_01A2B4_00B52F_8E5BC4,
+UNNEST(system_labels) sl
+WHERE project.id = 'onelegal-ai'
+  AND sl.key = 'spanner.googleapis.com/is_rag_engine_billing'
+  AND sl.value = 'True'
+GROUP BY 1,2,3,4,5,6,7
+ORDER BY total_cost DESC;
+
+
+===== FILE: C:\dev\gas\TaskLess\README.md =====
+# TaskLess
+
+Voice → AI → Plan → Confirm → Execute (WhatsApp-first).
+
+
+
+===== FILE: C:\dev\gas\TaskLess\SCHEMA.json =====
+{
+  "version": "sheet-export-1",
+  "exported_iso": "2026-03-01T19:02:51.453Z",
+  "sheet_id": "",
+  "tabs": [
+    {
+      "tab": "TASKS",
+      "headers": ["createdAt","updatedAt","taskId","batchId","userE164","channel","title","status","missingFieldsJson","proposalJson","actionJson","resultJson","lastPresentedAt","lastError"]
+    },
+    {
+      "tab": "OPEN",
+      "headers": ["createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel","status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"]
+    },
+    {
+      "tab": "PENDING",
+      "headers": ["createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel","status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"]
+    },
+    {
+      "tab": "REVISION",
+      "headers": ["createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel","status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"]
+    },
+    {
+      "tab": "ARCHIVE",
+      "headers": ["createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel","status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"]
+    },
+    {
+      "tab": "COMMANDS_INBOX",
+      "headers": ["ts","userE164","text","batchVersion","payloadJson"]
+    },
+    {
+      "tab": "CONTACTS",
+      "headers": ["createdAt","updatedAt","contactId","displayName","aliasesCsv","e164","email","notes"]
+    },
+    {
+      "tab": "SETTINGS",
+      "headers": ["key","value"]
+    },
+    {
+      "tab": "AUDIT_LOG",
+      "headers": ["ts","actor","eventType","payloadJson","taskId","batchId","payloadJson"]
+    }
+  ]
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\scripts\apply-patch.ps1 =====
+param(
+  [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+  [switch]$FromClipboard,
+  [string]$PatchFile,
+  [switch]$DryRun
+)
+
+$ErrorActionPreference = "Stop"
+
+function Read-PatchText {
+  if ($PatchFile) { return (Get-Content -Raw -Path $PatchFile) }
+  if ($FromClipboard) { return (Get-Clipboard -Raw) }
+  throw "Provide -FromClipboard or -PatchFile <path>"
+}
+
+function Normalize-RelPath([string]$p) {
+  if (-not $p) { $p = "" }; $p = $p.Trim()
+  if (-not $p) { throw "Empty file path in patch bundle." }
+  $p = $p -replace "/","\"
+  if ($p.StartsWith("\")) { $p = $p.TrimStart("\") }
+  if ($p -match '^[A-Za-z]:\\') { throw "Patch path must be repo-relative, got absolute: $p" }
+  if ($p -match "\.\.") { throw "Patch path may not contain .. : $p" }
+  return $p
+}
+
+$txt = Read-PatchText
+
+# Patch bundle format:
+# <<<FILE relative\path.ext>>>
+# <full file contents...>
+# <<<END>>>
+$re = [regex]'(?s)<<<FILE\s+([^\r\n>]+)\s*>>>(.*?)<<<END>>>'
+$matches = $re.Matches($txt)
+
+if ($matches.Count -eq 0) {
+  throw "No files found. Expected blocks like: <<<FILE path>>> ... <<<END>>>"
+}
+
+$plan = @()
+foreach ($m in $matches) {
+  $rel = Normalize-RelPath $m.Groups[1].Value
+  $content = $m.Groups[2].Value
+
+  # Preserve exact content, but remove one leading newline if present (common formatting artifact)
+  if ($content.StartsWith("`r`n")) { $content = $content.Substring(2) }
+  elseif ($content.StartsWith("`n")) { $content = $content.Substring(1) }
+
+  $abs = Join-Path $RepoRoot $rel
+  $dir = Split-Path -Parent $abs
+  $plan += [pscustomobject]@{ Rel=$rel; Abs=$abs; Dir=$dir; Bytes=([Text.Encoding]::UTF8.GetByteCount($content)); Content=$content }
+}
+
+# Safety: ensure all target files are under repo root
+$repoFull = (Resolve-Path $RepoRoot).Path.TrimEnd("\")
+foreach ($p in $plan) {
+  $absFull = (Resolve-Path -LiteralPath $p.Dir -ErrorAction SilentlyContinue)
+  if (-not $absFull) { } # dir may not exist yet
+  $target = [IO.Path]::GetFullPath($p.Abs)
+  if (-not ($target.StartsWith($repoFull + "\", [System.StringComparison]::OrdinalIgnoreCase) -or $target -eq $repoFull)) {
+    throw "Unsafe target outside repo root: $($p.Rel) => $target"
+  }
+}
+
+Write-Host "Patch plan ($($plan.Count) files) against repo: $RepoRoot"
+$plan | Select-Object Rel,Bytes | Format-Table -AutoSize | Out-String | Write-Host
+
+if ($DryRun) {
+  Write-Host "DryRun: no files written."
+  exit 0
+}
+
+foreach ($p in $plan) {
+  if (!(Test-Path -LiteralPath $p.Dir)) { New-Item -ItemType Directory -Path $p.Dir -Force | Out-Null }
+  Set-Content -LiteralPath $p.Abs -Value $p.Content -Encoding UTF8
+}
+
+Write-Host "Patch applied."
+
+
+
+
+===== FILE: C:\dev\gas\TaskLess\scripts\dump-files.ps1 =====
+param(
+  [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+  [string]$OutFile = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..")).Path "_FILES_DUMP.txt")
+)
+
+$ErrorActionPreference="Stop"
+
+$include = @("*.md","*.gs","*.js","*.json","*.ps1","*.txt","*.html","*.css")
+
+$files = Get-ChildItem -Path $Root -Recurse -File |
+  Where-Object {
+    $name = $_.Name.ToLowerInvariant()
+    ($include | ForEach-Object { $name -like $_ }) -contains $true
+  } |
+  Where-Object {
+    $_.FullName -notmatch "\\\.git\\" -and
+    $_.FullName -notmatch "\\node_modules\\" -and
+    $_.Name -ne "_FILES_DUMP.txt"
+  } |
+  Sort-Object FullName
+
+$sb = New-Object System.Text.StringBuilder
+$null = $sb.AppendLine("## TaskLess file dump  " + (Get-Date).ToString("s"))
+$null = $sb.AppendLine("root: " + $Root)
+$null = $sb.AppendLine("")
+
+foreach ($f in $files) {
+  $rel = $f.FullName.Substring($Root.Length).TrimStart("\")
+  $null = $sb.AppendLine("==============================")
+  $null = $sb.AppendLine("FILE: " + $rel)
+  $null = $sb.AppendLine("==============================")
+  $null = $sb.AppendLine((Get-Content -Raw -Path $f.FullName))
+  $null = $sb.AppendLine("")
+}
+
+$sb.ToString() | Set-Content -Encoding UTF8 -Path $OutFile
+Write-Host "Wrote: $OutFile"
+
+
+===== FILE: C:\dev\gas\TaskLess\scripts\pack.ps1 =====
+param(
+  [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+  [int]$TreeDepth = 4,
+  [int]$MaxFileChars = 12000
+)
+
+$ErrorActionPreference="Stop"
+
+function SafeRead([string]$path, [int]$limit) {
+  if (!(Test-Path -LiteralPath $path)) { return "[MISSING] $path" }
+  $t = Get-Content -Raw -LiteralPath $path
+  if ($t.Length -le $limit) { return $t }
+  return $t.Substring(0,$limit) + "`r`n...[TRUNCATED]..."
+}
+
+$git = ""
+try { $git = (git rev-parse HEAD 2>$null).Trim() } catch { $git = "[no-git]" }
+
+$tree = ""
+try {
+  # limited depth tree (fast)
+  $tree = (Get-ChildItem -LiteralPath $Root -Recurse -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notmatch "\\\.git\\" -and $_.FullName -notmatch "\\node_modules\\" } |
+    ForEach-Object {
+      $rel = $_.FullName.Substring($Root.Length).TrimStart("\")
+      $depth = ($rel -split "\\").Count - 1
+      if ($depth -le $TreeDepth) { $rel }
+    } |
+    Sort-Object |
+    Out-String).Trim()
+} catch {
+  $tree = "[tree failed] " + $_.Exception.Message
+}
+
+$filesDump = Join-Path $Root "_FILES_DUMP.txt"
+$dumpHint = if (Test-Path -LiteralPath $filesDump) { "Exists: $filesDump" } else { "Missing: $filesDump (run scripts\dump-files.ps1)" }
+
+$statePath  = Join-Path $Root "STATE.md"
+$tasksPath  = Join-Path $Root "DEV_TASKS.md"
+$logicPath  = Join-Path $Root "BUSINESS_LOGIC.md"
+$schemaPath = Join-Path $Root "SCHEMA.json"
+
+$pack = @()
+$pack += "===== TASKLESS PACK ====="
+$pack += ("Generated: " + (Get-Date).ToString("s"))
+$pack += ("RepoRoot: " + $Root)
+$pack += ("GitHead: " + $git)
+$pack += ""
+$pack += "----- TREE (depth " + $TreeDepth + ") -----"
+$pack += $tree
+$pack += ""
+$pack += "----- KEY FILES (truncated) -----"
+$pack += "## STATE.md"
+$pack += (SafeRead $statePath $MaxFileChars)
+$pack += ""
+$pack += "## DEV_TASKS.md"
+$pack += (SafeRead $tasksPath $MaxFileChars)
+$pack += ""
+$pack += "## BUSINESS_LOGIC.md"
+$pack += (SafeRead $logicPath $MaxFileChars)
+$pack += ""
+$pack += "## SCHEMA.json"
+$pack += (SafeRead $schemaPath $MaxFileChars)
+$pack += ""
+$pack += "----- FILE DUMP -----"
+$pack += $dumpHint
+$pack += "TIP: paste _FILES_DUMP.txt separately only if needed (it can be huge)."
+$pack += ""
+$pack += "----- NEXT DEBUG HOOKS (GAS) -----"
+$pack += "Run in Apps Script editor (when utilities exist):"
+$pack += "- TL_Code_Inventory()"
+$pack += "- TL_Sheets_ExportSchemaJson()"
+$pack += "- TL_Sheets_ListTabsAndHeaders()"
+$pack += ""
+$pack += "===== END PACK ====="
+
+($pack -join "`r`n") | Set-Clipboard
+Write-Host "PACK copied to clipboard."
+
+
+===== FILE: C:\dev\gas\TaskLess\scripts\README.md =====
+# scripts
+
+This folder is for helper scripts / runbooks.
+
+- dump-files.ps1: emits a single combined text snapshot of the repo files
+
+
+
+===== FILE: C:\dev\gas\TaskLess\spanner_raginstance_labels.sql =====
+WITH base AS (
+  SELECT
+    usage_start_time,
+    usage_end_time,
+    project.id            AS project_id,
+    project.number        AS project_number,
+    service.description   AS service_desc,
+    sku.description       AS sku_desc,
+    location.location     AS loc,
+    resource.global_name  AS resource_global_name,
+    labels,
+    system_labels,
+    cost
+  FROM dinai-tenant-internal-001.billing_export.gcp_billing_export_resource_v1_01A2B4_00B52F_8E5BC4
+  WHERE project.id = 'onelegal-ai'
+    AND service.description = 'Cloud Spanner'
+    AND resource.global_name = '//spanner.googleapis.com/projects/lb357b7f9d0af2a09p-tp/instances/raginstance'
+)
+SELECT
+  'LABEL' AS label_kind,
+  loc,
+  sku_desc,
+  l.key   AS label_key,
+  l.value AS label_value,
+  SUM(cost) AS total_cost
+FROM base, UNNEST(labels) l
+GROUP BY 1,2,3,4,5
+
+UNION ALL
+
+SELECT
+  'SYSTEM_LABEL' AS label_kind,
+  loc,
+  sku_desc,
+  sl.key   AS label_key,
+  sl.value AS label_value,
+  SUM(cost) AS total_cost
+FROM base, UNNEST(system_labels) sl
+GROUP BY 1,2,3,4,5
+
+ORDER BY total_cost DESC, label_kind, label_key;
+
+
+===== FILE: C:\dev\gas\TaskLess\src\spec\TL_MARKERS.md =====
+# TL Markers
+
+Allowed markers (machine-only):
+- [TL:TRIGGER:VOICE]
+- [TL:TRIGGER:TEXT]
+- [TL:CMD:APPROVE:<REF>]
+- [TL:CMD:CANCEL:<REF>]
+- [TL:CMD:EDIT:<REF>]
+
+Rules:
+1) Only inbound messages containing [TL:TRIGGER:*] or [TL:CMD:*] are actionable.
+2) The system must never output [TL:TRIGGER:*] or [TL:CMD:*] in normal user-facing responses.
+3) Always log: ref_id, message_id, from, type, parsed_text, action_taken, result.
+
+
+
+===== FILE: C:\dev\gas\TaskLess\STATE.md =====
+# TaskLess — Project State (Source of Truth)
+
+## 1) Rule: Source of Truth
+This file is the single source of truth for project state (replaces chat footers).
+If chat and this file conflict, this file wins.
+
+## 2) Current Goal (One-liner)
+Lock infra so schema + codebase + business logic stay in sync, then implement snapshot-based execution safely.
+
+## 3) Working Mode
+- Engineering Mode: GAS + Sheets + Git/Clasp + deterministic tests
+- Product Mode: business logic + flows + schema + safety model
+Rule: Only one mode per sprint.
+
+## 4) Workflow (Mandatory Order)
+1. Edit locally (preferred via patch files)
+2. git add -A
+3. git commit -m "<message>"
+4. git push
+5. clasp push
+Rule: avoid editing in GAS UI. If you do, immediately clasp pull + commit.
+
+## 5) Sheet Schema (Canonical)
+- Canonical schema artifact: SCHEMA.json
+- Export from GAS: TL_Sheets_ExportSchemaJson()
+- Apply/Verify schema from GAS: TL_Sheets_ApplySchema(...)
+
+## 6) Current Tabs (authoritative)
+See SCHEMA.json.
+
+## 7) Sprint Log (append-only)
+- 2026-03-01: Added schema export + rebuild utilities; established patch-based infra.
+
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_Audit.gs =====
+/**
+ * TL_Audit - append-only audit log for bounded sheet POC
+ * Tab: AUDIT_LOG
+ * Columns: ts, actor, eventType, payloadJson
+ */
+
+function TL_Audit_append_(actor, eventType, payloadObj) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName("AUDIT_LOG");
+  if (!sh) sh = ss.insertSheet("AUDIT_LOG");
+
+  // ensure headers
+  var headers = ["ts","actor","eventType","payloadJson"];
+  var rng = sh.getRange(1, 1, 1, headers.length);
+  var cur = rng.getValues()[0];
+  var needs = false;
+  for (var i = 0; i < headers.length; i++) {
+    if (String(cur[i] || "") !== String(headers[i] || "")) { needs = true; break; }
+  }
+  if (needs) {
+    rng.setValues([headers]);
+    sh.setFrozenRows(1);
+  }
+
+  sh.appendRow([
+    new Date().toISOString(),
+    String(actor || ""),
+    String(eventType || ""),
+    JSON.stringify(payloadObj || {})
+  ]);
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_Config.gs =====
+/**
+ * TL_Config - Script Properties helper + SETTINGS sheet helpers (POC)
+ * - ScriptProperties: secrets/config (tokens, ids)
+ * - SETTINGS tab: non-secret knobs (controller mode, owner number, etc.)
+ *
+ * IMPORTANT:
+ * - SETTINGS values are "digits-only" for WhatsApp numbers (no +).
+ * - Bootstrap only ADDS missing keys; it NEVER overwrites existing user values.
+ */
+
+function TL_Config_get_(key, fallback) {
+  const v = PropertiesService.getScriptProperties().getProperty(key);
+  return (v === null || v === undefined || v === "") ? fallback : v;
+}
+
+function TL_Config_set_(key, value) {
+  PropertiesService.getScriptProperties().setProperty(key, String(value));
+}
+
+/** Digits-only normalization (WhatsApp webhook "from" is digits-only). */
+function TL_Normalize_digits_(v) {
+  return String(v || "").replace(/[^\d]/g, "").trim();
+}
+
+/** Returns the bound spreadsheet SETTINGS sheet (creates sheet + headers if missing). */
+function TL_Settings_getSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet(); // bound sheet
+  const tabName = TL_Config_get_("TL_CFG_TAB_SETTINGS", "SETTINGS");
+
+  let sh = ss.getSheetByName(tabName);
+  if (!sh) sh = ss.insertSheet(tabName);
+
+  // Ensure header row exists: ["key","value"]
+  const lastRow = sh.getLastRow();
+  const lastCol = Math.max(1, sh.getLastColumn());
+  const firstRow = sh.getRange(1, 1, 1, lastCol).getValues()[0] || [];
+  const hasHeader = (firstRow[0] === "key" && firstRow[1] === "value");
+
+  if (lastRow === 0 || !hasHeader) {
+    sh.clear();
+    sh.getRange(1, 1, 1, 2).setValues([["key", "value"]]);
+    sh.setFrozenRows(1);
+  }
+
+  return sh;
+}
+
+/**
+ * Bootstrap REQUIRED SETTINGS keys (adds missing only; never overwrite).
+ * Call this after creating a new sheet / or before wiring logic.
+ */
+function TL_Settings_bootstrapRequired_() {
+  const sh = TL_Settings_getSheet_();
+
+  const required = [
+    // Controller flags
+    ["TL_CTRL_DIRECT_MODE", "NO"],            // YES/NO
+    ["TL_CTRL_OWNER_E164", ""],               // digits-only (no +)
+    // Future (kept as placeholders so schema is ready)
+    ["TL_CTRL_ROUTER_MODE", "NO"],            // YES/NO (future)
+    ["TL_CTRL_ROUTER_E164", ""],              // digits-only (future)
+    // Environment knobs (future safe defaults)
+    ["TL_ENV_MODE", "DEV"]                    // DEV/PROD
+  ];
+
+  const lastRow = sh.getLastRow();
+  const existing = {};
+
+  if (lastRow >= 2) {
+    const vals = sh.getRange(2, 1, lastRow - 1, 2).getValues();
+    vals.forEach(r => {
+      const k = String(r[0] || "").trim();
+      if (k) existing[k] = true;
+    });
+  }
+
+  const toAppend = required
+    .filter(pair => !existing[String(pair[0])])
+    .map(pair => [String(pair[0]), String(pair[1])]);
+
+  if (toAppend.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, toAppend.length, 2).setValues(toAppend);
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  return {
+    ok: true,
+    added: toAppend.map(r => r[0]),
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tab: sh.getName()
+  };
+}
+
+/** Read SETTINGS into { key: value } object (keys preserved; values trimmed). */
+function TL_Settings_getAll_() {
+  const sh = TL_Settings_getSheet_();
+  const lastRow = sh.getLastRow();
+  const out = {};
+
+  if (lastRow < 2) return out;
+
+  const vals = sh.getRange(2, 1, lastRow - 1, 2).getValues();
+  vals.forEach(r => {
+    const k = String(r[0] || "").trim();
+    if (!k) return;
+    out[k] = String(r[1] || "").trim();
+  });
+
+  return out;
+}
+
+/**
+ * Validate SETTINGS consistency (throws actionable errors).
+ * Use this before enabling real routing/execution logic.
+ */
+function TL_Settings_validate_() {
+  const s = TL_Settings_getAll_();
+
+  const direct = String(s["TL_CTRL_DIRECT_MODE"] || "NO").toUpperCase();
+  const owner = TL_Normalize_digits_(s["TL_CTRL_OWNER_E164"] || "");
+
+  if (direct === "YES" && !owner) {
+    throw new Error("SETTINGS invalid: TL_CTRL_DIRECT_MODE=YES but TL_CTRL_OWNER_E164 is empty (must be digits-only, e.g. 97250...)");
+  }
+
+  const routerMode = String(s["TL_CTRL_ROUTER_MODE"] || "NO").toUpperCase();
+  const router = TL_Normalize_digits_(s["TL_CTRL_ROUTER_E164"] || "");
+  if (routerMode === "YES" && !router) {
+    throw new Error("SETTINGS invalid: TL_CTRL_ROUTER_MODE=YES but TL_CTRL_ROUTER_E164 is empty (digits-only)");
+  }
+
+  return { ok: true, directMode: direct, ownerE164: owner, routerMode: routerMode, routerE164: router };
+}
+
+/**
+ * Export compact JSON for copy/paste into chat (so AI can align wiring).
+ * Includes spreadsheet identity, tabs list, and SETTINGS map.
+ */
+function TL_Settings_exportJson_(rowLimitPerTab) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const tabs = ss.getSheets().map(sh => sh.getName());
+
+  const out = {
+    ok: true,
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tabs: tabs,
+    settings: TL_Settings_getAll_()
+  };
+
+  // Optional: lightweight sanity peek into key tabs (no heavy dumps)
+  const limit = Number(rowLimitPerTab || 0);
+  if (limit > 0) {
+    out.peek = {};
+    tabs.forEach(name => {
+      const sh = ss.getSheetByName(name);
+      if (!sh) return;
+      const lr = sh.getLastRow();
+      const lc = sh.getLastColumn();
+      const rows = Math.min(lr, limit);
+      if (rows <= 0 || lc <= 0) { out.peek[name] = { rows: 0, cols: 0, values: [] }; return; }
+      out.peek[name] = { rows: rows, cols: lc, values: sh.getRange(1, 1, rows, lc).getValues() };
+    });
+  }
+
+  return JSON.stringify(out);
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_Dedupe.gs =====
+/**
+ * TL_Dedupe - prevent double processing due to webhook retries.
+ */
+function TL_Dedupe_seen_(msgId) {
+  const props = PropertiesService.getScriptProperties();
+  const key = "TL_SEEN_" + msgId;
+  if (props.getProperty(key)) return true;
+  props.setProperty(key, String(Date.now()));
+
+  // light cleanup every ~30 messages
+  const n = Number(props.getProperty("TL_SEEN_CLEAN_COUNTER") || "0") + 1;
+  props.setProperty("TL_SEEN_CLEAN_COUNTER", String(n));
+  if (n % 30 === 0) TL_Dedupe_cleanup_();
+  return false;
+}
+
+function TL_Dedupe_cleanup_() {
+  const props = PropertiesService.getScriptProperties();
+  const all = props.getProperties();
+  const now = Date.now();
+  const ttlMs = 24 * 60 * 60 * 1000;
+
+  Object.keys(all).forEach(k => {
+    if (!k.startsWith("TL_SEEN_")) return;
+    if (k === "TL_SEEN_CLEAN_COUNTER") return;
+    const ts = Number(all[k] || "0");
+    if (ts && (now - ts) > ttlMs) props.deleteProperty(k);
+  });
+}
+
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_Digest.gs =====
+
+===== FILE: C:\dev\gas\TaskLess\TL_Digest.gs.bak =====
+/**
+ * TL_Digest - A0 digest builder (Email-only, no execution)
+ * Produces a WhatsApp-ready "Secretary Brief" text from OPEN rows.
+ */
+
+function TL_Digest_buildEmailSecretaryBrief_A0(opts) {
+  const options = opts || {};
+  const maxItems = Number(options.maxItems || 8);
+
+  const ss = TL_Sheets_getStore_();
+  const sh = ss.getSheetByName(TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"));
+  if (!sh) return { ok:false, error:"OPEN tab not found" };
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return { ok:true, text:"Secretary Brief — 0 items\n(OPEN is empty)" };
+
+  const values = sh.getRange(1,1,lastRow,sh.getLastColumn()).getValues();
+  const headers = values[0];
+
+  const idx = {};
+  headers.forEach((h,i)=> idx[h]=i);
+
+  // newest first by createdAt (string ISO)
+  const rows = values.slice(1)
+    .filter(r => String(r[idx.channel]||"") === "email" && String(r[idx.status]||"") === "OPEN")
+    .sort((a,b)=> String(b[idx.createdAt]||"").localeCompare(String(a[idx.createdAt]||"")))
+    .slice(0, maxItems);
+
+  if (!rows.length) return { ok:true, text:"Secretary Brief — 0 email items\n(No OPEN email rows found)" };
+
+  const lines = [];
+  lines.push(`Secretary Brief — ${rows.length} Email Items`);
+  lines.push("");
+
+  for (let i=0;i<rows.length;i++) {
+    const r = rows[i];
+    const title = String(r[idx.title]||"");
+    const payloadJson = String(r[idx.draftOrPromptJson]||"{}");
+    let payload = {};
+    try { payload = JSON.parse(payloadJson); } catch(e) { payload = {}; }
+
+    const triage = TL_Digest_triageEmail_(payload);
+    const oneLine = TL_Digest_summarizeEmail_(payload);
+
+    lines.push(`${i+1}) [${triage}] ${oneLine}`);
+    lines.push(`   Subject: ${title}`);
+
+    if (payload && payload.permalink) lines.push(`   Link: ${payload.permalink}`);
+
+    const suggestion = TL_Digest_suggestNextStep_(triage, payload);
+    if (suggestion) lines.push(`   Suggested: ${suggestion}`);
+
+    lines.push("");
+  }
+
+  lines.push("Reply with: 1,2 to mark as handled | 'open 1' | 'ignore 2'");
+  return { ok:true, text: lines.join("\n") };
+}
+
+function TL_Digest_triageEmail_(payload) {
+  const subject = String(payload.subject||"");
+  const flat = String(payload.flattenedText||"");
+  const fromLine = (flat.match(/FROM:\s*(.*)/i)||[])[1] || "";
+  const toLine = (flat.match(/TO:\s*(.*)/i)||[])[1] || "";
+
+  const from = fromLine.toLowerCase();
+  const subj = subject.toLowerCase();
+
+  // NOT_MINE heuristic (Hebrew greeting to someone else)
+  if (flat.includes("היי רמי") || flat.includes("הי רמי")) return "NOT_MINE";
+
+  // FYI heuristics
+  if (from.includes("noreply") || from.includes("no-reply")) return "FYI";
+  if (subj.includes("newsletter") || subj.includes("update") || subj.includes("notification")) return "FYI";
+  if (subj.includes("receipt") || subj.includes("invoice")) return "FYI";
+
+  // ACTION heuristic: direct ask / question
+  if (flat.includes("?")) return "ACTION";
+  if (/please|can you|confirm|approve|action advised|action required/i.test(flat)) {
+    // If it’s "action advised" from a system sender, still likely FYI
+    if (from.includes("google") || from.includes("microsoft") || from.includes("noreply") || from.includes("no-reply")) return "FYI";
+    return "ACTION";
+  }
+
+  // If you're only in CC and not directly addressed, default FYI (best effort)
+  if (toLine && !toLine.toLowerCase().includes("reuven")) return "FYI";
+
+  return "FYI";
+}
+
+function TL_Digest_summarizeEmail_(payload) {
+  const subject = String(payload.subject||"(no subject)");
+  const fromLine = (String(payload.flattenedText||"").match(/FROM:\s*(.*)/i)||[])[1] || "";
+  const from = fromLine ? fromLine.replace(/<.*?>/g,"").trim() : "Unknown sender";
+
+  // ultra-compact: "Sender — subject"
+  return `${from} — ${subject}`;
+}
+
+function TL_Digest_suggestNextStep_(triage, payload) {
+  if (triage === "FYI") return "No action needed. Archive/ignore.";
+  if (triage === "NOT_MINE") return "No action. Optionally forward to intended recipient.";
+  if (triage === "WAITING") return "No action now. Set follow-up reminder.";
+  if (triage === "SCHEDULE") return "Propose times + prepare calendar hold (needs confirmation).";
+  if (triage === "ACTION") return "Draft a short reply for approval (next phase).";
+  return "";
+}
+
+function TL_Digest_POC_RunEmailBrief() {
+  return TL_Digest_buildEmailSecretaryBrief_A0({ maxItems: 8 });
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_Gmail.gs =====
+/**
+ * TL_Gmail - A0 Gmail ingestion (Important threads -> OPEN tab)
+ *
+ * Writes to OPEN as "tasks" with:
+ * - channel: "email"
+ * - kind: "email_thread"
+ * - refId: "gmail:thread:<threadId>" (idempotent key)
+ * - chunkId: latest message id (best-effort)
+ * - draftOrPromptJson: compact thread payload for later AI proposal layer
+ *
+ * NOTE: This is intake only. No AI. No execution.
+ */
+
+function TL_Gmail_defaultQuery_() {
+  // Later: read from SETTINGS / config keys.
+  return 'is:important newer_than:14d -category:promotions -category:social';
+}
+
+function TL_Gmail_pullImportantThreads_A0(opts) {
+  const options = opts || {};
+  const query = String(options.query || TL_Gmail_defaultQuery_());
+  const maxThreads = Number(options.maxThreads || 20);
+  const maxMessagesPerThread = Number(options.maxMessagesPerThread || 20);
+  const maxCharsPerMessage = Number(options.maxCharsPerMessage || 8000);
+  const maxTotalChars = Number(options.maxTotalChars || 20000);
+
+  const nowIso = new Date().toISOString();
+  const tabOpen = TL_Config_get_('TL_CFG_TAB_OPEN', 'OPEN');
+
+  const threads = GmailApp.search(query, 0, maxThreads);
+
+  let upserted = 0;
+  const touched = [];
+
+  for (let i = 0; i < threads.length; i++) {
+    const th = threads[i];
+    const threadId = String(th.getId());
+    const refId = 'gmail:thread:' + threadId;
+
+    const subject = String(th.getFirstMessageSubject() || '(no subject)');
+    const messageCount = th.getMessageCount();
+
+    const msgsAll = th.getMessages();
+    const msgs = msgsAll.slice(Math.max(0, msgsAll.length - maxMessagesPerThread)); // last N messages only
+    const latestMsg = msgsAll.length ? msgsAll[msgsAll.length - 1] : null;
+
+    const latestMsgId = latestMsg ? String(latestMsg.getId()) : '';
+    const latestMsgDateIso = latestMsg ? latestMsg.getDate().toISOString() : '';
+
+    const permalink = 'https://mail.google.com/mail/u/0/#inbox/' + threadId;
+
+    const flat = TL_Gmail_flattenThread_(msgs, maxCharsPerMessage, maxTotalChars);
+
+    // Payload for later AI proposal layer (Secretary Brief)
+    const payload = {
+      source: 'gmail',
+      threadId,
+      permalink,
+      query,
+      subject,
+      messageCount,
+      latestMsgId,
+      latestMsgDateIso,
+      flattenedText: flat.text,
+      participants: flat.participants,
+      truncated: flat.truncated,
+      limits: {
+        maxThreads,
+        maxMessagesPerThread,
+        maxCharsPerMessage,
+        maxTotalChars
+      }
+    };
+
+    // Store into OPEN using existing schema
+    const rowObj = {
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      userE164: '',               // A0: email intake not tied to WhatsApp user yet
+      refId: refId,
+      chunkId: latestMsgId,
+      title: subject,
+      kind: 'email_thread',
+      channel: 'email',
+      status: 'OPEN',
+      askedAt: '',
+      answeredAt: '',
+      executedAt: '',
+      draftOrPromptJson: JSON.stringify(payload),
+      lastAction: 'GMAIL_INGEST',
+      lastActionAt: nowIso
+    };
+
+    TL_Sheets_upsertTask_(tabOpen, rowObj, 'refId', refId);
+    upserted++;
+    touched.push({ refId, subject, messageCount, latestMsgDateIso, permalink });
+  }
+
+  return {
+    ok: true,
+    query,
+    maxThreads,
+    upserted,
+    touchedSample: touched.slice(0, 5)
+  };
+}
+
+function TL_Gmail_flattenThread_(messages, maxCharsPerMessage, maxTotalChars) {
+  const participants = {};
+  const parts = [];
+  let total = 0;
+  let truncated = false;
+
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    const dateIso = m.getDate().toISOString();
+
+    const from = String(m.getFrom() || '');
+    const to = String(m.getTo() || '');
+    const cc = String(m.getCc() || '');
+    const subj = String(m.getSubject() || '');
+
+    // track participants (very simple)
+    [from, to, cc].forEach(s => {
+      String(s || '').split(',').map(x => x.trim()).filter(Boolean).forEach(p => participants[p] = true);
+    });
+
+    let body = String(m.getPlainBody() || '');
+    if (body.length > maxCharsPerMessage) {
+      body = body.slice(0, maxCharsPerMessage) + '\n...[TRUNCATED_MESSAGE_BODY]...';
+      truncated = true;
+    }
+
+    const block =
+      '---\n' +
+      'DATE: ' + dateIso + '\n' +
+      'FROM: ' + from + '\n' +
+      'TO: ' + to + '\n' +
+      (cc ? ('CC: ' + cc + '\n') : '') +
+      'SUBJECT: ' + subj + '\n' +
+      '\n' + body + '\n';
+
+    if (total + block.length > maxTotalChars) {
+      parts.push('\n...[TRUNCATED_THREAD]...\n');
+      truncated = true;
+      break;
+    }
+
+    parts.push(block);
+    total += block.length;
+  }
+
+  return {
+    text: parts.join('\n'),
+    participants: Object.keys(participants),
+    truncated
+  };
+}
+
+/**
+ * Convenience runner for the Apps Script editor.
+ * Safe to run multiple times (upsert by refId).
+ */
+function TL_Gmail_POC_RunPullImportant() {
+  TL_Sheets_bootstrapPOC(); // ensure tabs exist
+  return TL_Gmail_pullImportantThreads_A0({ maxThreads: 20 });
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_Log.gs =====
+/**
+ * TL_Log.gs
+ * Compatibility shim so Router can call TL_Log_append_
+ * Internally delegates to TL_Audit_append_
+ */
+
+function TL_Log_append_(actor, eventType, payloadObj, taskId, batchId) {
+  if (typeof TL_Audit_append_ === "function") {
+    return TL_Audit_append_(actor, eventType, payloadObj, taskId, batchId);
+  }
+  // fallback no-op to avoid breaking pipeline
+  return;
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_Menu.gs =====
+/**
+ * TL_Menu.gs
+ * POC shim: Router expects TL_Menu_text_ to render a human-readable menu string.
+ * For now we keep it minimal and deterministic (no buttons yet).
+ */
+function TL_Menu_text_(ctx) {
+  var lines = [];
+  lines.push("TaskLess POC");
+  if (ctx && ctx.batchId) lines.push("Batch: " + ctx.batchId);
+  if (ctx && ctx.taskId) lines.push("Task: " + ctx.taskId);
+  lines.push("");
+  lines.push("Menu:");
+  lines.push("1) Approve");
+  lines.push("2) Modify");
+  lines.push("3) Cancel");
+  return lines.join("\n");
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_Parse.gs =====
+/**
+ * TL_Parse.gs
+ * Minimal envelope parser for TaskLess POC.
+ */
+function TL_Parse_envelope_(raw) {
+  try {
+    var obj = raw;
+    if (typeof raw === "string") obj = JSON.parse(raw);
+    if (!obj || typeof obj !== "object") {
+      return { ok: false, error: "Parse: payload is not an object" };
+    }
+
+    var entry0  = (obj.entry && obj.entry[0]) ? obj.entry[0] : null;
+    var change0 = (entry0 && entry0.changes && entry0.changes[0]) ? entry0.changes[0] : null;
+    var value   = (change0 && change0.value) ? change0.value : null;
+    var msg0    = (value && value.messages && value.messages[0]) ? value.messages[0] : null;
+    var meta    = (value && value.metadata) ? value.metadata : {};
+
+    var textBody = null;
+    if (msg0 && msg0.type === "text" && msg0.text && typeof msg0.text.body === "string") {
+      textBody = msg0.text.body;
+    }
+
+    var messageId = msg0 && msg0.id ? String(msg0.id) : "";
+    var dedupeKey = messageId ? ("wa:" + messageId) : ("wa:nomsg:" + new Date().toISOString());
+
+    return {
+      ok: true,
+      envelope: {
+        source: "wa_cloud",
+        object: obj.object || "",
+        entryId: entry0 && entry0.id ? String(entry0.id) : "",
+        changeField: change0 && change0.field ? String(change0.field) : "",
+        meta: {
+          phone_number_id: meta.phone_number_id || "",
+          display_phone_number: meta.display_phone_number || ""
+        },
+        message: {
+          id: messageId,
+          from: msg0 && msg0.from ? String(msg0.from) : "",
+          timestamp: msg0 && msg0.timestamp ? String(msg0.timestamp) : "",
+          type: msg0 && msg0.type ? String(msg0.type) : "",
+          textBody: textBody,
+          raw: msg0 || null
+        },
+        dedupeKey: dedupeKey
+      }
+    };
+  } catch (e) {
+    return { ok: false, error: "Parse exception: " + (e && e.stack ? e.stack : e) };
+  }
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_Router.gs =====
+/**
+ * TL_Router - minimal routing for now.
+ * IMPORTANT invariant: free text/voice only generates proposals. Button payloads commit.
+ */
+function TL_Router_handle_(env) {
+  // Normalize
+  var from = String(env && env.from ? env.from : "");
+  var text = String(env && env.text ? env.text : "");
+
+  // 1) Button payloads would be parsed here later (interactive)
+  if (env && env.interactive) {
+    TL_Log_append_("USER", "BTN_CLICK", env, "", "");
+    return _json_({ ok:true, note:"interactive handling not wired yet", interactive: env.interactive });
+  }
+
+  var t = String(text || "").trim();
+  var tl = t.toLowerCase();
+
+  // Always-first menu behavior
+  if (!t || tl === "hi" || tl === "hello" || tl === "hey" || t === "שלום" || t === "היי") {
+    TL_Log_append_("SYSTEM", "MENU_SHOWN", env, "", "");
+    return _json_({ ok:true, menu: TL_Menu_text_() });
+  }
+
+  // Menu numbers (MVP)
+  if (tl === "1") {
+    TL_Log_append_("SYSTEM", "MENU_OPT_1", env, "", "");
+    return _json_({ ok:true, next:"Send your command now (voice or text). I will propose actions for confirmation." });
+  }
+
+  if (tl === "2") {
+    TL_Log_append_("SYSTEM", "MENU_OPT_2", env, "", "");
+    var tasks = (typeof TL_Sheets_findOpenTasks_ === "function")
+      ? TL_Sheets_findOpenTasks_(from, 10)
+      : [];
+    return _json_({ ok:true, openTasks: tasks });
+  }
+
+  if (tl === "3") {
+    TL_Log_append_("SYSTEM", "MENU_OPT_3", env, "", "");
+    return _json_({ ok:true, future:["Premium features","WhatsApp templates","Google Tasks mirror","Multi-user roles"] });
+  }
+
+  // Default: treat as command text -> create TASK row (proposal placeholder)
+  var batchId = TL_Router_newBatchId_();
+  var taskId  = TL_Router_newTaskId_(batchId);
+
+  var taskObj = {
+    taskId: taskId,
+    batchId: batchId,
+    from: from,
+    status: "NEEDS_APPROVAL",
+    kind: "PROPOSAL",
+    receivedText: text,
+    createdAt: (typeof _nowIso_ === "function") ? _nowIso_() : new Date().toISOString(),
+    rawEnv: env
+  };
+
+  TL_Router_appendTask_(taskObj);
+
+  TL_Log_append_("USER", "TASK_CREATED", { task: taskObj }, taskId, batchId);
+
+  return _json_({
+    ok:true,
+    batchId: batchId,
+    taskId: taskId,
+    status: "NEEDS_APPROVAL",
+    note: "Task created. Next: wire AI planner to generate proposal card(s) for confirmation.",
+    menu: TL_Menu_text_({ batchId: batchId, taskId: taskId })
+  });
+}
+
+/** Create short deterministic-ish batch id */
+function TL_Router_newBatchId_() {
+  var d = new Date();
+  // yyyymmdd-hhmmss
+  var pad = function(n){ return (n < 10 ? "0" : "") + n; };
+  return "B" +
+    d.getFullYear() +
+    pad(d.getMonth()+1) +
+    pad(d.getDate()) + "-" +
+    pad(d.getHours()) +
+    pad(d.getMinutes()) +
+    pad(d.getSeconds());
+}
+
+/** Create task id under batch */
+function TL_Router_newTaskId_(batchId) {
+  // In POC we keep it simple: one task per message
+  return String(batchId).replace(/^B/, "T") + "-1";
+}
+
+/**
+ * Append a TASK row.
+ * If TASKS has headers, we map known columns.
+ * Otherwise we append a default fixed schema row.
+ */
+function TL_Router_appendTask_(taskObj) {
+  if (typeof TL_Sheets_appendTask_ === "function") {
+    // preferred store-layer API if you add it later
+    TL_Sheets_appendTask_(taskObj);
+    return;
+  }
+
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName("TASKS");
+  if (!sh) throw new Error("TASKS sheet not found");
+
+  var lastCol = sh.getLastColumn();
+  var headers = [];
+  if (sh.getLastRow() >= 1 && lastCol > 0) {
+    headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function(x){ return String(x||"").trim(); });
+  }
+
+  var row = null;
+
+  // Header-mapped insert if headers exist
+  if (headers && headers.length && headers.join("").length) {
+    row = new Array(headers.length).fill("");
+
+    var set = function(colName, val) {
+      var idx = headers.indexOf(colName);
+      if (idx >= 0) row[idx] = val;
+    };
+
+    set("taskId", taskObj.taskId);
+    set("batchId", taskObj.batchId);
+    set("from", taskObj.from);
+    set("status", taskObj.status);
+    set("kind", taskObj.kind);
+    set("text", taskObj.receivedText);
+    set("createdAt", taskObj.createdAt);
+    set("updatedAt", taskObj.createdAt);
+
+    // Store raw json if column exists
+    if (headers.indexOf("payloadJson") >= 0) set("payloadJson", _json_(taskObj.rawEnv));
+    if (headers.indexOf("rawJson") >= 0) set("rawJson", _json_(taskObj.rawEnv));
+
+    sh.appendRow(row);
+    return;
+  }
+
+  // Fallback fixed row (no headers defined yet)
+  // Columns: createdAt, taskId, batchId, from, status, kind, text, payloadJson
+  sh.appendRow([
+    taskObj.createdAt,
+    taskObj.taskId,
+    taskObj.batchId,
+    taskObj.from,
+    taskObj.status,
+    taskObj.kind,
+    taskObj.receivedText,
+    _json_(taskObj.rawEnv)
+  ]);
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_SheetsStore.gs =====
+/**
+ * TL_SheetsStore - bounded sheet store + bootstrap helpers (POC)
+ * Default store: bound spreadsheet (getActiveSpreadsheet)
+ * Optional override: Script Property TL_CFG_STORE_SHEET_ID
+ *
+ * Tabs we may create:
+ * OPEN, PENDING, REVISION, ARCHIVE, AUDIT_LOG, SETTINGS, COMMANDS_INBOX
+ */
+
+function TL_Sheets_getStore_() {
+  const sheetId = TL_Config_get_("TL_CFG_STORE_SHEET_ID", "");
+  if (sheetId) return SpreadsheetApp.openById(sheetId);
+  // default to bound sheet
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function TL_Sheets_ensureTab_(ss, tabName, headers) {
+  let sh = ss.getSheetByName(tabName);
+  if (!sh) sh = ss.insertSheet(tabName);
+
+  if (headers && headers.length) {
+    const lastCol = Math.max(1, sh.getLastColumn());
+    const firstRow = sh.getRange(1, 1, 1, lastCol).getValues()[0] || [];
+    const hasHeader = firstRow.join("|").includes(headers[0]);
+    if (!hasHeader) {
+      sh.clear();
+      sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sh.setFrozenRows(1);
+    }
+  }
+  return sh;
+}
+
+function TL_Sheets_taskHeaders_() {
+  return [
+    "createdAt","updatedAt","userE164",
+    "refId","chunkId","title","kind","channel",
+    "status","askedAt","answeredAt","executedAt",
+    "draftOrPromptJson","lastAction","lastActionAt"
+  ];
+}
+
+function TL_Sheets_bootstrapTabs_() {
+  const ss = TL_Sheets_getStore_();
+
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_REVISION","REVISION"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_ARCHIVE","ARCHIVE"), TL_Sheets_taskHeaders_());
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_AUDIT","AUDIT_LOG"), ["ts","actor","eventType","userE164","refId","chunkId","payload"]);
+  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_SETTINGS","SETTINGS"), ["key","value"]);
+
+  // Router currently expects this to exist (quick unblock)
+  TL_Sheets_ensureTab_(ss, "COMMANDS_INBOX", ["ts","userE164","text","batchVersion","payloadJson"]);
+
+  return {
+    ok: true,
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tabs: ss.getSheets().map(sh => sh.getName())
+  };
+}
+
+/**
+ * Public runner to bootstrap required store tabs.
+ * Safe to run multiple times.
+ */
+function TL_Sheets_bootstrapPOC() {
+  return TL_Sheets_bootstrapTabs_();
+}
+
+function TL_Sheets_upsertTask_(tabName, rowObj, keyField, keyValue) {
+  const ss = TL_Sheets_getStore_();
+  const sh = TL_Sheets_ensureTab_(ss, tabName, TL_Sheets_taskHeaders_());
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+
+  const keyCol = headers.indexOf(keyField) + 1;
+  if (keyCol <= 0) throw new Error("Key field not found: " + keyField);
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) {
+    TL_Sheets_appendTask_(sh, headers, rowObj);
+    return;
+  }
+
+  const keyVals = sh.getRange(2, keyCol, lastRow - 1, 1).getValues().map(r => String(r[0] || ""));
+  const idx = keyVals.indexOf(String(keyValue));
+  if (idx === -1) {
+    TL_Sheets_appendTask_(sh, headers, rowObj);
+    return;
+  }
+
+  const rowNumber = 2 + idx;
+  TL_Sheets_writeTaskRow_(sh, headers, rowNumber, rowObj);
+}
+
+function TL_Sheets_appendTask_(sh, headers, rowObj) {
+  const row = headers.map(h => (rowObj[h] !== undefined ? rowObj[h] : ""));
+  sh.appendRow(row);
+}
+
+function TL_Sheets_writeTaskRow_(sh, headers, rowNumber, rowObj) {
+  const row = headers.map(h => (rowObj[h] !== undefined ? rowObj[h] : ""));
+  sh.getRange(rowNumber, 1, 1, row.length).setValues([row]);
+}
+
+function TL_Sheets_findOpenTasks_(userE164, limit) {
+  const ss = TL_Sheets_getStore_();
+  if (!ss) return [];
+
+  const tabs = [
+    TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"),
+    TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"),
+    TL_Config_get_("TL_CFG_TAB_REVISION","REVISION")
+  ];
+
+  const out = [];
+  const max = limit || 10;
+
+  tabs.forEach(tab => {
+    if (out.length >= max) return;
+    const sh = ss.getSheetByName(tab);
+    if (!sh) return;
+
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return;
+
+    const values = sh.getRange(1, 1, lastRow, sh.getLastColumn()).getValues();
+    const headers = values[0];
+
+    const idxUser = headers.indexOf("userE164");
+    const idxTitle = headers.indexOf("title");
+    const idxChunk = headers.indexOf("chunkId");
+    const idxRef = headers.indexOf("refId");
+    const idxStatus = headers.indexOf("status");
+
+    for (let r = 1; r < values.length && out.length < max; r++) {
+      const row = values[r];
+      if (String(row[idxUser] || "") !== String(userE164 || "")) continue;
+      out.push({
+        tab,
+        refId: String(row[idxRef] || ""),
+        chunkId: String(row[idxChunk] || ""),
+        title: String(row[idxTitle] || ""),
+        status: String(row[idxStatus] || "")
+      });
+    }
+  });
+
+  return out;
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_Util.gs =====
+/**
+ * TL_Util.gs
+ * Utilities for bound-sheet inspection + compact dumping for sharing in chat.
+ * Also includes small safe helpers used by Router/Webhook.
+ */
+
+function _json_(obj) {
+  try { return JSON.stringify(obj); }
+  catch (e) {
+    try { return String(obj); } catch (e2) { return "[unstringifiable]"; }
+  }
+}
+
+function _nowIso_() {
+  return new Date().toISOString();
+}
+
+/**
+ * Returns bound spreadsheetId + all tab names.
+ * Safe to run from Apps Script editor.
+ */
+function TL_Util_listSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var names = ss.getSheets().map(function(sh){ return sh.getName(); });
+  var out = {
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    tabs: names
+  };
+  Logger.log(_json_(out));
+  return out;
+}
+
+/**
+ * Dumps a sheet as 2D array (values), with optional row limit.
+ * @param {string} sheetName
+ * @param {number} rowLimit optional (default 50)
+ */
+function TL_Util_dumpSheet(sheetName, rowLimit) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(String(sheetName || ""));
+  if (!sh) return { ok:false, error:"sheet not found", sheetName: String(sheetName||"") };
+
+  var max = (rowLimit == null || rowLimit === "") ? 50 : Number(rowLimit);
+  if (!isFinite(max) || max <= 0) max = 50;
+
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow === 0 || lastCol === 0) {
+    return { ok:true, sheetName: sh.getName(), rows: 0, cols: 0, values: [] };
+  }
+
+  var rows = Math.min(lastRow, max);
+  var values = sh.getRange(1, 1, rows, lastCol).getValues();
+
+  return {
+    ok: true,
+    sheetName: sh.getName(),
+    rows: rows,
+    cols: lastCol,
+    lastRow: lastRow,
+    lastCol: lastCol,
+    values: values
+  };
+}
+
+/**
+ * Dumps multiple sheets into one compact object.
+ * @param {string} csvNames comma-separated sheet names. If omitted => all sheets.
+ * @param {number} rowLimit optional per sheet (default 25)
+ */
+function TL_Util_dumpSheets(csvNames, rowLimit) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var all = ss.getSheets().map(function(sh){ return sh.getName(); });
+
+  var names = String(csvNames || "").trim()
+    ? String(csvNames).split(",").map(function(s){ return s.trim(); }).filter(Boolean)
+    : all;
+
+  var out = {
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    requested: names,
+    dumps: {}
+  };
+
+  names.forEach(function(name){
+    out.dumps[name] = TL_Util_dumpSheet(name, rowLimit);
+  });
+
+  return out;
+}
+
+/**
+ * Returns a compact JSON string for copy/paste into chat.
+ * @param {string} csvNames optional
+ * @param {number} rowLimit optional
+ */
+function TL_Util_dumpSheetsJson(csvNames, rowLimit) {
+  var obj = TL_Util_dumpSheets(csvNames, rowLimit);
+  return _json_(obj);
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\TL_Webhook.gs =====
+/**
+ * TL_Webhook - WhatsApp Cloud API webhook entry (GET verify + POST events)
+ *
+ * Required Script Properties:
+ * - TL_VERIFY_TOKEN        (string)  webhook verify token
+ * - TL_SHEET_ID            (string)  spreadsheet ID containing WEBHOOK_LOG
+ * - META_USER_ACCESS_TOKEN (string)  Graph API token (optional for COEX_checkPhoneNumberState)
+ *
+ * Tabs:
+ * - WEBHOOK_LOG (auto-created)
+ */
+const TL_WEBHOOK = {
+  LOG_SHEET: "WEBHOOK_LOG",
+  HEADERS: [
+    "ts","event_type","display_phone_number","phone_number_id",
+    "from","message_id","message_type","text","statuses_count","raw_json"
+  ],
+  MAX_IDEMPOTENCY_SCAN_ROWS: 2000
+};
+
+function doGet(e) {
+  try {
+    const p = (e && e.parameter) ? e.parameter : {};
+    const mode = String(p["hub.mode"] || "");
+    const token = String(p["hub.verify_token"] || "");
+    const challenge = String(p["hub.challenge"] || "");
+
+    const expected = String(PropertiesService.getScriptProperties().getProperty("TL_VERIFY_TOKEN") || "");
+    if (mode === "subscribe" && expected && token === expected) {
+      return ContentService.createTextOutput(challenge).setMimeType(ContentService.MimeType.TEXT);
+    }
+    return ContentService.createTextOutput("forbidden").setMimeType(ContentService.MimeType.TEXT);
+  } catch (err) {
+    return ContentService.createTextOutput("error").setMimeType(ContentService.MimeType.TEXT);
+  }
+}
+
+function doPost(e) {
+  const started = new Date();
+  try {
+    const raw = (e && e.postData && typeof e.postData.contents === "string") ? e.postData.contents : "";
+    if (!raw) {
+      TLW_logDebug_("empty_post", { when: started.toISOString() });
+      return TLW_json_({ ok:true, empty:true });
+    }
+
+    let payload = {};
+    try { payload = JSON.parse(raw); }
+    catch (parseErr) {
+      TLW_logDebug_("invalid_json", { err:String(parseErr), raw: raw.slice(0,500) });
+      return TLW_json_({ ok:true, parse_error:true });
+    }
+
+    const events = TLW_extractEvents_(payload);
+    if (!events.length) {
+      TLW_appendRow_({
+        ts:new Date(), event_type:"webhook_no_events",
+        display_phone_number:"", phone_number_id:"", from:"",
+        message_id:"", message_type:"", text:"",
+        statuses_count:0, raw_json: TLW_safeStringify_(payload, 4000)
+      }, true);
+      return TLW_json_({ ok:true, events:0 });
+    }
+
+    const idSet = TLW_getRecentMessageIdSet_();
+    let appended=0, skipped=0;
+
+    events.forEach(ev => {
+      const messageId = String(ev.message_id || "");
+      if (messageId && idSet.has(messageId)) { skipped++; return; }
+
+      TLW_appendRow_({
+        ts:new Date(),
+        event_type: ev.event_type || "messages",
+        display_phone_number: ev.display_phone_number || "",
+        phone_number_id: ev.phone_number_id || "",
+        from: ev.from || "",
+        message_id: messageId,
+        message_type: ev.message_type || "",
+        text: ev.text || "",
+        statuses_count: ev.statuses_count || 0,
+        raw_json: TLW_safeStringify_(payload, 8000)
+      }, false);
+
+      if (messageId) idSet.add(messageId);
+      appended++;
+    });
+
+    return TLW_json_({ ok:true, appended, skipped });
+  } catch (err) {
+    TLW_logDebug_("doPost_error", { err:String(err && err.stack ? err.stack : err) });
+    return TLW_json_({ ok:true, error:true });
+  }
+}
+
+/** ---- Optional helper: check phone state (coexist) ---- */
+function COEX_checkPhoneNumberState(phoneNumberId) {
+  const id = String(phoneNumberId || "").trim();
+  if (!id) throw new Error("Missing phoneNumberId");
+
+  const token = String(PropertiesService.getScriptProperties().getProperty("META_USER_ACCESS_TOKEN") || "").trim();
+  if (!token) throw new Error("Missing Script Property META_USER_ACCESS_TOKEN");
+
+  const fields = [
+    "id","display_phone_number","verified_name","status","platform_type",
+    "code_verification_status","name_status","quality_rating","health_status"
+  ].join(",");
+
+  const url = "https://graph.facebook.com/v24.0/" + encodeURIComponent(id) + "?fields=" + encodeURIComponent(fields);
+  const res = UrlFetchApp.fetch(url, { method:"get", muteHttpExceptions:true, headers:{ Authorization:"Bearer " + token } });
+
+  const status = res.getResponseCode();
+  const body = res.getContentText();
+
+  TLW_appendRow_({
+    ts:new Date(), event_type:"coex_check_state",
+    display_phone_number:"", phone_number_id:id, from:"",
+    message_id:"", message_type:"HTTP_" + status, text:"",
+    statuses_count:0, raw_json: body
+  }, true);
+
+  return { status, body };
+}
+
+/** ---- internals ---- */
+function TLW_extractEvents_(payload) {
+  const out = [];
+  if (!payload || !payload.entry || !payload.entry.length) return out;
+
+  payload.entry.forEach(entry => {
+    const changes = entry && entry.changes ? entry.changes : [];
+    changes.forEach(ch => {
+      const field = String(ch.field || "");
+      const val = ch.value || {};
+      const meta = val.metadata || {};
+      const displayPhone = String(meta.display_phone_number || "");
+      const phoneId = String(meta.phone_number_id || "");
+
+      if (field === "messages" && val.messages && val.messages.length) {
+        val.messages.forEach(m => {
+          const from = String(m.from || "");
+          const msgId = String(m.id || "");
+          const type = String(m.type || "");
+          const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
+          out.push({ event_type:"messages", display_phone_number:displayPhone, phone_number_id:phoneId, from, message_id:msgId, message_type:type, text, statuses_count:0 });
+        });
+      }
+
+      const statuses = val.statuses || [];
+      if (statuses && statuses.length) {
+        out.push({ event_type:"statuses", display_phone_number:displayPhone, phone_number_id:phoneId, from:"", message_id:"", message_type:"status_update", text:"", statuses_count: statuses.length });
+      }
+    });
+  });
+
+  return out;
+}
+
+function TLW_appendRow_(obj, allowDuplicate) {
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  if (!ss) throw new Error("Missing Script Property TL_SHEET_ID");
+
+  let sh = ss.getSheetByName(TL_WEBHOOK.LOG_SHEET);
+  if (!sh) sh = ss.insertSheet(TL_WEBHOOK.LOG_SHEET);
+
+  const range = sh.getRange(1,1,1,TL_WEBHOOK.HEADERS.length);
+  const existing = range.getValues()[0];
+  const needs = existing.some((v,i)=>String(v||"")!==String(TL_WEBHOOK.HEADERS[i]||""));
+  if (needs) { range.setValues([TL_WEBHOOK.HEADERS]); sh.setFrozenRows(1); }
+
+  const messageId = String(obj.message_id || "");
+  if (!allowDuplicate && messageId) {
+    const set = TLW_getRecentMessageIdSet_();
+    if (set.has(messageId)) return;
+  }
+
+  sh.appendRow([
+    obj.ts || new Date(),
+    String(obj.event_type||""),
+    String(obj.display_phone_number||""),
+    String(obj.phone_number_id||""),
+    String(obj.from||""),
+    String(obj.message_id||""),
+    String(obj.message_type||""),
+    String(obj.text||""),
+    Number(obj.statuses_count||0),
+    String(obj.raw_json||"")
+  ]);
+}
+
+function TLW_getRecentMessageIdSet_() {
+  const set = new Set();
+  try {
+    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+    const sh = ss.getSheetByName(TL_WEBHOOK.LOG_SHEET);
+    if (!sh) return set;
+
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return set;
+
+    const start = Math.max(2, lastRow - TL_WEBHOOK.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
+    const count = lastRow - start + 1;
+    const values = sh.getRange(start, 6, count, 1).getValues(); // message_id col
+    values.forEach(r => { const id = String(r[0]||"").trim(); if (id) set.add(id); });
+  } catch (e) {}
+  return set;
+}
+
+function TLW_logDebug_(label, data) {
+  try {
+    TLW_appendRow_({
+      ts:new Date(), event_type:"debug_" + String(label||"log"),
+      display_phone_number:"", phone_number_id:"", from:"",
+      message_id:"", message_type:"", text:"",
+      statuses_count:0, raw_json: TLW_safeStringify_(data, 4000)
+    }, true);
+  } catch(e) {}
+}
+
+function TLW_safeStringify_(obj, maxLen) {
+  const lim = (typeof maxLen==="number" && isFinite(maxLen)) ? maxLen : 4000;
+  let s="";
+  try { s = JSON.stringify(obj); } catch(e){ s = String(obj); }
+  if (s.length > lim) return s.slice(0, lim) + "...";
+  return s;
+}
+
+function TLW_json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj||{})).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+===== FILE: C:\dev\gas\TaskLess\UTIL_Sheets_ExportSchema.gs =====
+/**
+ * UTIL_Sheets_ExportSchema
+ * - Exports spreadsheet tabs + headers as pasteable JSON
+ *
+ * Uses Script Property TL_SHEET_ID if set; otherwise uses active spreadsheet.
+ */
+
+function TL_Sheets_GetSpreadsheet_() {
+  var id = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+  if (id) return SpreadsheetApp.openById(id);
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function TL_Sheets_ListTabsAndHeaders() {
+  var ss = TL_Sheets_GetSpreadsheet_();
+  var sheets = ss.getSheets();
+  var out = [];
+  for (var i=0; i<sheets.length; i++) {
+    var sh = sheets[i];
+    var name = sh.getName();
+    var lastCol = sh.getLastColumn();
+    var headers = [];
+    if (lastCol > 0) {
+      headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||"").trim(); });
+      while (headers.length && !headers[headers.length-1]) headers.pop();
+    }
+    out.push({ tab:name, headers:headers, lastRow:sh.getLastRow(), lastCol:lastCol });
+  }
+  return out;
+}
+
+function TL_Sheets_ExportSchemaJson() {
+  var schema = {
+    version: "sheet-export-1",
+    exported_iso: new Date().toISOString(),
+    sheet_id: String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim(),
+    tabs: TL_Sheets_ListTabsAndHeaders()
+  };
+  var json = JSON.stringify(schema, null, 2);
+  try { Logger.log(json); } catch(e) {}
+  return json;
+}
+
+
+
+===== FILE: C:\dev\gas\TaskLess\UTIL_Sheets_RebuildSchema.gs =====
+/**
+ * UTIL_Sheets_RebuildSchema
+ * Applies a schema (tabs + headers) deterministically.
+ *
+ * Modes:
+ * - "verify_only": no changes; returns report
+ * - "create_missing": create missing tabs and fix header row if mismatched
+ */
+
+function TL_Sheets_ApplySchema(schemaJson, mode) {
+  var ss = TL_Sheets_GetSpreadsheet_();
+  var m = String(mode || "verify_only").trim();
+
+  var schema = schemaJson;
+  if (typeof schemaJson === "string") schema = JSON.parse(schemaJson);
+  if (!schema || !schema.tabs || !schema.tabs.length) throw new Error("Invalid schema: missing tabs");
+
+  var report = { applied_iso:new Date().toISOString(), mode:m, actions:[], ok:true };
+  function push(action, details) { report.actions.push({ action:action, details:details||{} }); }
+
+  schema.tabs.forEach(function(t){
+    var tab = String(t.tab || "").trim();
+    if (!tab) return;
+    var expectedHeaders = (t.headers || []).map(function(x){ return String(x||"").trim(); });
+
+    var sh = ss.getSheetByName(tab);
+    if (!sh) {
+      if (m === "create_missing") { sh = ss.insertSheet(tab); push("create_sheet", { tab:tab }); }
+      else { push("missing_sheet", { tab:tab }); report.ok=false; return; }
+    }
+
+    var lastCol = Math.max(sh.getLastColumn(), expectedHeaders.length);
+    if (lastCol < 1) lastCol = expectedHeaders.length;
+
+    var actual = [];
+    if (lastCol > 0) {
+      actual = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||"").trim(); });
+      while (actual.length && !actual[actual.length-1]) actual.pop();
+    }
+
+    var mismatch = (expectedHeaders.length !== actual.length);
+    if (!mismatch) {
+      for (var i=0; i<expectedHeaders.length; i++) {
+        if (String(expectedHeaders[i]||"") !== String(actual[i]||"")) { mismatch=true; break; }
+      }
+    }
+
+    if (mismatch) {
+      if (m === "create_missing") {
+        sh.getRange(1,1,1,expectedHeaders.length).setValues([expectedHeaders]);
+        sh.setFrozenRows(1);
+        push("set_headers", { tab:tab, expected:expectedHeaders, actual:actual });
+      } else {
+        push("headers_mismatch", { tab:tab, expected:expectedHeaders, actual:actual });
+        report.ok=false;
+      }
+    } else {
+      push("headers_ok", { tab:tab });
+    }
+  });
+
+  var json = JSON.stringify(report, null, 2);
+  try { Logger.log(json); } catch(e) {}
+  return json;
+}
+
+
+

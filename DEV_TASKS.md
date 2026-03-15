@@ -2,296 +2,316 @@
 
 ---
 
-## 1. Canonical Value Proposition
+# 1. Canonical Value Proposition
 
-TaskLess is a communications-driven CRM that keeps itself current by observing real business activity.
+TaskLess is a command layer for business communication.
 
-Traditional CRMs require the user to manually log calls, update records, track follow-ups, and maintain contact history. Over time this friction causes the CRM to drift away from the real state of the business.
+Instead of business owners manually managing conversations inside messaging apps,
+TaskLess sits above those apps and acts as a control system that:
 
-TaskLess reverses this model.
+• receives inbound messages  
+• analyzes intent using AI  
+• proposes responses  
+• requires Boss approval  
+• executes communication safely  
 
-Instead of the user feeding the CRM, the CRM feeds itself by observing the user’s real communication activity.
+TaskLess introduces an **AI Safety Guard** that prevents risky or damaging
+messages from being sent impulsively.
 
-Signals such as:
+The system is designed to work **on top of WhatsApp Business Coexistence**,
+allowing business owners to keep their familiar WhatsApp UI while TaskLess
+provides intelligence, safety, and automation.
 
-- incoming and outgoing email
-- WhatsApp conversations
-- calendar events
-- future business channels
+The objective is to:
 
-are ingested automatically through integrations such as Google Apps Script and related backend systems.
+• reduce manual messaging workload  
+• prevent embarrassing or risky messages  
+• improve response speed  
+• create a structured communication system  
 
-An external AI layer acts as the user’s AI secretary.
+Expected impact:
 
-The AI continuously reviews the latest context and proposes suggested actions or reply drafts.
-
-The user does not need to manually operate the CRM. Instead:
-
-- TaskLess gathers communication history
-- AI reads the latest context
-- AI proposes reply drafts or next actions
-- the user chooses, edits, or approves
-- TaskLess executes through the correct backend channel
-
-The unique value proposition is not just reminders or automation. The unique value proposition is a living CRM that stays current by observing and processing the user’s real business communications.
-
-The core product is:
-
-**a CRM that works for the user, with an AI secretary that reads context and proposes the next action.**
+10–15 hours per month saved for typical SMB users.
 
 ---
 
-## 2. System Operating Model
+# 2. System Operating Model
 
-### 2.1 Ingestion
-TaskLess ingests communication and activity signals from:
-- WhatsApp
-- Gmail
-- Calendar
-- future business channels
+## Roles
 
-### 2.2 Context Layer
-The system stores and organizes activity so that AI can understand:
-- who the contact is
-- what happened recently
-- what the current thread or business context is
-- what the likely next action should be
+### TaskLess Boss
+The human user.
 
-### 2.3 AI Secretary
-The AI secretary:
-- reads the latest context
-- proposes a draft or action
-- presents choices to the user
-- does not execute automatically unless the flow is explicitly approved
+Responsibilities:
 
-### 2.4 Execution
-Approved actions are executed deterministically through backend systems such as:
-- WhatsApp messaging
-- email sending
-- calendar updates
-- sheet updates
-- CRM state changes
+• approves outgoing messages  
+• edits AI drafts  
+• controls final execution  
 
-### 2.5 Safety Principle
-Thinking is AI-driven.
-Execution is deterministic and system-controlled.
+The Boss always has final authority.
 
 ---
 
-## 3. Current Sprint Focus
+### TaskLess Assistant
 
-Current focus is the WhatsApp Embedded Signup / onboarding POC.
+The AI system responsible for:
+
+• analyzing inbound messages  
+• generating reply drafts  
+• extracting tasks and intents  
+• organizing communication context  
+
+The Assistant prepares actions but does not execute without Boss approval.
+
+---
+
+### AI Safety Guard
+
+A protective layer inside the Assistant.
+
+It detects risky communications before sending.
+
+Examples:
+
+• hostile language  
+• emotional messages  
+• reputational risks  
+• confidential data leaks  
+• abnormal commitments  
+
+If detected:
+
+Assistant pauses execution and requests confirmation from the Boss.
+
+Boss may still override.
+
+---
+
+# 3. Communication Flow
+
+Inbound Flow
+
+Client  
+↓  
+WhatsApp (Coexist)  
+↓  
+WABA Webhook  
+↓  
+TaskLess Assistant  
+
+Assistant analyzes:
+
+• sender  
+• message content  
+• conversation context  
+
+Assistant produces:
+
+• intent classification  
+• suggested reply  
+• possible tasks
+
+---
+
+Boss Interaction
+
+Boss receives a control card:
+
+Suggested reply  
+Approve  
+Edit  
+Revise with AI  
+Ignore
+
+---
+
+Outbound Flow
+
+Assistant  
+↓  
+AI Safety Guard  
+↓  
+Boss Approval  
+↓  
+WhatsApp Cloud API  
+↓  
+Client
+
+---
+
+# 4. Learning Loop
+
+TaskLess learns from Boss revisions.
+
+When Boss edits an AI draft the system records:
+
+• client message  
+• AI draft  
+• Boss revision  
+• final message
+
+This data is stored in Google Sheets.
+
+Over time the Assistant learns:
+
+• tone preferences  
+• phrasing  
+• communication style
+
+---
+
+# 5. Development Ledger
+
+## ✓ Completed Work
+
+✓ Core TaskLess concept defined  
+✓ Boss / Assistant architecture defined  
+✓ AI Safety Guard concept defined  
+✓ WhatsApp Coexistence limitations analyzed  
+✓ Deployment Web App created  
+✓ Google Apps Script deployment pipeline established  
+
+Deployment endpoint:
+
+https://script.google.com/macros/s/AKfycbx1p8fg0eFua_9qLJ7tTk0P-cd_zLKxAHnc8KRfyIhgaPtwXANfEZ_QjG3a6pvfVefa/exec
+
+---
+
+## ▶ Current Work
+
+Inbound WhatsApp message capture prototype.
 
 Goal:
-- successfully onboard a test WhatsApp number to the app
-- capture and verify onboarding outputs
-- confirm we can reliably obtain and store the identifiers needed for downstream messaging flows
-- identify the exact activation blocker if onboarding reaches object creation but not operational send readiness
+
+Receive WABA webhook events and log them to a Google Sheet.
+
+Data to capture:
+
+• phone_number_id  
+• sender phone  
+• message text  
+• timestamp  
+
+This stage validates:
+
+• webhook reliability  
+• message structure  
+• data capture
 
 ---
 
-## 4. What Has Been Established
+## ○ Next Tasks
 
-- TaskLess has its own dedicated repository separate from GLV.
-- PowerShell profile/menu workflow was updated to support project-specific selection.
-- Desktop and Termux are now treated as separate supported environments.
-- TaskLess repository can now be pushed from desktop and pulled from Termux.
-- We decided not to invest further right now in a general config helper abstraction.
-- For the current POC we prefer explicit, local property access where needed.
-- The app system token is valid and works against Graph.
-- The business node query works and returns owned WhatsApp Business Accounts.
-- The system token can read phone-number objects under visible WABAs.
-- The current deployment webhook is attached to visible phone objects.
-- The client WABA onboarding target is real, not a ghost UI artifact.
-- The immediate objective is no longer basic discovery; it is now to document and resolve the exact activation blocker.
+Task 1 — AI Draft Generation
+
+Assistant generates reply drafts for inbound messages.
+
+Drafts stored alongside inbound messages.
 
 ---
 
-## 5. Current Decisions
+Task 2 — Boss Approval Interface
 
-- Do not optimize architecture before proving the onboarding POC.
-- Do not block progress on a generalized config/property helper.
-- Treat the user system token as the primary practical token for the POC.
-- Attempting to obtain an onboarding-derived user token is useful, but not critical for first success.
-- Capturing WhatsApp Business identifiers and phone identifiers is critical even if token exchange is incomplete.
-- If possible, capture identifiers separately so failure in access-code/token exchange does not prevent retaining the core onboarding outputs.
-- Use direct edge queries as the trusted diagnostic method; avoid brittle aggregate `?fields=` business queries in this Meta context.
-- Distinguish carefully between multiple WhatsApp environments in the same business portfolio:
-  - existing ON_PREMISE number
-  - existing CLOUD_API test number
-  - current onboarding / client-WABA target number
+Boss can:
+
+• approve draft  
+• edit draft  
+• reject draft  
 
 ---
 
-## 6. P0 — WhatsApp Embedded Signup POC
+Task 3 — AI Learning Storage
 
-### Environment Verification
+Store Boss revisions in Google Sheets.
 
-- [x] Confirm the current app system token exists and is available for testing
-- [x] Verify the system token actually works against the expected Graph endpoint
-- [ ] Confirm the app secret stored in script properties matches the secret currently shown in Meta app settings
-- [x] Confirm the worker / deployed GAS webhook path is visible on WhatsApp phone objects
-- [ ] Confirm the worker and GAS handoff path still match the exact current onboarding implementation
-
-### Business / WABA / Phone Discovery
-
-- [x] Confirm owned WABAs are visible from the business node
-- [x] Confirm phone numbers are visible for owned WABAs
-- [x] Confirm the suspected third WABA is real and not a ghost
-- [x] Confirm the third WABA is a client WABA rather than an owned WABA
-- [x] Capture WABA ID for the onboarding target
-- [x] Capture phone number ID for the onboarding target
-
-### Onboarding Target Captured
-
-Confirmed onboarding target identifiers:
-
-- Business ID: `1309151907679742`
-- Client WABA ID: `3910373462597249`
-- Client WABA Name: `נחמה וראובן כהן`
-- Phone Number ID: `1039368419259439`
-- Display Phone Number: `+972 8-376-1169`
-- App ID: `1576900080223572`
-- Last Onboarded Time: `2026-03-09T15:49:54+02:00`
-
-### Current Phone-State Result
-
-Confirmed current phone-state for onboarding target:
-
-- `code_verification_status = VERIFIED`
-- `status = PENDING`
-- `platform_type = NOT_APPLICABLE`
-- `quality_rating = UNKNOWN`
-- `health_status.can_send_message = BLOCKED`
-
-Primary blocking phone-level error:
-
-- `141000` — The phone number is not linked to the WhatsApp account; Meta indicates OTP / final registration is not fully completed
-
-Additional blockers observed:
-
-- `141006` — payment method issue at WABA level
-- `141010` — business verification not passed at business level
-
-### Remaining P0 Checks
-
-- [ ] Confirm whether access code is captured in current onboarding flow
-- [ ] Confirm whether token exchange is attempted in current onboarding flow
-- [ ] Confirm whether token exchange succeeds or fails in current onboarding flow
-- [ ] Run one fresh onboarding attempt with worker logs open
-- [ ] Run the same attempt with GAS execution log open
-- [ ] Confirm whether a fresh run changes the client phone from `PENDING` to an active operational state
-- [ ] Document the exact failing phase if onboarding does not complete end-to-end
-
-### P0 Interpretation Note
-
-Important:
-it is possible that earlier successful test sends were performed from a different number / WABA combination already active in the environment, using the system token.
-
-That does **not** prove that the current onboarding target:
-
-- WABA `3910373462597249`
-- phone number ID `1039368419259439`
-
-is operational yet.
-
-For this sprint, the onboarding target must be judged by its own phone-state result, not by sends from other numbers.
+Create learning dataset for future draft improvements.
 
 ---
 
-## 7. P1 — Identifier Capture and Persistence
+Task 4 — Safety Guard Logic
 
-Minimum useful identifier set for first useful POC now confirmed as:
+Detect risky messages before sending.
 
-- Business ID
-- WABA ID
-- phone number ID
-- business/account linkage context
-- app ID
-- webhook binding visibility
-- onboarding timestamp if available
-
-Persistence options still to decide:
-
-- worker log
-- GAS log
-- sheet
-- script properties
-
-Identifier capture should remain independent from optional token exchange wherever possible.
-
-Logs should clearly distinguish:
-
-- SDK event received
-- onboarding completed
-- WABA ID captured
-- phone number ID captured
-- access code captured
-- token exchange attempted
-- token exchange success/failure
-- phone activation status
-- final operational blocker code
-
-Open task:
-
-- [ ] Decide first persistence location for captured identifiers
-- [ ] Ensure logs distinguish discovery from true operational readiness
+Trigger confirmation workflow.
 
 ---
 
-## 8. P1 — Token Strategy
+# 6. Future Architecture
 
-- [x] Verify the user system token path is available and usable for the POC
-- [x] Confirm the system token can read business, WABA, and phone-number objects
-- [ ] Treat onboarding access-code exchange as secondary, not blocking
-- [ ] Confirm which actions truly require exchanged user token versus existing system/user system token
-- [ ] Record a clear token strategy note inside the repo after verification
+Current prototype uses a single Web App.
 
-Working note:
-the system token is already strong enough for diagnostic discovery and at least some messaging operations on existing active assets. The open question is not token validity in general, but whether the specific onboarding target phone has completed activation.
+Future system will include a **Router Layer**.
 
----
+Router responsibilities:
 
-## 9. P2 — Cleanup After First Successful Trace
-
-- [ ] Clean up or deprecate outdated TaskLess legacy files if they conflict with DEV_TASKS.md
-- [ ] Decide whether BUSINESS_LOGIC.md and STATE.md remain historical only
-- [ ] Align README with the canonical value proposition
-- [ ] Add a concise onboarding trace summary to the repo after the first monitored run
-- [ ] Add a short asset map note documenting:
-  - ON_PREMISE number
-  - test CLOUD_API number
-  - current client-WABA onboarding target
+• detect phone_number_id  
+• map to correct user environment  
+• forward message to correct TaskLess instance.
 
 ---
 
-## 10. Current Precise Blocker
+# 7. Onboarding Registry
 
-The current onboarding target has passed object creation and code verification but has **not** completed final activation.
+User onboarding data will eventually move to a structured registry.
 
-Precise blocker:
+Candidate systems:
 
-- WABA exists
-- phone object exists
-- code verification is `VERIFIED`
-- last onboarded time exists
-- webhook is attached
-- but phone status remains `PENDING`
-- `can_send_message = BLOCKED`
-- primary error `141000` indicates the phone number is still not fully linked to the WhatsApp account / final OTP registration state
+Google Sheets table  
+Firebase collection
 
-This is the current first real blocker and should be treated as the sprint’s exact failing phase unless the next monitored onboarding run changes the phone state.
+Registry fields:
+
+• user_id  
+• phone_number_id  
+• webhook endpoint  
+• configuration settings  
+
+Purpose:
+
+Enable multi-tenant TaskLess architecture.
 
 ---
 
-## 11. Close Criteria For This Sprint
+# 8. Logging Requirements
 
-- [x] TaskLess DEV_TASKS.md reflects the real TaskLess product and sprint
-- [x] App system token is confirmed working
-- [ ] Script secret is confirmed against Meta settings
-- [ ] One monitored onboarding run is completed after the current diagnostics baseline
-- [x] We know the WABA ID for the onboarding target
-- [x] We know the phone number ID for the onboarding target
-- [ ] We know whether access code and token exchange succeeded in the current monitored flow
-- [ ] If token exchange failed, the successful identifiers were still preserved
-- [x] The first actual blocker is now documented as a precise phase, not a guess
+All flows must log deterministically.
+
+Logs must capture:
+
+• inbound events  
+• AI proposals  
+• Boss approvals  
+• execution attempts  
+• success  
+• errors
+
+Silent execution paths are not allowed.
+
+---
+
+# 9. Strategic Direction
+
+TaskLess converts messaging apps into a command-driven communication system.
+
+Key principles:
+
+• Boss remains in control  
+• AI prepares work  
+• Safety Guard prevents mistakes  
+• communication flows through a command layer  
+
+TaskLess sits above communication tools rather than replacing them.
+
+This allows business owners to keep their familiar interfaces
+while gaining AI-powered workflow automation.
+
+---
+
+# 10. Lessons Learned
+
+• WhatsApp Coexistence removes reliable message deletion  
+• Prevention is better than correction  
+• AI draft + Boss approval is the safest workflow  
+• Safety Guard significantly reduces reputational risk  
+• Logging and learning loops are critical for improvement
+
