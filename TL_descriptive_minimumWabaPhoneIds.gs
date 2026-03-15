@@ -1,28 +1,18 @@
 /**
  * TL_descriptive_minimumWabaPhoneIds.gs
- *
- * Goal:
- * - Start from a known WABA ID
- * - Read the WABA directly
- * - List phone numbers under that WABA
- *
- * Uses:
- * - Script Property: TL_SYSTEM_TOKEN
- * - Direct WABA ID: 1359984478739186
+ * WABA-FIRST VERSION
  */
 
 const TL_GRAPH_VERSION = "v21.0";
 const TL_GRAPH_BASE = "https://graph.facebook.com/" + TL_GRAPH_VERSION;
 const TL_TOKEN_PROPERTY_KEY = "TL_SYSTEM_TOKEN";
-
-// WABA ID from Meta UI
 const TL_WABA_ID = "1359984478739186";
 
 function TL_descriptive_run_minimum() {
   const token = TL_getToken_();
   if (!token) throw new Error("Missing Script Property: " + TL_TOKEN_PROPERTY_KEY);
 
-  Logger.log("=== DIRECT WABA LOOKUP ===");
+  Logger.log("=== WABA-FIRST VERSION ===");
   Logger.log("WABA ID: " + TL_WABA_ID);
 
   const waba = TL_fetchJson_(
@@ -49,10 +39,6 @@ function TL_descriptive_run_minimum() {
 
   if (phoneNumbers.length === 0) {
     Logger.log("No phone numbers returned for this WABA.");
-    Logger.log("Possible causes:");
-    Logger.log("1) Token lacks whatsapp_business_management access");
-    Logger.log("2) System user is not assigned to this WABA / phone asset");
-    Logger.log("3) The WABA exists but phone numbers are not accessible to this token");
     return;
   }
 
@@ -67,8 +53,6 @@ function TL_descriptive_run_minimum() {
     Logger.log("code_verification_status: " + String(pn.code_verification_status || ""));
   });
 }
-
-/** Helpers */
 
 function TL_getToken_() {
   return PropertiesService.getScriptProperties().getProperty(TL_TOKEN_PROPERTY_KEY);
