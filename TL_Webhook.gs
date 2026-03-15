@@ -2,21 +2,17 @@
  * TL_Webhook - WhatsApp Cloud API webhook entry (GET verify + POST events)
  *
  * Required Script Properties:
- * - TL_VERIFY_TOKEN        webhook verify token
- * - TL_SHEET_ID            spreadsheet ID containing OPEN / WEBHOOK_LOG
- * - META_USER_ACCESS_TOKEN Graph API token (optional for COEX_checkPhoneNumberState)
+ * - TL_VERIFY_TOKEN        (string)  webhook verify token
+ * - TL_SHEET_ID            (string)  spreadsheet ID containing AUDIT_LOG / OPEN
+ * - META_USER_ACCESS_TOKEN (string)  Graph API token (optional for COEX_checkPhoneNumberState)
  *
- * Tabs:
- * - WEBHOOK_LOG
+ * Tabs used:
+ * - AUDIT_LOG
  * - OPEN
  */
 const TL_WEBHOOK = {
-  LOG_SHEET: "WEBHOOK_LOG",
+  AUDIT_SHEET: "AUDIT_LOG",
   OPEN_SHEET: "OPEN",
-  LOG_HEADERS: [
-    "ts","event_type","display_phone_number","phone_number_id",
-    "from","message_id","message_type","text","statuses_count","raw_json"
-  ],
   OPEN_HEADERS: [
     "createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel",
     "status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"
@@ -32,90 +28,99 @@ function doGet(e) {
     const challenge = String(p["hub.challenge"] || "");
 
     const expected = String(PropertiesService.getScriptProperties().getProperty("TL_VERIFY_TOKEN") || "");
+
+    TLW_appendAudit_("SYST", "WEBHOOK_VERIFY_IN", {
+      mode: mode,
+      tokenPresent: !!token,
+      expectedPresent: !!expected
+    });
+
     if (mode === "subscribe" && expected && token === expected) {
+      TLW_appendAudit_("SYST", "WEBHOOK_VERIFY_OK", {});
       return ContentService.createTextOutput(challenge).setMimeType(ContentService.MimeType.TEXT);
     }
 
+    TLW_appendAudit_("SYST", "WEBHOOK_VERIFY_FORBIDDEN", { mode: mode });
     return ContentService.createTextOutput("forbidden").setMimeType(ContentService.MimeType.TEXT);
   } catch (err) {
+    TLW_appendAudit_("SYST", "WEBHOOK_VERIFY_ERR", {
+      error: String(err && err.stack ? err.stack : err)
+    });
     return ContentService.createTextOutput("error").setMimeType(ContentService.MimeType.TEXT);
   }
 }
 
 function doPost(e) {
-  const started = new Date();
-
   try {
     const raw = (e && e.postData && typeof e.postData.contents === "string") ? e.postData.contents : "";
+
+    TLW_appendAudit_("SYST", "WEBHOOK_POST_IN", {
+      rawLen: raw ? raw.length : 0,
+      keys: TLW_topLevelKeys_(raw)
+    });
+
     if (!raw) {
-      TLW_logDebug_("empty_post", { when: started.toISOString() });
-      return TLW_json_({ ok: true, empty: true });
+      TLW_appendAudit_("SYST", "WEBHOOK_POST_EMPTY", {});
+      return TLW_json_({ ok:true, empty:true });
     }
 
     let payload = {};
     try {
       payload = JSON.parse(raw);
     } catch (parseErr) {
-      TLW_logDebug_("invalid_json", { err: String(parseErr), raw: raw.slice(0, 500) });
-      return TLW_json_({ ok: true, parse_error: true });
+      TLW_appendAudit_("SYST", "WEBHOOK_POST_ERR", {
+        error: String(parseErr),
+        rawHead: raw.slice(0, 500)
+      });
+      return TLW_json_({ ok:true, parse_error:true });
     }
 
     const events = TLW_extractEvents_(payload);
-    if (!events.length) {
-      TLW_appendLogRow_({
-        ts: new Date(),
-        event_type: "webhook_no_events",
-        display_phone_number: "",
-        phone_number_id: "",
-        from: "",
-        message_id: "",
-        message_type: "",
-        text: "",
-        statuses_count: 0,
-        raw_json: TLW_safeStringify_(payload, 4000)
-      }, true);
 
-      return TLW_json_({ ok: true, events: 0 });
+    TLW_appendAudit_("SYST", "WEBHOOK_EVENTS_EXTRACTED", {
+      count: events.length
+    });
+
+    if (!events.length) {
+      TLW_appendAudit_("SYST", "WEBHOOK_NO_EVENTS", payload);
+      return TLW_json_({ ok:true, events:0 });
     }
 
-    const idSet = TLW_getRecentMessageIdSet_();
-    let appended = 0;
-    let skipped = 0;
+    const idSet = TLW_getRecentOpenMessageIdSet_();
     let openAppended = 0;
+    let skipped = 0;
 
-    events.forEach(ev => {
-      const messageId = String(ev.message_id || "");
-      if (messageId && idSet.has(messageId)) {
-        skipped++;
+    events.forEach(function(ev) {
+      if (!(ev.event_type === "messages" && ev.message_type === "text")) {
+        TLW_appendAudit_("SYST", "WEBHOOK_NON_TEXT_EVENT", ev);
         return;
       }
 
-      TLW_appendLogRow_({
-        ts: new Date(),
-        event_type: ev.event_type || "messages",
-        display_phone_number: ev.display_phone_number || "",
-        phone_number_id: ev.phone_number_id || "",
-        from: ev.from || "",
-        message_id: messageId,
-        message_type: ev.message_type || "",
-        text: ev.text || "",
-        statuses_count: ev.statuses_count || 0,
-        raw_json: TLW_safeStringify_(payload, 8000)
-      }, false);
-
-      if (ev.event_type === "messages" && ev.message_type === "text" && messageId) {
-        TLW_appendOpenRow_(ev);
-        openAppended++;
+      const msgId = String(ev.message_id || "");
+      if (msgId && idSet.has(msgId)) {
+        skipped++;
+        TLW_appendAudit_("SYST", "WEBHOOK_DUPLICATE_SKIP", { message_id: msgId });
+        return;
       }
 
-      if (messageId) idSet.add(messageId);
-      appended++;
+      TLW_appendOpenRow_(ev);
+      if (msgId) idSet.add(msgId);
+      openAppended++;
+
+      TLW_appendAudit_("SYST", "WEBHOOK_OPEN_APPEND_OK", {
+        message_id: msgId,
+        from: ev.from || "",
+        display_phone_number: ev.display_phone_number || "",
+        phone_number_id: ev.phone_number_id || ""
+      });
     });
 
-    return TLW_json_({ ok: true, appended: appended, skipped: skipped, openAppended: openAppended });
+    return TLW_json_({ ok:true, openAppended:openAppended, skipped:skipped });
   } catch (err) {
-    TLW_logDebug_("doPost_error", { err: String(err && err.stack ? err.stack : err) });
-    return TLW_json_({ ok: true, error: true });
+    TLW_appendAudit_("SYST", "WEBHOOK_POST_ERR", {
+      error: String(err && err.stack ? err.stack : err)
+    });
+    return TLW_json_({ ok:true, error:true });
   }
 }
 
@@ -134,26 +139,19 @@ function COEX_checkPhoneNumberState(phoneNumberId) {
 
   const url = "https://graph.facebook.com/v24.0/" + encodeURIComponent(id) + "?fields=" + encodeURIComponent(fields);
   const res = UrlFetchApp.fetch(url, {
-    method: "get",
-    muteHttpExceptions: true,
-    headers: { Authorization: "Bearer " + token }
+    method:"get",
+    muteHttpExceptions:true,
+    headers:{ Authorization:"Bearer " + token }
   });
 
   const status = res.getResponseCode();
   const body = res.getContentText();
 
-  TLW_appendLogRow_({
-    ts: new Date(),
-    event_type: "coex_check_state",
-    display_phone_number: "",
+  TLW_appendAudit_("SYST", "COEX_CHECK_STATE", {
     phone_number_id: id,
-    from: "",
-    message_id: "",
-    message_type: "HTTP_" + status,
-    text: "",
-    statuses_count: 0,
-    raw_json: body
-  }, true);
+    httpStatus: status,
+    body: body
+  });
 
   return { status: status, body: body };
 }
@@ -182,7 +180,7 @@ function TLW_extractEvents_(payload) {
           const from = String(m.from || waId || "");
           const msgId = String(m.id || "");
           const type = String(m.type || "");
-          const ts = String(m.timestamp || "");
+          const timestamp = String(m.timestamp || "");
           const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
 
           out.push({
@@ -195,7 +193,7 @@ function TLW_extractEvents_(payload) {
             text: text,
             statuses_count: 0,
             profile_name: profileName,
-            timestamp: ts
+            timestamp: timestamp
           });
         });
       }
@@ -226,7 +224,7 @@ function TLW_appendOpenRow_(ev) {
   let sh = ss.getSheetByName(TL_WEBHOOK.OPEN_SHEET);
   if (!sh) sh = ss.insertSheet(TL_WEBHOOK.OPEN_SHEET);
 
-  TLW_ensureHeaders_(sh, TL_WEBHOOK.OPEN_HEADERS);
+  TLW_ensureOpenHeaders_(sh);
 
   const nowIso = new Date().toISOString();
   const messageId = String(ev.message_id || "");
@@ -264,31 +262,27 @@ function TLW_appendOpenRow_(ev) {
   ]);
 }
 
-function TLW_appendLogRow_(obj, allowDuplicate) {
-  const ss = TLW_getSpreadsheet_();
-  let sh = ss.getSheetByName(TL_WEBHOOK.LOG_SHEET);
-  if (!sh) sh = ss.insertSheet(TL_WEBHOOK.LOG_SHEET);
+function TLW_appendAudit_(actor, eventType, payloadObj) {
+  try {
+    const ss = TLW_getSpreadsheet_();
+    let sh = ss.getSheetByName(TL_WEBHOOK.AUDIT_SHEET);
+    if (!sh) sh = ss.insertSheet(TL_WEBHOOK.AUDIT_SHEET);
 
-  TLW_ensureHeaders_(sh, TL_WEBHOOK.LOG_HEADERS);
+    if (sh.getLastRow() === 0) {
+      sh.appendRow(["ts","actor","eventType","payloadJson","taskId","batchId","payloadJson2"]);
+      sh.setFrozenRows(1);
+    }
 
-  const messageId = String(obj.message_id || "");
-  if (!allowDuplicate && messageId) {
-    const set = TLW_getRecentMessageIdSet_();
-    if (set.has(messageId)) return;
-  }
-
-  sh.appendRow([
-    obj.ts || new Date(),
-    String(obj.event_type || ""),
-    String(obj.display_phone_number || ""),
-    String(obj.phone_number_id || ""),
-    String(obj.from || ""),
-    String(obj.message_id || ""),
-    String(obj.message_type || ""),
-    String(obj.text || ""),
-    Number(obj.statuses_count || 0),
-    String(obj.raw_json || "")
-  ]);
+    sh.appendRow([
+      new Date().toISOString(),
+      String(actor || "SYST"),
+      String(eventType || ""),
+      TLW_safeStringify_(payloadObj, 8000),
+      "",
+      "",
+      ""
+    ]);
+  } catch (e) {}
 }
 
 function TLW_getSpreadsheet_() {
@@ -297,25 +291,24 @@ function TLW_getSpreadsheet_() {
   return SpreadsheetApp.openById(sheetId);
 }
 
-function TLW_ensureHeaders_(sh, headers) {
-  const range = sh.getRange(1, 1, 1, headers.length);
+function TLW_ensureOpenHeaders_(sh) {
+  const range = sh.getRange(1,1,1,TL_WEBHOOK.OPEN_HEADERS.length);
   const existing = range.getValues()[0];
   const needs = existing.some(function(v, i) {
-    return String(v || "") !== String(headers[i] || "");
+    return String(v || "") !== String(TL_WEBHOOK.OPEN_HEADERS[i] || "");
   });
 
   if (needs) {
-    range.setValues([headers]);
+    range.setValues([TL_WEBHOOK.OPEN_HEADERS]);
     sh.setFrozenRows(1);
   }
 }
 
-function TLW_getRecentMessageIdSet_() {
+function TLW_getRecentOpenMessageIdSet_() {
   const set = new Set();
-
   try {
     const ss = TLW_getSpreadsheet_();
-    const sh = ss.getSheetByName(TL_WEBHOOK.LOG_SHEET);
+    const sh = ss.getSheetByName(TL_WEBHOOK.OPEN_SHEET);
     if (!sh) return set;
 
     const lastRow = sh.getLastRow();
@@ -323,43 +316,28 @@ function TLW_getRecentMessageIdSet_() {
 
     const start = Math.max(2, lastRow - TL_WEBHOOK.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
     const count = lastRow - start + 1;
-    const values = sh.getRange(start, 6, count, 1).getValues();
-
+    const values = sh.getRange(start, 5, count, 1).getValues(); // chunkId
     values.forEach(function(r) {
       const id = String(r[0] || "").trim();
       if (id) set.add(id);
     });
   } catch (e) {}
-
   return set;
 }
 
-function TLW_logDebug_(label, data) {
+function TLW_topLevelKeys_(raw) {
   try {
-    TLW_appendLogRow_({
-      ts: new Date(),
-      event_type: "debug_" + String(label || "log"),
-      display_phone_number: "",
-      phone_number_id: "",
-      from: "",
-      message_id: "",
-      message_type: "",
-      text: "",
-      statuses_count: 0,
-      raw_json: TLW_safeStringify_(data, 4000)
-    }, true);
-  } catch (e) {}
+    const obj = JSON.parse(raw);
+    return Object.keys(obj || {});
+  } catch (e) {
+    return [];
+  }
 }
 
 function TLW_safeStringify_(obj, maxLen) {
   const lim = (typeof maxLen === "number" && isFinite(maxLen)) ? maxLen : 4000;
   let s = "";
-  try {
-    s = JSON.stringify(obj);
-  } catch (e) {
-    s = String(obj);
-  }
-
+  try { s = JSON.stringify(obj); } catch (e) { s = String(obj); }
   if (s.length > lim) return s.slice(0, lim) + "...";
   return s;
 }
