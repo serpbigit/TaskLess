@@ -1,89 +1,26 @@
-function doPost(e) {
-  try {
+/**
+ * TL_WA_POC_Router.gs
+ * Helper only - NOT a webhook entrypoint.
+ * Canonical webhook entrypoint must stay in TL_Webhook.gs
+ */
 
-    const payload = JSON.parse(e.postData.contents);
+function TL_WA_POC_Router_handle_(payload) {
+  const entry = payload && payload.entry && payload.entry[0] ? payload.entry[0] : {};
+  const change = entry && entry.changes && entry.changes[0] ? entry.changes[0] : {};
+  const value = change.value || {};
+  const msg = value && value.messages && value.messages[0] ? value.messages[0] : null;
 
-    const entry = payload.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
-
-    const msg = value?.messages?.[0];
-    const phoneNumberId = value?.metadata?.phone_number_id;
-
-    if (!msg) {
-      TL_Log_("WA_NO_MESSAGE", payload);
-      return TL_OK_();
-    }
-
-    const userPhone = msg.from;
-    const messageId = msg.id;
-    const text = msg.text?.body || "";
-
-    const now = new Date().toISOString();
-
-    const refId = "wa:msg:" + messageId;
-    const chunkId = messageId;
-
-    const draftJson = {
-      source: "whatsapp",
-      phone_number_id: phoneNumberId,
-      from: userPhone,
-      messageId: messageId,
-      text: text
-    };
-
-    const sheet = SpreadsheetApp.getActive().getSheetByName("OPEN");
-
-    sheet.appendRow([
-      now,                // createdAt
-      now,                // updatedAt
-      userPhone,          // userE164
-      refId,              // refId
-      chunkId,            // chunkId
-      text.substring(0,120), // title
-      "wa_message",       // kind
-      "whatsapp",         // channel
-      "OPEN",             // status
-      now,                // askedAt
-      "",                 // answeredAt
-      "",                 // executedAt
-      JSON.stringify(draftJson), // draftOrPromptJson
-      "WA_INGEST",        // lastAction
-      now                 // lastActionAt
-    ]);
-
-    TL_Log_("WA_MESSAGE_STORED", draftJson);
-
-    return TL_OK_();
-
-  } catch (err) {
-
-    TL_Log_("WA_ERROR", err.toString());
-
-    return TL_OK_();
+  if (!msg) {
+    return { ok: true, note: "no message in payload" };
   }
-}
 
-
-
-function TL_OK_() {
-  return ContentService
-    .createTextOutput("OK")
-    .setMimeType(ContentService.MimeType.TEXT);
-}
-
-
-
-function TL_Log_(type, data) {
-
-  const log = SpreadsheetApp.getActive().getSheetByName("AUDIT_LOG");
-
-  if (!log) return;
-
-  log.appendRow([
-    new Date().toISOString(),
-    type,
-    JSON.stringify(data)
-  ]);
-
+  return {
+    ok: true,
+    from: String(msg.from || ""),
+    messageId: String(msg.id || ""),
+    type: String(msg.type || ""),
+    text: (msg.type === "text" && msg.text && msg.text.body) ? String(msg.text.body || "") : "",
+    phone_number_id: String((value.metadata && value.metadata.phone_number_id) || ""),
+    display_phone_number: String((value.metadata && value.metadata.display_phone_number) || "")
+  };
 }
