@@ -34,7 +34,7 @@ They are not intended as documentation for human developers.
 - All edits occur in the repo. Summarize changes; user decides when to git add/commit/push.
 - If Apps Script UI changes are made, require clasp pull before committing.
 
-## 7. Deployment (Apps Script)
+## Apps Script Deployment Rules
 TaskLess uses a fixed Google Apps Script Web App deployment.
 
 Never create a new deployment.
@@ -63,4 +63,4 @@ Creating a new deployment would change the webhook URL and break the system.
 - Provide one clear command sequence only when the user must run it; otherwise perform edits directly.
 
 ## 10. File Locations
-- Keep DEV_INSTRUCTIONS.md at repo root; reference it from DEV_TASKS.md so it’s easy to find.
+- Keep AGENT.md at repo root; reference it from DEV_TASKS.md so it’s easy to find.
