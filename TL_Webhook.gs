@@ -67,7 +67,8 @@ function doPost(e) {
 
     events.forEach(ev => {
       const messageId = String(ev.message_id || "");
-      if (messageId && idSet.has(messageId)) { skipped++; return; }
+      const dedupeKey = String(ev.event_type || "") + "|" + messageId + "|" + String(ev.text || "");
+      if (messageId && idSet.has(dedupeKey)) { skipped++; return; }
 
       TLW_appendRow_({
         ts:new Date(),
@@ -82,7 +83,7 @@ function doPost(e) {
         raw_json: TLW_safeStringify_(payload, 8000)
       }, false);
 
-      if (messageId) idSet.add(messageId);
+      if (messageId) idSet.add(dedupeKey);
       appended++;
     });
 
@@ -142,13 +143,69 @@ function TLW_extractEvents_(payload) {
           const msgId = String(m.id || "");
           const type = String(m.type || "");
           const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
-          out.push({ event_type:"messages", display_phone_number:displayPhone, phone_number_id:phoneId, from, message_id:msgId, message_type:type, text, statuses_count:0 });
+          out.push({
+            event_type:"messages",
+            display_phone_number:displayPhone,
+            phone_number_id:phoneId,
+            from:from,
+            message_id:msgId,
+            message_type:type,
+            text:text,
+            statuses_count:0
+          });
+        });
+      }
+
+      if (field === "message_echoes" && val.message_echoes && val.message_echoes.length) {
+        val.message_echoes.forEach(m => {
+          const from = String(m.from || "");
+          const msgId = String(m.id || "");
+          const type = String(m.type || "");
+          const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
+          out.push({
+            event_type:"message_echoes",
+            display_phone_number:displayPhone,
+            phone_number_id:phoneId,
+            from:from,
+            message_id:msgId,
+            message_type:type,
+            text:text,
+            statuses_count:0
+          });
+        });
+      }
+
+      if (field === "smb_message_echoes" && val.message_echoes && val.message_echoes.length) {
+        val.message_echoes.forEach(m => {
+          const from = String(m.from || "");
+          const msgId = String(m.id || "");
+          const type = String(m.type || "");
+          const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
+          out.push({
+            event_type:"smb_message_echoes",
+            display_phone_number:displayPhone,
+            phone_number_id:phoneId,
+            from:from,
+            message_id:msgId,
+            message_type:type,
+            text:text,
+            statuses_count:0
+          });
         });
       }
 
       const statuses = val.statuses || [];
       if (statuses && statuses.length) {
-        out.push({ event_type:"statuses", display_phone_number:displayPhone, phone_number_id:phoneId, from:"", message_id:"", message_type:"status_update", text:"", statuses_count: statuses.length });
+        out.push({
+          event_type:"statuses",
+          display_phone_number:displayPhone,
+          phone_number_id:phoneId,
+          from:"",
+          message_id:"",
+          message_type:"status_update",
+          text:"",
+          statuses_count: statuses.length
+        });
       }
     });
   });
@@ -167,12 +224,6 @@ function TLW_appendRow_(obj, allowDuplicate) {
   const existing = range.getValues()[0];
   const needs = existing.some((v,i)=>String(v||"")!==String(TL_WEBHOOK.HEADERS[i]||""));
   if (needs) { range.setValues([TL_WEBHOOK.HEADERS]); sh.setFrozenRows(1); }
-
-  const messageId = String(obj.message_id || "");
-  if (!allowDuplicate && messageId) {
-    const set = TLW_getRecentMessageIdSet_();
-    if (set.has(messageId)) return;
-  }
 
   sh.appendRow([
     obj.ts || new Date(),
@@ -200,8 +251,13 @@ function TLW_getRecentMessageIdSet_() {
 
     const start = Math.max(2, lastRow - TL_WEBHOOK.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
     const count = lastRow - start + 1;
-    const values = sh.getRange(start, 6, count, 1).getValues(); // message_id col
-    values.forEach(r => { const id = String(r[0]||"").trim(); if (id) set.add(id); });
+    const values = sh.getRange(start, 2, count, 7).getValues();
+    values.forEach(r => {
+      const eventType = String(r[0] || "").trim();
+      const messageId = String(r[4] || "").trim();
+      const text = String(r[6] || "").trim();
+      if (messageId) set.add(eventType + "|" + messageId + "|" + text);
+    });
   } catch (e) {}
   return set;
 }
