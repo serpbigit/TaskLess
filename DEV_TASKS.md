@@ -1,6 +1,8 @@
 # TaskLess - DEV_TASKS
 
 Working instructions: see DEV_INSTRUCTIONS.md
+Operational model: see OPERATIONAL.md
+Reconstruction guide: see RECONSTRUCTION.md
 
 ---
 
