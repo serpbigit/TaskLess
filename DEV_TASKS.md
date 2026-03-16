@@ -4,34 +4,36 @@
 
 # 1. Canonical Value Proposition
 
-TaskLess is a command layer for business communication.
+TaskLess (BossAI) is a command layer for business communication.
 
-Instead of business owners manually managing conversations inside messaging apps,
-TaskLess sits above those apps and acts as a control system that:
+Brand concept:
+
+BossAI.online — You are the Boss. AI does the rest.
+
+TaskLess allows business owners to continue using their familiar messaging tools (especially WhatsApp Business) while AI organizes communication and tasks behind the scenes.
+
+The system runs on top of the user's personal Google Workspace (Gmail + Google Sheets) and functions as a lightweight CRM and communication control system.
+
+TaskLess:
 
 • receives inbound messages  
 • analyzes intent using AI  
-• proposes responses  
-• requires Boss approval  
-• executes communication safely  
+• proposes response drafts  
+• extracts tasks and commitments  
+• requires Boss approval before sending  
+• logs all communication events  
 
-TaskLess introduces an **AI Safety Guard** that prevents risky or damaging
-messages from being sent impulsively.
+Goal:
 
-The system is designed to work **on top of WhatsApp Business Coexistence**,
-allowing business owners to keep their familiar WhatsApp UI while TaskLess
-provides intelligence, safety, and automation.
-
-The objective is to:
-
-• reduce manual messaging workload  
-• prevent embarrassing or risky messages  
-• improve response speed  
-• create a structured communication system  
+Transform chaotic messaging into a structured communication workflow without replacing WhatsApp.
 
 Expected impact:
 
-10–15 hours per month saved for typical SMB users.
+10–15 hours saved per month for SMB users.
+
+Core concept:
+
+You remain the Boss. AI prepares the work.
 
 ---
 
@@ -40,6 +42,7 @@ Expected impact:
 ## Roles
 
 ### TaskLess Boss
+
 The human user.
 
 Responsibilities:
@@ -58,10 +61,10 @@ The AI system responsible for:
 
 • analyzing inbound messages  
 • generating reply drafts  
-• extracting tasks and intents  
+• extracting tasks  
 • organizing communication context  
 
-The Assistant prepares actions but does not execute without Boss approval.
+The Assistant prepares work but does not execute without Boss approval.
 
 ---
 
@@ -69,7 +72,7 @@ The Assistant prepares actions but does not execute without Boss approval.
 
 A protective layer inside the Assistant.
 
-It detects risky communications before sending.
+Detects risky communications before sending.
 
 Examples:
 
@@ -81,9 +84,9 @@ Examples:
 
 If detected:
 
-Assistant pauses execution and requests confirmation from the Boss.
+Assistant pauses execution and asks Boss for confirmation.
 
-Boss may still override.
+Boss can still override.
 
 ---
 
@@ -93,17 +96,17 @@ Inbound Flow
 
 Client  
 ↓  
-WhatsApp (Coexist)  
+WhatsApp Business (Coexist)  
 ↓  
 WABA Webhook  
 ↓  
-TaskLess Assistant  
+TaskLess Assistant
 
 Assistant analyzes:
 
 • sender  
 • message content  
-• conversation context  
+• conversation context
 
 Assistant produces:
 
@@ -150,97 +153,174 @@ When Boss edits an AI draft the system records:
 • Boss revision  
 • final message
 
-This data is stored in Google Sheets.
+Stored in Google Sheets.
 
 Over time the Assistant learns:
 
 • tone preferences  
-• phrasing  
-• communication style
+• phrasing style  
+• communication patterns
 
 ---
 
 # 5. Development Ledger
 
-## ✓ Completed Work
+## Completed Work
 
-✓ Core TaskLess concept defined  
-✓ Boss / Assistant architecture defined  
-✓ AI Safety Guard concept defined  
-✓ WhatsApp Coexistence limitations analyzed  
-✓ Deployment Web App created  
-✓ Google Apps Script deployment pipeline established  
+Core architecture defined.
 
-Deployment endpoint:
+Boss / Assistant system model established.
+
+AI Safety Guard concept defined.
+
+WhatsApp Business Coexist successfully configured.
+
+Cloud API connection confirmed.
+
+WABA ID discovered:
+
+1359984478739186
+
+Phone Number ID discovered:
+
+896133996927016
+
+Permanent system token configured.
+
+Google Apps Script webhook deployed.
+
+Webhook endpoint:
 
 https://script.google.com/macros/s/AKfycbx1p8fg0eFua_9qLJ7tTk0P-cd_zLKxAHnc8KRfyIhgaPtwXANfEZ_QjG3a6pvfVefa/exec
 
+Google Sheet logging infrastructure created.
+
+WEBHOOK_LOG table captures:
+
+• timestamp  
+• event_type  
+• display_phone_number  
+• phone_number_id  
+• sender  
+• message_id  
+• message_type  
+• text  
+• statuses_count  
+• raw_json
+
+Cloud API outbound message sending verified.
+
+Manual webhook POST tests successful.
+
+Meta webhook test events successfully delivered.
+
 ---
 
-## ▶ Current Work
-
-Inbound WhatsApp message capture prototype.
+# 6. Current Investigation
 
 Goal:
 
-Receive WABA webhook events and log them to a Google Sheet.
+Receive inbound WhatsApp messages both:
 
-Data to capture:
+• in the mobile WhatsApp Business app  
+• in the Cloud API webhook
 
-• phone_number_id  
-• sender phone  
-• message text  
-• timestamp  
+Observed behavior:
 
-This stage validates:
+Webhook endpoint receives Meta test events correctly.
 
-• webhook reliability  
-• message structure  
-• data capture
+Example event:
 
----
+field: messages  
+type: text  
+text: "Webhook test message"
 
-## ○ Next Tasks
+However mobile-originated messages sometimes do not appear as "messages" webhook events.
 
-Task 1 — AI Draft Generation
+Instead they appear as:
 
-Assistant generates reply drafts for inbound messages.
+field: message_echoes
 
-Drafts stored alongside inbound messages.
+or
 
----
+field: smb_message_echoes
 
-Task 2 — Boss Approval Interface
+Example payload observed:
 
-Boss can:
+field: smb_message_echoes  
+type: text  
+text: "this is a text message"
 
-• approve draft  
-• edit draft  
-• reject draft  
+The current parser logs these as:
 
----
+event_type: webhook_no_events
 
-Task 3 — AI Learning Storage
-
-Store Boss revisions in Google Sheets.
-
-Create learning dataset for future draft improvements.
+because only messages and statuses were originally supported.
 
 ---
 
-Task 4 — Safety Guard Logic
+# 7. Required Webhook Subscriptions
 
-Detect risky messages before sending.
+For coexist support the system must subscribe to:
 
-Trigger confirmation workflow.
+messages  
+smb_message_echoes
+
+Observed:
+
+messages subscription works  
+smb_message_echoes subscription works  
+message_echoes subscription inconsistent
+
+Echo payloads confirm Meta webhook delivery is functioning.
 
 ---
 
-# 6. Future Architecture
+# 8. Current Troubleshooting Task
 
-Current prototype uses a single Web App.
+Objective:
 
-Future system will include a **Router Layer**.
+Ensure that real inbound WhatsApp messages trigger usable webhook records.
+
+Questions being investigated:
+
+• why some inbound messages appear only as echo events  
+• when "messages" events are generated vs "smb_message_echoes"  
+• whether coexist routing depends on message origin
+
+Test observations:
+
+Meta webhook test → success  
+Manual webhook POST → success  
+Echo webhook events → received  
+
+But some mobile messages still do not appear as standard messages events.
+
+---
+
+# 9. Immediate Next Tasks
+
+Update webhook parser to support:
+
+messages  
+smb_message_echoes  
+message_echoes
+
+Verify inbound messages from an external phone number.
+
+Confirm real client messages generate usable records.
+
+Normalize webhook events into unified message format.
+
+---
+
+# 10. Future Architecture
+
+Current prototype:
+
+Single Google Apps Script Web App.
+
+Future system will include a Router Layer.
 
 Router responsibilities:
 
@@ -250,68 +330,65 @@ Router responsibilities:
 
 ---
 
-# 7. Onboarding Registry
+# 11. Onboarding Registry
 
-User onboarding data will eventually move to a structured registry.
-
-Candidate systems:
-
-Google Sheets table  
-Firebase collection
-
-Registry fields:
+Future multi-tenant registry fields:
 
 • user_id  
 • phone_number_id  
 • webhook endpoint  
 • configuration settings  
 
-Purpose:
+Candidate storage:
 
-Enable multi-tenant TaskLess architecture.
+Google Sheets  
+Firebase
 
 ---
 
-# 8. Logging Requirements
+# 12. Logging Requirements
 
 All flows must log deterministically.
 
 Logs must capture:
 
 • inbound events  
-• AI proposals  
+• AI drafts  
 • Boss approvals  
 • execution attempts  
 • success  
 • errors
 
-Silent execution paths are not allowed.
+No silent execution paths.
 
 ---
 
-# 9. Strategic Direction
+# 13. Strategic Direction
 
-TaskLess converts messaging apps into a command-driven communication system.
+TaskLess converts messaging into a command-driven communication system.
 
-Key principles:
+Principles:
 
 • Boss remains in control  
 • AI prepares work  
 • Safety Guard prevents mistakes  
-• communication flows through a command layer  
+• communication becomes structured  
 
 TaskLess sits above communication tools rather than replacing them.
 
-This allows business owners to keep their familiar interfaces
-while gaining AI-powered workflow automation.
-
 ---
 
-# 10. Lessons Learned
+# 14. Lessons Learned
 
-• WhatsApp Coexistence removes reliable message deletion  
-• Prevention is better than correction  
-• AI draft + Boss approval is the safest workflow  
-• Safety Guard significantly reduces reputational risk  
-• Logging and learning loops are critical for improvement
+WhatsApp Coexist introduces additional webhook streams.
+
+Inbound messages may appear as echo events.
+
+Webhook logging is essential for debugging.
+
+AI draft + Boss approval prevents messaging mistakes.
+
+Safety Guard significantly reduces reputational risk.
+
+Logging and learning loops are critical for improvement.
 
