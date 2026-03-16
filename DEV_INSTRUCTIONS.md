@@ -6,7 +6,7 @@
 - If a required spec file is missing, create it in-repo via patch/full rewrite.
 
 ## 2. Session Bootstrap
-- At session start, read DEV_TASKS.md and this file; do not rely on clipboard/menu scripts.
+- At session start, read DEV_TASKS.md and this file; assume a plain shell without custom profile helpers.
 - If the environment is not Windows PowerShell, ask which shell is being used; otherwise default to PowerShell commands.
 
 ## 3. Operation Modes
@@ -19,7 +19,7 @@
 - Do not mix environment-specific commands in the same response.
 
 ## 5. Context Retrieval
-- Never assume file contents; read needed files directly (e.g., Get-Content, g).
+- Never assume file contents; read needed files directly (e.g., `Get-Content`, `Select-String`).
 - Only ask for additional dumps if something is inaccessible from the repo.
 
 ## 6. Git Discipline
