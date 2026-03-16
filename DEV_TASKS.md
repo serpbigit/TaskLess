@@ -1,4 +1,6 @@
-# TaskLess — DEV_TASKS
+# TaskLess - DEV_TASKS
+
+Working instructions: see DEV_INSTRUCTIONS.md
 
 ---
 
