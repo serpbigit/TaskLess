@@ -1,7 +1,6 @@
 /**
  * TL_WA_POC_Router.gs
- * Helper only - NOT a webhook entrypoint.
- * Canonical webhook entrypoint must stay in TL_Webhook.gs
+ * Helper only. No doPost here.
  */
 
 function TL_WA_POC_Router_handle_(payload) {
