@@ -2,6 +2,43 @@
 
 ---
 
+# 0. System Context
+
+TaskLess is currently in the **infrastructure validation phase**.
+
+The objective of this phase was to prove that business communication can be captured reliably from WhatsApp and stored in a structured backend without disrupting the user's normal workflow.
+
+The key architectural decision behind TaskLess is:
+
+TaskLess **does not replace communication tools**.
+
+Instead it **sits above them** and converts everyday communication into structured operational data.
+
+Current infrastructure stack:
+
+• WhatsApp Business (Coexist mode)  
+• Meta Cloud API Webhooks  
+• Google Apps Script Web App  
+• Google Sheets CRM backend  
+
+Verified pipeline:
+
+Client  
+↓  
+WhatsApp Business  
+↓  
+Meta Cloud API Webhook  
+↓  
+Apps Script Webhook  
+↓  
+TaskLess Logging Layer  
+↓  
+Google Sheets CRM
+
+This pipeline is now **fully operational**.
+
+---
+
 # 1. Canonical Value Proposition
 
 TaskLess (BossAI) is a command layer for business communication.
@@ -163,25 +200,33 @@ Over time the Assistant learns:
 
 ---
 
-# 5. Development Ledger
+# 5. Infrastructure Milestone Achieved
 
-## Completed Work
+The WhatsApp communication ingestion layer is now operational.
 
-Core architecture defined.
+Verified capabilities:
 
-Boss / Assistant system model established.
+Inbound messages captured via webhook.
 
-AI Safety Guard concept defined.
+Outbound phone-app replies captured via coexist echo events.
+
+Message lifecycle events received.
+
+All events stored inside Google Sheets.
+
+---
+
+## Verified Infrastructure Components
 
 WhatsApp Business Coexist successfully configured.
 
 Cloud API connection confirmed.
 
-WABA ID discovered:
+WABA ID:
 
 1359984478739186
 
-Phone Number ID discovered:
+Phone Number ID:
 
 896133996927016
 
@@ -212,105 +257,115 @@ Cloud API outbound message sending verified.
 
 Manual webhook POST tests successful.
 
-Meta webhook test events successfully delivered.
+Meta webhook events successfully delivered.
+
+Real inbound WhatsApp messages confirmed working.
+
+Outbound phone-app replies confirmed working.
 
 ---
 
-# 6. Current Investigation
+# 6. Important Onboarding Discovery
 
-Goal:
+Embedded Signup SDK is **not required**.
 
-Receive inbound WhatsApp messages both:
+The onboarding URL provided by Meta can be used directly.
 
-• in the mobile WhatsApp Business app  
-• in the Cloud API webhook
+Meaning clients can be onboarded via a simple link.
 
-Observed behavior:
+Embedded signup may still be used later to:
 
-Webhook endpoint receives Meta test events correctly.
+• capture onboarding metadata  
+• automate ID collection  
+• reduce manual configuration
 
-Example event:
-
-field: messages  
-type: text  
-text: "Webhook test message"
-
-However mobile-originated messages sometimes do not appear as "messages" webhook events.
-
-Instead they appear as:
-
-field: message_echoes
-
-or
-
-field: smb_message_echoes
-
-Example payload observed:
-
-field: smb_message_echoes  
-type: text  
-text: "this is a text message"
-
-The current parser logs these as:
-
-event_type: webhook_no_events
-
-because only messages and statuses were originally supported.
+But manual onboarding is sufficient for production.
 
 ---
 
-# 7. Required Webhook Subscriptions
+# 7. WABA App Subscription Requirement
 
-For coexist support the system must subscribe to:
+Webhook delivery requires the application to be subscribed to the client's WABA.
 
-messages  
-smb_message_echoes
+This is performed via:
 
-Observed:
+POST /{WABA_ID}/subscribed_apps
 
-messages subscription works  
-smb_message_echoes subscription works  
-message_echoes subscription inconsistent
+Important behavior:
 
-Echo payloads confirm Meta webhook delivery is functioning.
+• Required once per WABA  
+• Not required again after subscription  
+• Fully automatable
 
----
-
-# 8. Current Troubleshooting Task
-
-Objective:
-
-Ensure that real inbound WhatsApp messages trigger usable webhook records.
-
-Questions being investigated:
-
-• why some inbound messages appear only as echo events  
-• when "messages" events are generated vs "smb_message_echoes"  
-• whether coexist routing depends on message origin
-
-Test observations:
-
-Meta webhook test → success  
-Manual webhook POST → success  
-Echo webhook events → received  
-
-But some mobile messages still do not appear as standard messages events.
+This step enabled real message delivery during infrastructure validation.
 
 ---
 
-# 9. Immediate Next Tasks
+# 8. Observed Webhook Event Types
 
-Update webhook parser to support:
+WhatsApp Coexist produces multiple webhook streams.
+
+Observed event types:
 
 messages  
 smb_message_echoes  
-message_echoes
+message_echoes  
+statuses
 
-Verify inbound messages from an external phone number.
+Meaning:
 
-Confirm real client messages generate usable records.
+messages → inbound customer message
 
-Normalize webhook events into unified message format.
+smb_message_echoes → outbound message from phone app
+
+message_echoes → outbound message echoes from API flows
+
+statuses → delivery state updates
+
+Future parsing will normalize these events into a unified message model.
+
+---
+
+# 9. Next Development Phase
+
+With communication capture operational, development will focus on backend operations.
+
+---
+
+## Communication Sources
+
+TaskLess will ingest:
+
+• WhatsApp messages (completed)  
+• Gmail messages  
+• Google Calendar events  
+• user-created tasks
+
+---
+
+## Core Backend Modules
+
+Communication Processing
+
+• normalize message events  
+• build unified conversation records  
+• contact resolution
+
+Task Extraction
+
+• detect tasks from messages  
+• create task records automatically
+
+Scheduling
+
+• detect appointment intent  
+• create calendar events
+
+Assistant Layer
+
+• summarize conversations  
+• propose responses  
+• suggest follow-up actions
 
 ---
 
@@ -320,13 +375,13 @@ Current prototype:
 
 Single Google Apps Script Web App.
 
-Future system will include a Router Layer.
+Future architecture will introduce a Router Layer.
 
 Router responsibilities:
 
 • detect phone_number_id  
 • map to correct user environment  
-• forward message to correct TaskLess instance.
+• forward messages to the correct TaskLess instance
 
 ---
 
@@ -337,7 +392,7 @@ Future multi-tenant registry fields:
 • user_id  
 • phone_number_id  
 • webhook endpoint  
-• configuration settings  
+• configuration settings
 
 Candidate storage:
 
@@ -372,7 +427,7 @@ Principles:
 • Boss remains in control  
 • AI prepares work  
 • Safety Guard prevents mistakes  
-• communication becomes structured  
+• communication becomes structured
 
 TaskLess sits above communication tools rather than replacing them.
 
