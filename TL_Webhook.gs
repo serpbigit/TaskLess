@@ -3,14 +3,11 @@
  *
  * Required Script Properties:
  * - TL_VERIFY_TOKEN        (string)  webhook verify token
- * - TL_SHEET_ID            (string)  spreadsheet ID containing WEBHOOK_LOG
+ * - TL_SHEET_ID            (string)  spreadsheet ID containing INBOX/LOG
  * - META_USER_ACCESS_TOKEN (string)  Graph API token (optional for COEX_checkPhoneNumberState)
  *
- * Tabs:
- * - WEBHOOK_LOG (auto-created)
  */
 const TL_WEBHOOK = {
-  LOG_SHEET: "WEBHOOK_LOG",
   INBOX_SHEET: "INBOX",
   MAX_IDEMPOTENCY_SCAN_ROWS: 2000,
   INBOX_HEADERS: [
@@ -48,14 +45,14 @@ function doPost(e) {
   try {
     const raw = (e && e.postData && typeof e.postData.contents === "string") ? e.postData.contents : "";
     if (!raw) {
-      TLW_logDebug_("empty_post", { when: started.toISOString() });
+    TLW_logDebug_("empty_post", { when: started.toISOString() });
       return TLW_json_({ ok:true, empty:true });
     }
 
     let payload = {};
     try { payload = JSON.parse(raw); }
     catch (parseErr) {
-      TLW_logDebug_("invalid_json", { err:String(parseErr), raw: raw.slice(0,500) });
+    TLW_logDebug_("invalid_json", { err:String(parseErr), raw: raw.slice(0,500) });
       return TLW_json_({ ok:true, parse_error:true });
     }
 
@@ -63,7 +60,7 @@ function doPost(e) {
 
     const events = TLW_extractEvents_(payload);
     if (!events.length) {
-      TLW_logDebug_("webhook_no_events", { raw: TLW_safeStringify_(payload, 2000) });
+    TLW_logDebug_("webhook_no_events", { raw: TLW_safeStringify_(payload, 2000) });
       return TLW_json_({ ok:true, events:0 });
     }
 
@@ -118,12 +115,7 @@ function COEX_checkPhoneNumberState(phoneNumberId) {
   const status = res.getResponseCode();
   const body = res.getContentText();
 
-  TLW_appendRow_({
-    ts:new Date(), event_type:"coex_check_state",
-    display_phone_number:"", phone_number_id:id, from:"",
-    message_id:"", message_type:"HTTP_" + status, text:"",
-    statuses_count:0, raw_json: body
-  }, true);
+  TLW_logInfo_("coex_check_state", { phone_number_id:id, status, body });
 
   return { status, body };
 }
