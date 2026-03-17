@@ -59,6 +59,8 @@ function doPost(e) {
       return TLW_json_({ ok:true, parse_error:true });
     }
 
+    TLW_logInfo_("webhook_received", { bytes: raw.length, entries: (payload && payload.entry && payload.entry.length) ? payload.entry.length : 0 });
+
     const events = TLW_extractEvents_(payload);
     if (!events.length) {
       TLW_logDebug_("webhook_no_events", { raw: TLW_safeStringify_(payload, 2000) });
@@ -83,6 +85,10 @@ function doPost(e) {
       TLW_appendInboxRow_(enriched, rawJson);
       appended++;
     });
+
+    if ((appended + updated) === 0) {
+      TLW_logInfo_("webhook_no_writes", { skipped, events: events.length });
+    }
 
     return TLW_json_({ ok:true, appended, skipped, updated });
   } catch (err) {
@@ -382,6 +388,19 @@ function TLW_logDebug_(label, data) {
       message_id:"", message_type:"", text:"",
       statuses_count:0, raw_json: TLW_safeStringify_(data, 4000)
     }, true);
+  } catch(e) {}
+}
+
+function TLW_logInfo_(label, data) {
+  try {
+    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+    let sh = ss.getSheetByName("LOG");
+    if (!sh) sh = ss.insertSheet("LOG");
+    const headers = ["timestamp","level","component","message","meta_json"];
+    const existing = sh.getRange(1,1,1,headers.length).getValues()[0];
+    const needs = existing.some((v,i)=>String(v||"")!==String(headers[i]||""));
+    if (needs) { sh.getRange(1,1,1,headers.length).setValues([headers]); sh.setFrozenRows(1); }
+    sh.appendRow([new Date(), "info", "webhook", String(label||""), TLW_safeStringify_(data, 4000)]);
   } catch(e) {}
 }
 
