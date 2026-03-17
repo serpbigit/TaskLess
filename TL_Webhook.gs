@@ -193,13 +193,12 @@ function TLW_extractEvents_(payload) {
 
 function TLW_tryBossMenu_(events) {
   if (!events || !events.length) return null;
-  const bossPhone = TLW_getSetting_("BOSS_PHONE");
-  if (!bossPhone) return null;
 
   // find first inbound/echo message event with text from boss
   const candidates = events.filter(ev => ev.message_type === "text");
-  TLW_logInfo_("menu_match_attempt", { bossPhone, candidates: candidates.map(e=>({from:e.from, type:e.event_type, msg_id:e.message_id, text:e.text||""})) });
-  const msg = candidates.find(ev => ev.from === bossPhone);
+  TLW_logInfo_("menu_match_attempt", { candidates: candidates.map(e=>({from:e.from, type:e.event_type, msg_id:e.message_id, text:e.text||""})) });
+  const triggerText = ["תפריט","menu","/menu"];
+  const msg = candidates.find(ev => triggerText.includes(String(ev.text||"").trim().toLowerCase()));
   if (!msg) return null;
 
   // log trigger detection
@@ -214,7 +213,7 @@ function TLW_tryBossMenu_(events) {
 
   if (!replyText) return null;
   const toPhoneId = msg.phone_number_id || TLW_getSetting_("BUSINESS_PHONE_ID") || TLW_getSetting_("BUSINESS_PHONEID") || TLW_getSetting_("BUSINESS_PHONE");
-  return { toSend: true, toPhoneId, toWaId: bossPhone, text: replyText };
+  return { toSend: true, toPhoneId, toWaId: msg.from, text: replyText };
 }
 
 function TLW_enrichEvent_(ev, ts) {

@@ -20,7 +20,7 @@ const TL_MENU = {
 function TL_Menu_HandleBossMessage_(ev, inboxRow) {
   const bossPhone = String(PropertiesService.getScriptProperties().getProperty("BOSS_PHONE") || "").trim();
   const from = String(ev.from || "");
-  if (!bossPhone || from !== bossPhone) return null; // not boss
+  if (bossPhone && from !== bossPhone) return null; // if boss phone set, enforce; otherwise allow anyone
 
   const text = String(ev.text || "").trim();
   if (!text) return TL_Menu_BuildMenuReply_();
