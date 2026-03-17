@@ -19,10 +19,11 @@ const TL_MENU = {
 
 function TL_Menu_HandleBossMessage_(ev, inboxRow) {
   const bossPhone = String(PropertiesService.getScriptProperties().getProperty("BOSS_PHONE") || "").trim();
-  const from = String(ev.from || "");
+  const from = String(ev.from || "").trim();
+  const bossWaId = from;
   if (bossPhone && from !== bossPhone) return null; // if boss phone set, enforce; otherwise allow anyone
 
-  const text = String(ev.text || "").trim();
+  const text = String(ev.text || "").trim().toLowerCase();
   if (!text) return TL_Menu_BuildMenuReply_();
 
   // Check triggers
@@ -111,7 +112,7 @@ function TL_Menu_BuildPendingSummary_() {
   if (!sh) return "אין כרגע פריטים דחופים.";
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return "אין כרגע פריטים דחופים.";
-  const vals = sh.getRange(2,1,Math.min(lastRow-1,100),16).getValues(); // timestamp..text
+  const vals = sh.getRange(2, 1, Math.min(lastRow - 1, 100), TL_WEBHOOK.INBOX_HEADERS.length).getValues();
   const pending = vals.filter(r => String(r[19]||"").toLowerCase() !== "done"); // task_status col T index 19 zero-based
   if (!pending.length) return "אין כרגע פריטים דחופים.";
   const top = pending.slice(0, TL_MENU.MAX_PENDING_SUMMARY).map(r => {

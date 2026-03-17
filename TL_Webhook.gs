@@ -194,13 +194,32 @@ function TLW_extractEvents_(payload) {
 function TLW_tryBossMenu_(events) {
   if (!events || !events.length) return null;
 
-  // find first inbound/echo message event with text from boss
+  // Find the first text event that should be handled by the boss menu flow:
+  // explicit trigger, numeric choice, or follow-up while menu state is active.
   const candidates = events.filter(ev => ev.message_type === "text");
   const normalized = candidates.map(e=>({from:e.from, type:e.event_type, msg_id:e.message_id, text:String(e.text||"").trim().toLowerCase()}));
   TLW_logInfo_("menu_match_attempt", { candidates: normalized });
   const triggerText = ["תפריט","menu","/menu"];
-  const msg = candidates.find(ev => triggerText.includes(String(ev.text||"").trim().toLowerCase()));
+  const msg = candidates.find(ev => {
+    const text = String(ev.text || "").trim().toLowerCase();
+    if (!text) return false;
+    if (triggerText.includes(text)) return true;
+    if (TL_MENU.CHOICES.includes(text)) return true;
+    return TL_Menu_GetState_(String(ev.from || "").trim()) !== "idle";
+  });
   if (!msg) return null;
+
+  const enriched = TLW_enrichEvent_(msg, new Date());
+  let inboxRow = null;
+  if (enriched) {
+    if (TLW_isDuplicate_(enriched)) {
+      const existing = TLW_findRowByMessageId_(enriched.phone_number_id || "", enriched.message_id || "");
+      if (existing) inboxRow = { row: existing.row };
+    } else {
+      const appended = TLW_appendInboxRow_(enriched, "");
+      if (appended) inboxRow = { row: appended.row };
+    }
+  }
 
   // log trigger detection
   TLW_logInfo_("menu_trigger", { from: msg.from, text: msg.text || "", phone_id: msg.phone_number_id || "" });
@@ -210,7 +229,7 @@ function TLW_tryBossMenu_(events) {
     text: msg.text || "",
     recipient_id: msg.recipient_id || "",
     phone_number_id: msg.phone_number_id || ""
-  }, null);
+  }, inboxRow);
 
   if (!replyText) return null;
   const toPhoneId = msg.phone_number_id || TLW_getSetting_("BUSINESS_PHONE_ID") || TLW_getSetting_("BUSINESS_PHONEID") || TLW_getSetting_("BUSINESS_PHONE");
@@ -344,6 +363,7 @@ function TLW_appendInboxRow_(obj, rawJson) {
   ];
 
   sh.appendRow(row);
+  return { sh, row: sh.getLastRow() };
 }
 
 function TLW_getRecentMessageIdSet_() {
@@ -475,9 +495,66 @@ function TLW_isDuplicate_(enriched) {
   return set.has(phoneId + "|" + messageId);
 }
 
+function TLW_getMetaAccessToken_() {
+  const scriptProps = PropertiesService.getScriptProperties();
+  const preferred = [
+    "TL_META_SYSTEM_USER_TOKEN",
+    "TL_SYSTEM_TOKEN",
+    "META_USER_ACCESS_TOKEN",
+    "TL_USER_ACCESS_TOKEN"
+  ];
+
+  for (let i = 0; i < preferred.length; i++) {
+    const token = String(scriptProps.getProperty(preferred[i]) || "").trim();
+    if (token) return token;
+  }
+
+  return TLW_getSetting_("API TOKEN");
+}
+
+function TLW_parseSendTextResponse_(body, fallbackWaId) {
+  let parsed = null;
+  try {
+    parsed = JSON.parse(String(body || "{}"));
+  } catch (e) {}
+
+  const messages = parsed && parsed.messages ? parsed.messages : [];
+  const contacts = parsed && parsed.contacts ? parsed.contacts : [];
+  const messageId = messages.length ? String(messages[0].id || "").trim() : "";
+  const waId = contacts.length ? String(contacts[0].wa_id || "").trim() : String(fallbackWaId || "").trim();
+
+  return {
+    raw: parsed,
+    messageId: messageId,
+    waId: waId
+  };
+}
+
+function TLW_logOutboundTextSend_(phoneNumberId, toWaId, text, responseBody) {
+  const parsed = TLW_parseSendTextResponse_(responseBody, toWaId);
+  const outgoingEvent = {
+    event_type: "message_echoes",
+    display_phone_number: "",
+    phone_number_id: String(phoneNumberId || "").trim(),
+    from: "",
+    recipient_id: parsed.waId,
+    message_id: parsed.messageId,
+    message_type: "text",
+    text: String(text || ""),
+    statuses_count: 0
+  };
+  const enriched = TLW_enrichEvent_(outgoingEvent, new Date());
+  if (!enriched) return;
+  if (TLW_isDuplicate_(enriched)) return;
+  TLW_appendInboxRow_(enriched, TLW_safeStringify_({
+    source: "TLW_sendText_",
+    send_response: parsed.raw || String(responseBody || "")
+  }, 4000));
+}
+
 function TLW_sendText_(phoneNumberId, toWaId, text) {
-  const token = TLW_getSetting_("API TOKEN");
-  if (!token) throw new Error("Missing API TOKEN");
+  const token = TLW_getMetaAccessToken_();
+  if (!token) throw new Error("Missing Meta access token (TL_META_SYSTEM_USER_TOKEN/TL_SYSTEM_TOKEN/META_USER_ACCESS_TOKEN/TL_USER_ACCESS_TOKEN/API TOKEN)");
   const url = "https://graph.facebook.com/v19.0/" + encodeURIComponent(phoneNumberId) + "/messages";
   const payload = {
     messaging_product: "whatsapp",
@@ -493,7 +570,11 @@ function TLW_sendText_(phoneNumberId, toWaId, text) {
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
-    return { ok: res.getResponseCode() === 200, status: res.getResponseCode(), body: res.getContentText() };
+    const result = { ok: res.getResponseCode() === 200, status: res.getResponseCode(), body: res.getContentText() };
+    if (result.ok) {
+      TLW_logOutboundTextSend_(phoneNumberId, toWaId, text, result.body);
+    }
+    return result;
   } catch (e) {
     TLW_logInfo_("menu_send_error", { error: String(e) });
     return { ok: false, status: 0, body: String(e) };
