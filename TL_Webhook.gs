@@ -77,6 +77,7 @@ function doPost(e) {
       if (enriched.record_class === "status") {
         const didUpdate = TLW_upsertStatus_(enriched, rawJson);
         if (didUpdate) { updated++; return; }
+        TLW_logInfo_("status_no_match", { phone: enriched.phone_number_id, msg: enriched.message_id });
       }
 
       const duplicate = TLW_isDuplicate_(enriched);
@@ -92,7 +93,7 @@ function doPost(e) {
 
     return TLW_json_({ ok:true, appended, skipped, updated });
   } catch (err) {
-    TLW_logDebug_("doPost_error", { err:String(err && err.stack ? err.stack : err) });
+    TLW_logInfo_("doPost_error", { err:String(err && err.stack ? err.stack : err) });
     return TLW_json_({ ok:true, error:true });
   }
 }
@@ -354,6 +355,7 @@ function TLW_upsertStatus_(ev, rawJson) {
   sh.getRange(row, 24).setValue(current + 1);                         // statuses_count
   sh.getRange(row, 26).setValue(rawJson);                             // raw_payload_ref
   sh.getRange(row, 6).setValue(version + 1);                          // record_version
+  TLW_logDebug_("status_merge", { phone: ev.phone_number_id, msg: messageId, row });
   return true;
 }
 
@@ -380,17 +382,6 @@ function TLW_findRowByMessageId_(phoneId, messageId) {
   return null;
 }
 
-function TLW_logDebug_(label, data) {
-  try {
-    TLW_appendRow_({
-      ts:new Date(), event_type:"debug_" + String(label||"log"),
-      display_phone_number:"", phone_number_id:"", from:"",
-      message_id:"", message_type:"", text:"",
-      statuses_count:0, raw_json: TLW_safeStringify_(data, 4000)
-    }, true);
-  } catch(e) {}
-}
-
 function TLW_logInfo_(label, data) {
   try {
     const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
@@ -401,6 +392,19 @@ function TLW_logInfo_(label, data) {
     const needs = existing.some((v,i)=>String(v||"")!==String(headers[i]||""));
     if (needs) { sh.getRange(1,1,1,headers.length).setValues([headers]); sh.setFrozenRows(1); }
     sh.appendRow([new Date(), "info", "webhook", String(label||""), TLW_safeStringify_(data, 4000)]);
+  } catch(e) {}
+}
+
+function TLW_logDebug_(label, data) {
+  try {
+    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+    let sh = ss.getSheetByName("LOG");
+    if (!sh) sh = ss.insertSheet("LOG");
+    const headers = ["timestamp","level","component","message","meta_json"];
+    const existing = sh.getRange(1,1,1,headers.length).getValues()[0];
+    const needs = existing.some((v,i)=>String(v||"")!==String(headers[i]||""));
+    if (needs) { sh.getRange(1,1,1,headers.length).setValues([headers]); sh.setFrozenRows(1); }
+    sh.appendRow([new Date(), "debug", "webhook", String(label||""), TLW_safeStringify_(data, 4000)]);
   } catch(e) {}
 }
 
