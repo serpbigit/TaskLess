@@ -49,7 +49,12 @@ const TL_SCHEMA = {
     ["DEFAULT_TZ","Asia/Jerusalem",""],
     ["AI_DEFAULT_LANGUAGE","Hebrew","default language for AI drafts/summaries"],
     ["API END POINT","",""],
-    ["API TOKEN","",""]
+    ["API TOKEN","",""],
+    ["thread_window_minutes","120","minutes to keep messages in same root/topic"],
+    ["reply_mode","consolidated","consolidated|per_message"],
+    ["status_cache_enabled","true","buffer unmatched statuses and merge later"],
+    ["ai_voice_transcription","true","transcribe/diarize voice notes"],
+    ["ai_summary_enabled","true","generate ai_summary/ai_proposal automatically"]
   ]
 };
 
