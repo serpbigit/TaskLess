@@ -195,6 +195,17 @@ function TLW_enrichEvent_(ev, ts) {
   const direction = (eventType === "messages") ? "incoming" : "outgoing";
   const channel = "whatsapp";
 
+  // sender/receiver normalization
+  let sender = String(ev.from || "");
+  let receiver = "";
+  if (direction === "incoming") {
+    receiver = String(ev.display_phone_number || "");
+  } else {
+    // outgoing echoes/statuses: business is sender, contact is receiver
+    receiver = sender;
+    sender = String(ev.display_phone_number || "");
+  }
+
   // record ids
   const recordId = msgId ? ("REC_" + phoneId + "_" + msgId) : ("REC_" + nowIso + "_" + Math.random().toString(36).slice(2,8));
   const rootId = TLW_resolveRootId_(contactId, topicId, ts);
@@ -212,7 +223,7 @@ function TLW_enrichEvent_(ev, ts) {
     phone_number_id: phoneId,
     display_phone_number: String(ev.display_phone_number || ""),
     sender: sender,
-    receiver: "",
+    receiver: receiver,
     message_id: msgId,
     message_type: String(ev.message_type || ""),
     text: String(ev.text || ""),
