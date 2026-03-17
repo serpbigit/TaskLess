@@ -196,7 +196,8 @@ function TLW_tryBossMenu_(events) {
 
   // find first inbound/echo message event with text from boss
   const candidates = events.filter(ev => ev.message_type === "text");
-  TLW_logInfo_("menu_match_attempt", { candidates: candidates.map(e=>({from:e.from, type:e.event_type, msg_id:e.message_id, text:e.text||""})) });
+  const normalized = candidates.map(e=>({from:e.from, type:e.event_type, msg_id:e.message_id, text:String(e.text||"").trim().toLowerCase()}));
+  TLW_logInfo_("menu_match_attempt", { candidates: normalized });
   const triggerText = ["תפריט","menu","/menu"];
   const msg = candidates.find(ev => triggerText.includes(String(ev.text||"").trim().toLowerCase()));
   if (!msg) return null;
