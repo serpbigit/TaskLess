@@ -459,3 +459,11 @@ Logging and learning loops are critical for improvement.
 - Library will handle schema creation (INBOX/ARCHIVE/CONTACTS/CONTACT_ENRICHMENTS/TOPICS/SETTINGS/LOG), root/topic resolution, and webhook normalization.
 - Client project will contain minimal config and UI triggers; onboarding flow should clone the client-bound script and register routing (phone_number_id → endpoint).
 
+## Current telemetry / open issues (2026-03-17)
+- INBOX/ARCHIVE schema deployed; CONTACTS, CONTACT_ENRICHMENTS, TOPICS, SETTINGS, LOG tabs created.
+- TL_Webhook now writes communication rows and merges statuses by (phone_number_id, message_id); status rows are skipped if no match and logged as status_no_match.
+- Direction normalization: incoming sender=contact, receiver=business; outgoing sender=business, receiver=contact when recipient_id is present.
+- Known gap: some status messages arrive before the corresponding message row, leading to status_no_match (logged) and no merge. Need a future cache/merge pass for late statuses.
+- Known gap: OUTGOING echo rows have empty receiver when recipient_id missing in payload; need fallback logic (e.g., last contact in root/topic window).
+- Known gap: record_version not incremented for communication evolutions (only statuses). Need consistent versioning across updates.
+
