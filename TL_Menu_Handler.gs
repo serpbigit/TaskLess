@@ -18,9 +18,9 @@ const TL_MENU = {
 };
 
 function TL_Menu_HandleBossMessage_(ev, inboxRow) {
-  const bossWaId = String(PropertiesService.getScriptProperties().getProperty("BOSS_WA_ID") || "").trim();
+  const bossPhone = String(PropertiesService.getScriptProperties().getProperty("BOSS_PHONE") || "").trim();
   const from = String(ev.from || "");
-  if (!bossWaId || from !== bossWaId) return null; // not boss
+  if (!bossPhone || from !== bossPhone) return null; // not boss
 
   const text = String(ev.text || "").trim();
   if (!text) return TL_Menu_BuildMenuReply_();
@@ -121,4 +121,3 @@ function TL_Menu_BuildPendingSummary_() {
   });
   return "דגימה קצרה של פריטים פתוחים:\n" + top.join("\n");
 }
-

@@ -50,6 +50,7 @@ const TL_SCHEMA = {
     ["AI_DEFAULT_LANGUAGE","Hebrew","default language for AI drafts/summaries"],
     ["API END POINT","",""],
     ["API TOKEN","",""],
+    ["BOSS_PHONE","","msisdn for Boss channel (wa_id will be inferred)"],
     ["thread_window_minutes","120","minutes to keep messages in same root/topic"],
     ["reply_mode","consolidated","consolidated|per_message"],
     ["status_cache_enabled","true","buffer unmatched statuses and merge later"],
