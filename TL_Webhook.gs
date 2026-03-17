@@ -137,30 +137,33 @@ function TLW_extractEvents_(payload) {
       if (field === "messages" && val.messages && val.messages.length) {
         val.messages.forEach(m => {
           const from = String(m.from || "");
+          const recipient = String(m.recipient_id || "");
           const msgId = String(m.id || "");
           const type = String(m.type || "");
           const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
-          out.push({ event_type:"messages", display_phone_number:displayPhone, phone_number_id:phoneId, from, message_id:msgId, message_type:type, text, statuses_count:0 });
+          out.push({ event_type:"messages", display_phone_number:displayPhone, phone_number_id:phoneId, from, recipient_id:recipient, message_id:msgId, message_type:type, text, statuses_count:0 });
         });
       }
 
       if (field === "message_echoes" && val.message_echoes && val.message_echoes.length) {
         val.message_echoes.forEach(m => {
           const from = String(m.from || "");
+          const recipient = String(m.recipient_id || "");
           const msgId = String(m.id || "");
           const type = String(m.type || "");
           const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
-          out.push({ event_type:"message_echoes", display_phone_number:displayPhone, phone_number_id:phoneId, from, message_id:msgId, message_type:type, text, statuses_count:0 });
+          out.push({ event_type:"message_echoes", display_phone_number:displayPhone, phone_number_id:phoneId, from, recipient_id:recipient, message_id:msgId, message_type:type, text, statuses_count:0 });
         });
       }
 
       if (field === "smb_message_echoes" && val.message_echoes && val.message_echoes.length) {
         val.message_echoes.forEach(m => {
           const from = String(m.from || "");
+          const recipient = String(m.recipient_id || "");
           const msgId = String(m.id || "");
           const type = String(m.type || "");
           const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
-          out.push({ event_type:"smb_message_echoes", display_phone_number:displayPhone, phone_number_id:phoneId, from, message_id:msgId, message_type:type, text, statuses_count:0 });
+          out.push({ event_type:"smb_message_echoes", display_phone_number:displayPhone, phone_number_id:phoneId, from, recipient_id:recipient, message_id:msgId, message_type:type, text, statuses_count:0 });
         });
       }
 
@@ -169,7 +172,8 @@ function TLW_extractEvents_(payload) {
         statuses.forEach(s => {
           const msgId = String(s.id || "");
           const st = String(s.status || "status_update");
-          out.push({ event_type:"statuses", display_phone_number:displayPhone, phone_number_id:phoneId, from:"", message_id:msgId, message_type:st, text:"", statuses_count:1, status_timestamp:String(s.timestamp || "") });
+          const recipient = String(s.recipient_id || "");
+          out.push({ event_type:"statuses", display_phone_number:displayPhone, phone_number_id:phoneId, from:"", recipient_id:recipient, message_id:msgId, message_type:st, text:"", statuses_count:1, status_timestamp:String(s.timestamp || "") });
         });
       }
     });
@@ -185,7 +189,9 @@ function TLW_enrichEvent_(ev, ts) {
 
   // contact resolution (simple deterministic id)
   const baseSender = String(ev.from || "");
-  const contactId = baseSender ? ("WA_" + phoneId + "_" + baseSender) : "";
+  const baseRecipient = String(ev.recipient_id || "");
+  const contactNumber = (direction === "incoming") ? baseSender : (baseRecipient || baseSender);
+  const contactId = contactNumber ? ("WA_" + phoneId + "_" + contactNumber) : "";
 
   // topic id (placeholder hash)
   const topicId = TLW_topicIdFromText_(ev.text || "");
@@ -199,11 +205,11 @@ function TLW_enrichEvent_(ev, ts) {
   let sender = baseSender;
   let receiver = "";
   if (direction === "incoming") {
+    sender = contactNumber;
     receiver = String(ev.display_phone_number || "");
   } else {
-    // outgoing echoes/statuses: business is sender, contact is receiver
-    receiver = sender;
-    sender = String(ev.display_phone_number || "");
+    sender = String(ev.display_phone_number || ""); // business
+    receiver = contactNumber;
   }
 
   // record ids
