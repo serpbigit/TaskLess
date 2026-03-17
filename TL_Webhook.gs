@@ -63,7 +63,8 @@ function doPost(e) {
     // Boss menu quick-path: only messages with text from BOSS_PHONE
     const menuReply = TLW_tryBossMenu_(events);
     if (menuReply && menuReply.toSend) {
-      TLW_sendText_(menuReply.toPhoneId, menuReply.toWaId, menuReply.text);
+      const sent = TLW_sendText_(menuReply.toPhoneId, menuReply.toWaId, menuReply.text);
+      TLW_logInfo_("menu_reply", { to: menuReply.toWaId, phone_id: menuReply.toPhoneId, ok: sent.ok, status: sent.status, body: sent.body });
       return TLW_json_({ ok:true, menu:true });
     }
 
@@ -198,6 +199,9 @@ function TLW_tryBossMenu_(events) {
   // find first inbound/echo message event with text from boss
   const msg = events.find(ev => ev.event_type && ev.message_type && ev.message_type === "text" && ev.from === bossPhone);
   if (!msg) return null;
+
+  // log trigger detection
+  TLW_logInfo_("menu_trigger", { from: msg.from, text: msg.text || "", phone_id: msg.phone_number_id || "" });
 
   const replyText = TL_Menu_HandleBossMessage_({
     from: msg.from,
@@ -479,13 +483,19 @@ function TLW_sendText_(phoneNumberId, toWaId, text) {
     type: "text",
     text: { body: text }
   };
-  UrlFetchApp.fetch(url, {
-    method: "post",
-    contentType: "application/json",
-    headers: { Authorization: "Bearer " + token },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  });
+  try {
+    const res = UrlFetchApp.fetch(url, {
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "Bearer " + token },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    return { ok: res.getResponseCode() === 200, status: res.getResponseCode(), body: res.getContentText() };
+  } catch (e) {
+    TLW_logInfo_("menu_send_error", { error: String(e) });
+    return { ok: false, status: 0, body: String(e) };
+  }
 }
 
 function TLW_topicIdFromText_(text) {
