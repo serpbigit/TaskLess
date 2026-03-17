@@ -341,6 +341,8 @@ With communication capture operational, development will focus on backend operat
 TaskLess will ingest:
 
 • WhatsApp messages (completed)  
+• WhatsApp images and documents  
+• WhatsApp voice notes / audio  
 • Gmail messages  
 • Google Calendar events  
 • user-created tasks
@@ -463,9 +465,12 @@ Logging and learning loops are critical for improvement.
 - INBOX/ARCHIVE schema deployed; CONTACTS, CONTACT_ENRICHMENTS, TOPICS, SETTINGS, LOG tabs created.
 - TL_Webhook now writes communication rows and merges statuses by (phone_number_id, message_id); status rows are skipped if no match and logged as status_no_match.
 - Direction normalization: incoming sender=contact, receiver=business; outgoing sender=business, receiver=contact when recipient_id is present.
+- Boss menu flow is now working end-to-end for `תפריט` -> choice (`1/2/3`) -> follow-up capture -> reply send, with outbound API replies logged to INBOX and status callbacks merged back onto the same rows.
+- Menu-handled inbound follow-up text is now appended before the menu handler runs, so free-text captures such as option `1` notes can be persisted and then upgraded to `record_class=instruction` / `task_status=logged`.
 - Known gap: some status messages arrive before the corresponding message row, leading to status_no_match (logged) and no merge. Need a future cache/merge pass for late statuses.
 - Known gap: OUTGOING echo rows have empty receiver when recipient_id missing in payload; need fallback logic (e.g., last contact in root/topic window).
 - Known gap: record_version not incremented for communication evolutions (only statuses). Need consistent versioning across updates.
+- Next media gap: webhook normalization currently focuses on text flows. Need explicit handling for image/document payloads and voice/audio notes, including media metadata capture and optional transcription for audio.
 
 ## Next steps (AI routine, WhatsApp-first)
 - Configure AI endpoint/token in SETTINGS (`API END POINT`, `API TOKEN`, `AI_DEFAULT_LANGUAGE`). Use existing WhatsApp messages as the first channel before adding email/scheduling/tasks.
@@ -473,5 +478,8 @@ Logging and learning loops are critical for improvement.
   - On new incoming communication row (record_class=communication, direction=incoming), build a prompt with recent context (same root/topic) and ask AI to propose reply + short summary.
   - Write results into `ai_summary` and `ai_proposal` on the same row (or new record_version).
   - Prepare a Boss approval card: Boss edits/approves; on approval, send via WhatsApp and log outbound communication row.
+- Extend inbound WhatsApp parsing beyond text:
+  - image/document messages: store media type, caption, media id/url metadata, and preserve linkage to the contact/root/topic.
+  - voice/audio notes: store media metadata and add transcription/summary pipeline before task extraction or reply drafting.
 - Deferrals for later: email ingestion, calendar/scheduling, and task auto-creation; focus first on WhatsApp AI drafts and Boss approval loop.
 
