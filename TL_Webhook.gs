@@ -197,8 +197,9 @@ function TLW_tryBossMenu_(events) {
   if (!bossPhone) return null;
 
   // find first inbound/echo message event with text from boss
-  const msg = events.find(ev => ev.event_type && ev.message_type && ev.message_type === "text" && ev.from === bossPhone);
-  TLW_logInfo_("menu_match_attempt", { bossPhone, candidates: events.map(e=>({from:e.from, type:e.event_type, msg_id:e.message_id})) });
+  const candidates = events.filter(ev => ev.message_type === "text");
+  TLW_logInfo_("menu_match_attempt", { bossPhone, candidates: candidates.map(e=>({from:e.from, type:e.event_type, msg_id:e.message_id, text:e.text||""})) });
+  const msg = candidates.find(ev => ev.from === bossPhone);
   if (!msg) return null;
 
   // log trigger detection
