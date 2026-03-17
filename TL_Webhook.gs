@@ -192,11 +192,8 @@ function TLW_extractEvents_(payload) {
 
 function TLW_tryBossMenu_(events) {
   if (!events || !events.length) return null;
-  const bossPhone = String(PropertiesService.getScriptProperties().getProperty("BOSS_PHONE") || "").trim();
-  const bizPhoneNumberId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim(); // fallback; better to set explicit BUSINESS_PHONE_ID
-  const businessPhoneId = String(PropertiesService.getScriptProperties().getProperty("BUSINESS_PHONE_ID") || "").trim() || "";
-
-  if (!bossPhone || (!businessPhoneId && !bizPhoneNumberId)) return null;
+  const bossPhone = TLW_getSetting_("BOSS_PHONE");
+  if (!bossPhone) return null;
 
   // find first inbound/echo message event with text from boss
   const msg = events.find(ev => ev.event_type && ev.message_type && ev.message_type === "text" && ev.from === bossPhone);
@@ -210,7 +207,7 @@ function TLW_tryBossMenu_(events) {
   }, null);
 
   if (!replyText) return null;
-  const toPhoneId = businessPhoneId || msg.phone_number_id;
+  const toPhoneId = msg.phone_number_id || TLW_getSetting_("BUSINESS_PHONE_ID") || TLW_getSetting_("BUSINESS_PHONEID") || TLW_getSetting_("BUSINESS_PHONE");
   return { toSend: true, toPhoneId, toWaId: bossPhone, text: replyText };
 }
 
@@ -445,6 +442,25 @@ function TLW_json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj||{})).setMimeType(ContentService.MimeType.JSON);
 }
 
+function TLW_getSetting_(key) {
+  const k = String(key || "").trim();
+  if (!k) return "";
+  const sp = PropertiesService.getScriptProperties().getProperty(k);
+  if (sp) return String(sp).trim();
+  try {
+    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+    const sh = ss.getSheetByName("SETTINGS");
+    if (!sh) return "";
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return "";
+    const vals = sh.getRange(2,1,lastRow-1,2).getValues(); // key,value
+    for (let i=0;i<vals.length;i++){
+      if (String(vals[i][0]||"").trim() === k) return String(vals[i][1]||"").trim();
+    }
+  } catch (e) {}
+  return "";
+}
+
 function TLW_isDuplicate_(enriched) {
   const messageId = String(enriched.message_id || "");
   const phoneId = String(enriched.phone_number_id || "");
@@ -454,7 +470,7 @@ function TLW_isDuplicate_(enriched) {
 }
 
 function TLW_sendText_(phoneNumberId, toWaId, text) {
-  const token = String(PropertiesService.getScriptProperties().getProperty("API TOKEN") || "").trim();
+  const token = TLW_getSetting_("API TOKEN");
   if (!token) throw new Error("Missing API TOKEN");
   const url = "https://graph.facebook.com/v19.0/" + encodeURIComponent(phoneNumberId) + "/messages";
   const payload = {
