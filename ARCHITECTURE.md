@@ -20,6 +20,8 @@ Primary tabs:
 - INBOX — active operational records
 - ARCHIVE — historical records (same schema as INBOX)
 - CONTACTS — normalized contact entities
+- CONTACT_ENRICHMENTS — append-only person-level updates (biz/personal)
+- TOPICS — topic index for drafting/context
 - SETTINGS — runtime configuration for timers/processing
 - LOG — technical/runtime logs
 

@@ -451,3 +451,11 @@ Safety Guard significantly reduces reputational risk.
 
 Logging and learning loops are critical for improvement.
 
+---
+
+# POC to Production Notes
+
+- After POC, split into a shared library (core router + ledger + topic/contact helpers) and per-client bound Apps Script files delivered during onboarding.
+- Library will handle schema creation (INBOX/ARCHIVE/CONTACTS/CONTACT_ENRICHMENTS/TOPICS/SETTINGS/LOG), root/topic resolution, and webhook normalization.
+- Client project will contain minimal config and UI triggers; onboarding flow should clone the client-bound script and register routing (phone_number_id → endpoint).
+

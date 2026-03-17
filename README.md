@@ -17,6 +17,8 @@ TaskLess (a.k.a. BossAI) is a WhatsApp-first, human-in-the-loop automation syste
 - INBOX: active operational records
 - ARCHIVE: historical records (same schema as INBOX)
 - CONTACTS: normalized contact entities
+- CONTACT_ENRICHMENTS: append-only biz/personal updates per contact
+- TOPICS: topic index to speed drafting/context
 - SETTINGS: runtime configuration (polling interval, batch sizes, feature flags)
 - LOG: technical/runtime logs
 
