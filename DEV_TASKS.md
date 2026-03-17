@@ -467,3 +467,11 @@ Logging and learning loops are critical for improvement.
 - Known gap: OUTGOING echo rows have empty receiver when recipient_id missing in payload; need fallback logic (e.g., last contact in root/topic window).
 - Known gap: record_version not incremented for communication evolutions (only statuses). Need consistent versioning across updates.
 
+## Next steps (AI routine, WhatsApp-first)
+- Configure AI endpoint/token in SETTINGS (`API END POINT`, `API TOKEN`, `AI_DEFAULT_LANGUAGE`). Use existing WhatsApp messages as the first channel before adding email/scheduling/tasks.
+- AI flow (initial POC):
+  - On new incoming communication row (record_class=communication, direction=incoming), build a prompt with recent context (same root/topic) and ask AI to propose reply + short summary.
+  - Write results into `ai_summary` and `ai_proposal` on the same row (or new record_version).
+  - Prepare a Boss approval card: Boss edits/approves; on approval, send via WhatsApp and log outbound communication row.
+- Deferrals for later: email ingestion, calendar/scheduling, and task auto-creation; focus first on WhatsApp AI drafts and Boss approval loop.
+
