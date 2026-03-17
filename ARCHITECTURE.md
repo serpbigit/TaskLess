@@ -13,5 +13,17 @@ When the Boss approves a proposal, the automation engine sends messages via the 
 ## Role of Google Sheets
 Google Sheets is both ledger and human-readable control interface. Tabs such as `INBOX`, `CONTACTS`, and `LOG` hold the structured operational data that the system reads and writes.
 
+## Operational Ledger
+TaskLess uses a unified operational ledger stored in Google Sheets.
+
+Primary tabs:
+- INBOX — active operational records
+- ARCHIVE — historical records (same schema as INBOX)
+- CONTACTS — normalized contact entities
+- SETTINGS — runtime configuration for timers/processing
+- LOG — technical/runtime logs
+
+All operational events share the canonical schema defined in OPERATIONAL.md and are differentiated by record_class.
+
 ## Change Discipline
 ARCHITECTURE.md documents the structural design of the platform and should be updated only when infrastructure components change significantly.

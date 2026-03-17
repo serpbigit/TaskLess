@@ -1,6 +1,6 @@
 # TaskLess - DEV_TASKS
 
-Working instructions: see DEV_INSTRUCTIONS.md
+Working instructions: see AGENT.md
 Operational model: see OPERATIONAL.md
 Reconstruction guide: see RECONSTRUCTION.md
 
