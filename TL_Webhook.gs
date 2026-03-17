@@ -78,6 +78,7 @@ function doPost(e) {
         const didUpdate = TLW_upsertStatus_(enriched, rawJson);
         if (didUpdate) { updated++; return; }
         TLW_logInfo_("status_no_match", { phone: enriched.phone_number_id, msg: enriched.message_id });
+        return; // do not append orphan status rows
       }
 
       const duplicate = TLW_isDuplicate_(enriched);
@@ -205,7 +206,7 @@ function TLW_enrichEvent_(ev, ts) {
   // contact resolution (simple deterministic id)
   const baseSender = String(ev.from || "");
   const baseRecipient = String(ev.recipient_id || "");
-  const contactNumber = (direction === "incoming") ? baseSender : (baseRecipient || baseSender);
+  const contactNumber = (direction === "incoming") ? baseSender : (baseRecipient || "");
   const contactId = contactNumber ? ("WA_" + phoneId + "_" + contactNumber) : "";
 
   // sender/receiver normalization
