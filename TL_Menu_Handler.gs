@@ -11,7 +11,7 @@
  */
 
 const TL_MENU = {
-  TRIGGERS: ["היי","תפריט","menu","שלום"],
+  TRIGGERS: ["תפריט","menu","/menu"],
   CHOICES: ["1","2","3"],
   STATE_KEY_PREFIX: "MENU_STATE_", // + wa_id
   MAX_PENDING_SUMMARY: 5

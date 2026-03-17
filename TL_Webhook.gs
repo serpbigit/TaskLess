@@ -59,8 +59,16 @@ function doPost(e) {
     TLW_logInfo_("webhook_received", { bytes: raw.length, entries: (payload && payload.entry && payload.entry.length) ? payload.entry.length : 0 });
 
     const events = TLW_extractEvents_(payload);
+
+    // Boss menu quick-path: only messages with text from BOSS_PHONE
+    const menuReply = TLW_tryBossMenu_(events);
+    if (menuReply && menuReply.toSend) {
+      TLW_sendText_(menuReply.toPhoneId, menuReply.toWaId, menuReply.text);
+      return TLW_json_({ ok:true, menu:true });
+    }
+
     if (!events.length) {
-    TLW_logDebug_("webhook_no_events", { raw: TLW_safeStringify_(payload, 2000) });
+      TLW_logDebug_("webhook_no_events", { raw: TLW_safeStringify_(payload, 2000) });
       return TLW_json_({ ok:true, events:0 });
     }
 
@@ -180,6 +188,30 @@ function TLW_extractEvents_(payload) {
   });
 
   return out;
+}
+
+function TLW_tryBossMenu_(events) {
+  if (!events || !events.length) return null;
+  const bossPhone = String(PropertiesService.getScriptProperties().getProperty("BOSS_PHONE") || "").trim();
+  const bizPhoneNumberId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim(); // fallback; better to set explicit BUSINESS_PHONE_ID
+  const businessPhoneId = String(PropertiesService.getScriptProperties().getProperty("BUSINESS_PHONE_ID") || "").trim() || "";
+
+  if (!bossPhone || (!businessPhoneId && !bizPhoneNumberId)) return null;
+
+  // find first inbound/echo message event with text from boss
+  const msg = events.find(ev => ev.event_type && ev.message_type && ev.message_type === "text" && ev.from === bossPhone);
+  if (!msg) return null;
+
+  const replyText = TL_Menu_HandleBossMessage_({
+    from: msg.from,
+    text: msg.text || "",
+    recipient_id: msg.recipient_id || "",
+    phone_number_id: msg.phone_number_id || ""
+  }, null);
+
+  if (!replyText) return null;
+  const toPhoneId = businessPhoneId || msg.phone_number_id;
+  return { toSend: true, toPhoneId, toWaId: bossPhone, text: replyText };
 }
 
 function TLW_enrichEvent_(ev, ts) {
@@ -419,6 +451,25 @@ function TLW_isDuplicate_(enriched) {
   if (!messageId) return false;
   const set = TLW_getRecentMessageIdSet_();
   return set.has(phoneId + "|" + messageId);
+}
+
+function TLW_sendText_(phoneNumberId, toWaId, text) {
+  const token = String(PropertiesService.getScriptProperties().getProperty("API TOKEN") || "").trim();
+  if (!token) throw new Error("Missing API TOKEN");
+  const url = "https://graph.facebook.com/v19.0/" + encodeURIComponent(phoneNumberId) + "/messages";
+  const payload = {
+    messaging_product: "whatsapp",
+    to: toWaId,
+    type: "text",
+    text: { body: text }
+  };
+  UrlFetchApp.fetch(url, {
+    method: "post",
+    contentType: "application/json",
+    headers: { Authorization: "Bearer " + token },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
 }
 
 function TLW_topicIdFromText_(text) {
