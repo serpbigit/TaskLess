@@ -194,12 +194,6 @@ function TLW_enrichEvent_(ev, ts) {
   const phoneId = String(ev.phone_number_id || "");
   const msgId = String(ev.message_id || "");
 
-  // contact resolution (simple deterministic id)
-  const baseSender = String(ev.from || "");
-  const baseRecipient = String(ev.recipient_id || "");
-  const contactNumber = (direction === "incoming") ? baseSender : (baseRecipient || baseSender);
-  const contactId = contactNumber ? ("WA_" + phoneId + "_" + contactNumber) : "";
-
   // topic id (placeholder hash)
   const topicId = TLW_topicIdFromText_(ev.text || "");
 
@@ -207,6 +201,12 @@ function TLW_enrichEvent_(ev, ts) {
   const eventType = String(ev.event_type || "");
   const direction = (eventType === "messages") ? "incoming" : "outgoing";
   const channel = "whatsapp";
+
+  // contact resolution (simple deterministic id)
+  const baseSender = String(ev.from || "");
+  const baseRecipient = String(ev.recipient_id || "");
+  const contactNumber = (direction === "incoming") ? baseSender : (baseRecipient || baseSender);
+  const contactId = contactNumber ? ("WA_" + phoneId + "_" + contactNumber) : "";
 
   // sender/receiver normalization
   let sender = baseSender;
