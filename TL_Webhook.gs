@@ -196,7 +196,7 @@ function TLW_enrichEvent_(ev, ts) {
   const channel = "whatsapp";
 
   // record ids
-  const recordId = msgId ? ("REC_" + msgId) : ("REC_" + nowIso + "_" + Math.random().toString(36).slice(2,8));
+  const recordId = msgId ? ("REC_" + phoneId + "_" + msgId) : ("REC_" + nowIso + "_" + Math.random().toString(36).slice(2,8));
   const rootId = TLW_resolveRootId_(contactId, topicId, ts);
 
   return {
@@ -208,7 +208,7 @@ function TLW_enrichEvent_(ev, ts) {
     record_version: 1,
     record_class: (eventType === "statuses") ? "status" : "communication",
     channel: channel,
-    direction: direction,
+    direction: (eventType === "statuses") ? "status" : direction,
     phone_number_id: phoneId,
     display_phone_number: String(ev.display_phone_number || ""),
     sender: sender,
@@ -306,8 +306,12 @@ function TLW_getRecentMessageIdSet_() {
 
     const start = Math.max(2, lastRow - TL_WEBHOOK.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
     const count = lastRow - start + 1;
-    const values = sh.getRange(start, 14, count, 1).getValues(); // message_id col (column N)
-    values.forEach(r => { const id = String(r[0]||"").trim(); if (id) set.add(id); });
+    const values = sh.getRange(start, 10, count, 5).getValues(); // phone_number_id (J) through message_id (N)
+    values.forEach(r => {
+      const phoneId = String(r[0]||"").trim();
+      const msgId = String(r[4]||"").trim();
+      if (msgId) set.add(phoneId + "|" + msgId);
+    });
   } catch (e) {}
   return set;
 }
@@ -316,7 +320,7 @@ function TLW_upsertStatus_(ev, rawJson) {
   const messageId = String(ev.message_id || "");
   if (!messageId) return false;
 
-  const loc = TLW_findRowByMessageId_(messageId);
+  const loc = TLW_findRowByMessageId_(ev.phone_number_id || "", messageId);
   if (!loc) return false;
 
   const { sh, row } = loc;
@@ -330,7 +334,7 @@ function TLW_upsertStatus_(ev, rawJson) {
   return true;
 }
 
-function TLW_findRowByMessageId_(messageId) {
+function TLW_findRowByMessageId_(phoneId, messageId) {
   try {
     const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
     const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
@@ -341,13 +345,13 @@ function TLW_findRowByMessageId_(messageId) {
 
     const start = Math.max(2, lastRow - TL_WEBHOOK.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
     const count = lastRow - start + 1;
-    const ids = sh.getRange(start, 14, count, 1).getValues(); // message_id col (N)
+    const ids = sh.getRange(start, 10, count, 5).getValues(); // phone_number_id (J) through message_id (N)
 
     // search from newest to oldest for speed
     for (let i = ids.length - 1; i >= 0; i--) {
-      if (String(ids[i][0] || "").trim() === messageId) {
-        return { sh, row: start + i };
-      }
+      const pId = String(ids[i][0]||"").trim();
+      const mId = String(ids[i][4]||"").trim();
+      if (pId === String(phoneId||"") && mId === messageId) return { sh, row: start + i };
     }
   } catch (e) {}
   return null;
@@ -378,9 +382,10 @@ function TLW_json_(obj) {
 
 function TLW_isDuplicate_(enriched) {
   const messageId = String(enriched.message_id || "");
+  const phoneId = String(enriched.phone_number_id || "");
   if (!messageId) return false;
   const set = TLW_getRecentMessageIdSet_();
-  return set.has(messageId);
+  return set.has(phoneId + "|" + messageId);
 }
 
 function TLW_topicIdFromText_(text) {
