@@ -21,7 +21,8 @@ const TL_WEBHOOK = {
     "task_due","task_status","task_priority",
     "topic_id","topic_tagged_at",
     "biz_stage","biz_stage_ts","payment_status","delivery_due",
-    "media_id","media_mime_type","media_sha256","media_caption","media_filename","media_is_voice"
+    "media_id","media_mime_type","media_sha256","media_caption","media_filename","media_is_voice",
+    "priority_level","importance_level","urgency_flag","needs_owner_now","suggested_action"
   ]
 };
 
@@ -100,6 +101,7 @@ function doPost(e) {
 
       const appendedRow = TLW_appendInboxRow_(enriched, rawJson);
       TLW_tryAutoVoiceTranscription_(enriched, appendedRow);
+      TLW_tryAutoAiTriage_(enriched, appendedRow);
       appended++;
     });
 
@@ -393,7 +395,12 @@ function TLW_enrichEvent_(ev, ts) {
     media_sha256: String(ev.media_sha256 || ""),
     media_caption: String(ev.media_caption || ""),
     media_filename: String(ev.media_filename || ""),
-    media_is_voice: !!ev.media_is_voice
+    media_is_voice: !!ev.media_is_voice,
+    priority_level: "",
+    importance_level: "",
+    urgency_flag: "",
+    needs_owner_now: "",
+    suggested_action: ""
   };
 }
 
@@ -452,7 +459,12 @@ function TLW_appendInboxRow_(obj, rawJson) {
     String(obj.media_sha256||""),
     String(obj.media_caption||""),
     String(obj.media_filename||""),
-    obj.media_is_voice ? "true" : "false"
+    obj.media_is_voice ? "true" : "false",
+    String(obj.priority_level||""),
+    String(obj.importance_level||""),
+    String(obj.urgency_flag||""),
+    String(obj.needs_owner_now||""),
+    String(obj.suggested_action||"")
   ];
 
   sh.appendRow(row);
@@ -701,6 +713,31 @@ function TLW_tryAutoVoiceTranscription_(enriched, appendedRow) {
     });
   } catch (err) {
     TLW_logInfo_("ai_voice_transcription_error", {
+      row: appendedRow && appendedRow.row ? appendedRow.row : "",
+      message_id: enriched && enriched.message_id ? enriched.message_id : "",
+      err: String(err && err.stack ? err.stack : err)
+    });
+  }
+}
+
+function TLW_tryAutoAiTriage_(enriched, appendedRow) {
+  try {
+    if (typeof TL_AI_TriageInboxRow_ !== "function") return;
+    if (!enriched || !appendedRow || !appendedRow.row) return;
+    if (String(TLW_getSetting_("ai_summary_enabled") || "").trim().toLowerCase() !== "true") return;
+    if (String(enriched.direction || "").trim().toLowerCase() !== "incoming") return;
+    if (String(enriched.record_class || "").trim().toLowerCase() !== "communication") return;
+
+    const result = TL_AI_TriageInboxRow_(appendedRow.row);
+    TLW_logInfo_("ai_triage_auto", {
+      row: appendedRow.row,
+      message_id: enriched.message_id || "",
+      priority_level: result && result.priority_level ? result.priority_level : "",
+      urgency_flag: result && result.urgency_flag ? result.urgency_flag : "",
+      suggested_action: result && result.suggested_action ? result.suggested_action : ""
+    });
+  } catch (err) {
+    TLW_logInfo_("ai_triage_error", {
       row: appendedRow && appendedRow.row ? appendedRow.row : "",
       message_id: enriched && enriched.message_id ? enriched.message_id : "",
       err: String(err && err.stack ? err.stack : err)

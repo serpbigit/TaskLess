@@ -475,17 +475,27 @@ Logging and learning loops are critical for improvement.
 - Deployed web app media ingestion verified by simulated POSTs to the live `doPost()` endpoint: image, document, voice, and video each returned `{"ok":true,"appended":1,"skipped":0,"updated":0}`.
 - Voice transcription path is now wired end-to-end: incoming WhatsApp voice note -> media fetch from Meta -> Gemini transcription -> transcript written back to `text` and summary written to `ai_summary`.
 - Webhook auto-transcription is now enabled for incoming voice notes when `ai_voice_transcription=TRUE`; failures are logged but do not break the webhook.
+- Amanda triage is now wired for incoming WhatsApp rows: after normalization (and after voice transcription when applicable), the system writes `priority_level`, `importance_level`, `urgency_flag`, `needs_owner_now`, `suggested_action`, `ai_summary`, and `ai_proposal`.
+- Live tests currently use the Boss phone configured in `SETTINGS` (`BOSS_PHONE`) as the sender while the system is under active development. Later test phases should introduce additional actors (clients, family, vendors, internal staff) so contact behavior and urgency rules are exercised against more realistic mixed traffic.
 - Remaining media gap: image/video analysis and richer downstream processing are still pending.
 
 ## Next steps (AI routine, WhatsApp-first)
 - Configure AI endpoint/token in SETTINGS (`API END POINT`, `API TOKEN`, `AI_DEFAULT_LANGUAGE`). Use existing WhatsApp messages as the first channel before adding email/scheduling/tasks.
 - AI flow (initial POC):
-  - On new incoming communication row (record_class=communication, direction=incoming), build a prompt with recent context (same root/topic) and ask AI to propose reply + short summary.
-  - Write results into `ai_summary` and `ai_proposal` on the same row (or new record_version).
+  - Amanda now handles first-pass per-message triage for incoming WhatsApp rows.
+  - Next Amanda layer: batch/thread synthesis after quiet-window stabilization so multiple related messages produce one coherent summary, proposal, and decision recommendation.
   - Prepare a Boss approval card: Boss edits/approves; on approval, send via WhatsApp and log outbound communication row.
 - Extend inbound WhatsApp parsing beyond text:
   - image/document/video messages: store media type, caption, media id/url metadata, and preserve linkage to the contact/root/topic.
   - voice/audio notes: transcription is now wired; next step is to feed transcript + summary into downstream task extraction and reply drafting automatically.
+- Add email pipeline:
+  - scan important incoming emails where the user is in `To` or `Cc` (not `Bcc`), import them into `INBOX`, and batch-analyze them as JSON.
+  - support outbound email drafting/sending as another Boss-approved execution channel.
+- Add calendar pipeline:
+  - scan upcoming or changed calendar events and write actionable/open items into `INBOX` so commitments and scheduling work appear in the same operational queue.
+- Add cross-channel contact intelligence:
+  - extract and normalize contact information from WhatsApp messages and emails.
+  - match messages/emails to shared contacts so Amanda can reason over broader context (previous emails, previous WhatsApp exchanges, prior commitments, and topic history).
 - Future voice-output task:
   - add support for AI-generated voice responses: generate approved reply text -> synthesize speech -> send outbound audio/voice note via the appropriate channel.
 - Deferrals for later: email ingestion, calendar/scheduling, and task auto-creation; focus first on WhatsApp AI drafts and Boss approval loop.

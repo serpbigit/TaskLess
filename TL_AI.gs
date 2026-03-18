@@ -33,6 +33,20 @@ function TL_AI_buildPrompt_(inputText, language) {
   ].join("\n");
 }
 
+function TL_AI_buildTriagePrompt_(inputText, language) {
+  return [
+    "You are Amanda, the TaskLess AI assistant for business communication triage.",
+    "Analyze the incoming message and return strict JSON only.",
+    "Language preference: " + String(language || "Hebrew"),
+    "Required JSON shape:",
+    '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","summary":"...","proposal":"..."}',
+    "Interpret urgency narrowly: only true when timing matters now or soon.",
+    "Interpret importance as business relevance, money, reputation, commitment, or customer risk.",
+    "Message:",
+    String(inputText || "")
+  ].join("\n");
+}
+
 function TL_AI_buildTranscriptionPrompt_(language) {
   return [
     "You are TaskLess, a business communication assistant.",
@@ -219,6 +233,60 @@ function TL_AI_TestLatestIncoming() {
     summary: result.summary,
     proposal: result.proposal
   };
+}
+
+function TL_AI_TriageInboxRow_(rowNumber) {
+  const loc = TL_AI_getInboxRow_(rowNumber);
+  if (!loc) throw new Error("INBOX row not found: " + rowNumber);
+
+  const rowData = loc.values;
+  const inputText = TL_AI_getCanonicalInputText_(rowData);
+  if (!inputText) throw new Error("Row has no usable input text for triage: " + rowNumber);
+
+  const cfg = TL_AI_getConfig_();
+  const prompt = TL_AI_buildTriagePrompt_(inputText, cfg.language);
+  const result = TL_AI_callPrompt_(prompt);
+
+  const triage = {
+    priority_level: TL_AI_normalizeLevel_(result.raw_json.priority_level),
+    importance_level: TL_AI_normalizeLevel_(result.raw_json.importance_level),
+    urgency_flag: TL_AI_normalizeBooleanString_(result.raw_json.urgency_flag),
+    needs_owner_now: TL_AI_normalizeBooleanString_(result.raw_json.needs_owner_now),
+    suggested_action: TL_AI_normalizeSuggestedAction_(result.raw_json.suggested_action),
+    summary: String(result.raw_json.summary || result.summary || "").trim(),
+    proposal: String(result.raw_json.proposal || result.proposal || "").trim()
+  };
+
+  loc.sh.getRange(loc.row, TLW_colIndex_("priority_level")).setValue(triage.priority_level);
+  loc.sh.getRange(loc.row, TLW_colIndex_("importance_level")).setValue(triage.importance_level);
+  loc.sh.getRange(loc.row, TLW_colIndex_("urgency_flag")).setValue(triage.urgency_flag);
+  loc.sh.getRange(loc.row, TLW_colIndex_("needs_owner_now")).setValue(triage.needs_owner_now);
+  loc.sh.getRange(loc.row, TLW_colIndex_("suggested_action")).setValue(triage.suggested_action);
+  loc.sh.getRange(loc.row, TLW_colIndex_("ai_summary")).setValue(triage.summary);
+  loc.sh.getRange(loc.row, TLW_colIndex_("ai_proposal")).setValue(triage.proposal);
+
+  TLW_logInfo_("ai_triage_row", {
+    row: loc.row,
+    priority_level: triage.priority_level,
+    importance_level: triage.importance_level,
+    urgency_flag: triage.urgency_flag,
+    needs_owner_now: triage.needs_owner_now,
+    suggested_action: triage.suggested_action
+  });
+
+  Logger.log("TL_AI_TriageInboxRow_: %s", JSON.stringify({
+    row: loc.row,
+    input_text: inputText,
+    triage: triage
+  }, null, 2));
+
+  return Object.assign({ ok: true, row: loc.row, input_text: inputText }, triage);
+}
+
+function TL_AI_TriageLatestIncoming() {
+  const loc = TL_AI_findLatestIncomingRow_();
+  if (!loc) throw new Error("No incoming communication row found in INBOX");
+  return TL_AI_TriageInboxRow_(loc.row);
 }
 
 function TL_AI_TranscribeLatestVoice() {
@@ -410,6 +478,30 @@ function TL_AI_findLatestIncomingRow_() {
   }
 
   return null;
+}
+
+function TL_AI_getCanonicalInputText_(rowData) {
+  const text = String(rowData[TLW_colIndex_("text") - 1] || "").trim();
+  const messageType = String(rowData[TLW_colIndex_("message_type") - 1] || "").trim();
+  const mediaCaption = String(rowData[TLW_colIndex_("media_caption") - 1] || "").trim();
+  return text || mediaCaption || ("Incoming " + messageType + " message");
+}
+
+function TL_AI_normalizeLevel_(value) {
+  const v = String(value || "").trim().toLowerCase();
+  if (v === "high" || v === "medium" || v === "low") return v;
+  return "medium";
+}
+
+function TL_AI_normalizeBooleanString_(value) {
+  const v = String(value || "").trim().toLowerCase();
+  return (v === "true" || v === "yes" || v === "1") ? "true" : "false";
+}
+
+function TL_AI_normalizeSuggestedAction_(value) {
+  const v = String(value || "").trim().toLowerCase();
+  const allowed = ["reply_now","reply_later","call","schedule","follow_up","wait","ignore","review_manually"];
+  return allowed.indexOf(v) !== -1 ? v : "review_manually";
 }
 
 function TL_AI_findLatestVoiceRow_() {
