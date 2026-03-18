@@ -16,7 +16,8 @@ const TL_SCHEMA = {
     "contact_id","raw_payload_ref","notes",
     "task_due","task_status","task_priority",
     "topic_id","topic_tagged_at",
-    "biz_stage","biz_stage_ts","payment_status","delivery_due"
+    "biz_stage","biz_stage_ts","payment_status","delivery_due",
+    "media_id","media_mime_type","media_sha256","media_caption","media_filename","media_is_voice"
   ],
   CONTACTS_HEADERS: [
     "contact_id","name","alias","org","website","phone1","phone2","email","role","tags","last_note","last_enriched_at"

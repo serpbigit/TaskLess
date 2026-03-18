@@ -19,9 +19,16 @@ const TL_WEBHOOK = {
     "contact_id","raw_payload_ref","notes",
     "task_due","task_status","task_priority",
     "topic_id","topic_tagged_at",
-    "biz_stage","biz_stage_ts","payment_status","delivery_due"
+    "biz_stage","biz_stage_ts","payment_status","delivery_due",
+    "media_id","media_mime_type","media_sha256","media_caption","media_filename","media_is_voice"
   ]
 };
+
+function TLW_colIndex_(headerName) {
+  const idx = TL_WEBHOOK.INBOX_HEADERS.indexOf(String(headerName || "").trim());
+  if (idx === -1) throw new Error("Unknown INBOX header: " + headerName);
+  return idx + 1;
+}
 
 function doGet(e) {
   try {
@@ -130,6 +137,29 @@ function COEX_checkPhoneNumberState(phoneNumberId) {
 }
 
 /** ---- internals ---- */
+function TLW_extractMessageContent_(m) {
+  const type = String(m && m.type || "");
+  const text = (type === "text" && m && m.text && m.text.body) ? String(m.text.body) : "";
+  const media = (m && m[type] && typeof m[type] === "object") ? m[type] : {};
+  const caption = String(media.caption || "");
+  const filename = String(media.filename || "");
+  const mimeType = String(media.mime_type || "");
+  const sha256 = String(media.sha256 || "");
+  const mediaId = String(media.id || "");
+  const isVoice = !!media.voice;
+
+  return {
+    message_type: (type === "audio" && isVoice) ? "voice" : type,
+    text: text || caption,
+    media_id: mediaId,
+    media_mime_type: mimeType,
+    media_sha256: sha256,
+    media_caption: caption,
+    media_filename: filename,
+    media_is_voice: isVoice
+  };
+}
+
 function TLW_extractEvents_(payload) {
   const out = [];
   if (!payload || !payload.entry || !payload.entry.length) return out;
@@ -149,8 +179,24 @@ function TLW_extractEvents_(payload) {
           const recipient = String(m.recipient_id || "");
           const msgId = String(m.id || "");
           const type = String(m.type || "");
-          const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
-          out.push({ event_type:"messages", display_phone_number:displayPhone, phone_number_id:phoneId, from, recipient_id:recipient, message_id:msgId, message_type:type, text, statuses_count:0 });
+          const content = TLW_extractMessageContent_(m);
+          out.push({
+            event_type:"messages",
+            display_phone_number:displayPhone,
+            phone_number_id:phoneId,
+            from,
+            recipient_id:recipient,
+            message_id:msgId,
+            message_type:content.message_type,
+            text: content.text,
+            statuses_count:0,
+            media_id: content.media_id,
+            media_mime_type: content.media_mime_type,
+            media_sha256: content.media_sha256,
+            media_caption: content.media_caption,
+            media_filename: content.media_filename,
+            media_is_voice: content.media_is_voice
+          });
         });
       }
 
@@ -160,8 +206,24 @@ function TLW_extractEvents_(payload) {
           const recipient = String(m.recipient_id || "");
           const msgId = String(m.id || "");
           const type = String(m.type || "");
-          const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
-          out.push({ event_type:"message_echoes", display_phone_number:displayPhone, phone_number_id:phoneId, from, recipient_id:recipient, message_id:msgId, message_type:type, text, statuses_count:0 });
+          const content = TLW_extractMessageContent_(m);
+          out.push({
+            event_type:"message_echoes",
+            display_phone_number:displayPhone,
+            phone_number_id:phoneId,
+            from,
+            recipient_id:recipient,
+            message_id:msgId,
+            message_type:content.message_type,
+            text: content.text,
+            statuses_count:0,
+            media_id: content.media_id,
+            media_mime_type: content.media_mime_type,
+            media_sha256: content.media_sha256,
+            media_caption: content.media_caption,
+            media_filename: content.media_filename,
+            media_is_voice: content.media_is_voice
+          });
         });
       }
 
@@ -171,8 +233,24 @@ function TLW_extractEvents_(payload) {
           const recipient = String(m.recipient_id || "");
           const msgId = String(m.id || "");
           const type = String(m.type || "");
-          const text = (type === "text" && m.text && m.text.body) ? String(m.text.body) : "";
-          out.push({ event_type:"smb_message_echoes", display_phone_number:displayPhone, phone_number_id:phoneId, from, recipient_id:recipient, message_id:msgId, message_type:type, text, statuses_count:0 });
+          const content = TLW_extractMessageContent_(m);
+          out.push({
+            event_type:"smb_message_echoes",
+            display_phone_number:displayPhone,
+            phone_number_id:phoneId,
+            from,
+            recipient_id:recipient,
+            message_id:msgId,
+            message_type:content.message_type,
+            text: content.text,
+            statuses_count:0,
+            media_id: content.media_id,
+            media_mime_type: content.media_mime_type,
+            media_sha256: content.media_sha256,
+            media_caption: content.media_caption,
+            media_filename: content.media_filename,
+            media_is_voice: content.media_is_voice
+          });
         });
       }
 
@@ -306,7 +384,13 @@ function TLW_enrichEvent_(ev, ts) {
     biz_stage: "",
     biz_stage_ts: "",
     payment_status: "",
-    delivery_due: ""
+    delivery_due: "",
+    media_id: String(ev.media_id || ""),
+    media_mime_type: String(ev.media_mime_type || ""),
+    media_sha256: String(ev.media_sha256 || ""),
+    media_caption: String(ev.media_caption || ""),
+    media_filename: String(ev.media_filename || ""),
+    media_is_voice: !!ev.media_is_voice
   };
 }
 
@@ -359,7 +443,13 @@ function TLW_appendInboxRow_(obj, rawJson) {
     String(obj.biz_stage||""),
     String(obj.biz_stage_ts||""),
     String(obj.payment_status||""),
-    String(obj.delivery_due||"")
+    String(obj.delivery_due||""),
+    String(obj.media_id||""),
+    String(obj.media_mime_type||""),
+    String(obj.media_sha256||""),
+    String(obj.media_caption||""),
+    String(obj.media_filename||""),
+    obj.media_is_voice ? "true" : "false"
   ];
 
   sh.appendRow(row);
@@ -541,7 +631,13 @@ function TLW_logOutboundTextSend_(phoneNumberId, toWaId, text, responseBody) {
     message_id: parsed.messageId,
     message_type: "text",
     text: String(text || ""),
-    statuses_count: 0
+    statuses_count: 0,
+    media_id: "",
+    media_mime_type: "",
+    media_sha256: "",
+    media_caption: "",
+    media_filename: "",
+    media_is_voice: false
   };
   const enriched = TLW_enrichEvent_(outgoingEvent, new Date());
   if (!enriched) return;
