@@ -1,0 +1,453 @@
+/**
+ * TL_AI - Gemini-compatible helpers for smoke tests, row proposals, and voice transcription.
+ *
+ * This does not auto-send anything. It calls the configured AI endpoint
+ * and writes results back into INBOX only when explicitly invoked.
+ */
+
+function TL_AI_getConfig_() {
+  const endpoint = String(TLW_getSetting_("API END POINT") || "").trim();
+  const token = String(TLW_getSetting_("API TOKEN") || "").trim();
+  const language = String(TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "Hebrew").trim();
+
+  if (!endpoint) throw new Error("Missing SETTINGS value: API END POINT");
+  if (!token) throw new Error("Missing SETTINGS value: API TOKEN");
+
+  return {
+    endpoint: endpoint,
+    token: token,
+    language: language
+  };
+}
+
+function TL_AI_buildPrompt_(inputText, language) {
+  return [
+    "You are TaskLess, a business communication assistant.",
+    "Return strict JSON only.",
+    "Language: " + String(language || "Hebrew"),
+    "Required JSON shape:",
+    '{"summary":"...","proposal":"..."}',
+    "The proposal should be a concise draft reply.",
+    "User message:",
+    String(inputText || "")
+  ].join("\n");
+}
+
+function TL_AI_buildTranscriptionPrompt_(language) {
+  return [
+    "You are TaskLess, a business communication assistant.",
+    "Transcribe the provided audio.",
+    "Return strict JSON only.",
+    "Language preference: " + String(language || "Hebrew"),
+    "Required JSON shape:",
+    '{"transcript":"...","summary":"..."}',
+    "The transcript should preserve the spoken wording as closely as possible.",
+    "The summary should be one short sentence."
+  ].join("\n");
+}
+
+function TL_AI_parseResponseText_(bodyText) {
+  let parsed = null;
+  try {
+    parsed = JSON.parse(String(bodyText || "{}"));
+  } catch (e) {
+    throw new Error("AI response is not valid JSON: " + e.message);
+  }
+
+  const candidates = parsed && parsed.candidates ? parsed.candidates : [];
+  if (!candidates.length) {
+    throw new Error("AI response has no candidates");
+  }
+
+  const parts = (((candidates[0] || {}).content || {}).parts || []);
+  const text = parts.map(p => String((p && p.text) || "")).join("").trim();
+  if (!text) {
+    throw new Error("AI response candidate is empty");
+  }
+
+  return text;
+}
+
+function TL_AI_parseJsonBlock_(text) {
+  const raw = String(text || "").trim();
+  if (!raw) throw new Error("AI text payload is empty");
+
+  let jsonText = raw;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced && fenced[1]) jsonText = fenced[1].trim();
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (e) {
+    throw new Error("AI text is not valid JSON: " + e.message + " :: " + jsonText.slice(0, 300));
+  }
+
+  return {
+    summary: String(parsed.summary || "").trim(),
+    proposal: String(parsed.proposal || "").trim(),
+    raw: parsed
+  };
+}
+
+function TL_AI_call_(contents, generationConfig) {
+  const cfg = TL_AI_getConfig_();
+  const payload = {
+    contents: contents,
+    generationConfig: generationConfig || {
+      temperature: 0.2,
+      responseMimeType: "application/json"
+    }
+  };
+
+  const res = UrlFetchApp.fetch(cfg.endpoint, {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      "x-goog-api-key": cfg.token
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  const status = res.getResponseCode();
+  const body = res.getContentText();
+  if (status < 200 || status >= 300) {
+    throw new Error("AI request failed: " + status + " :: " + body);
+  }
+
+  return {
+    status: status,
+    body: body
+  };
+}
+
+function TL_AI_callPrompt_(promptText) {
+  const res = TL_AI_call_([{
+    role: "user",
+    parts: [{ text: String(promptText || "") }]
+  }], {
+    temperature: 0.2,
+    responseMimeType: "application/json"
+  });
+
+  const responseText = TL_AI_parseResponseText_(res.body);
+  const parsed = TL_AI_parseJsonBlock_(responseText);
+
+  return {
+    ok: true,
+    status: res.status,
+    summary: parsed.summary,
+    proposal: parsed.proposal,
+    raw_text: responseText,
+    raw_json: parsed.raw,
+    response_body: res.body
+  };
+}
+
+function TL_AI_SmokeTest() {
+  const cfg = TL_AI_getConfig_();
+  const prompt = TL_AI_buildPrompt_(
+    "לקוח כתב: האם אפשר לקבוע פגישה מחר ב-10:00?",
+    cfg.language
+  );
+  const result = TL_AI_callPrompt_(prompt);
+  TLW_logInfo_("ai_smoke_test", {
+    status: result.status,
+    summary: result.summary,
+    proposal: result.proposal
+  });
+  Logger.log("TL_AI_SmokeTest: %s", JSON.stringify(result, null, 2));
+  return result;
+}
+
+function TL_AI_CapabilitiesTest() {
+  return TL_AI_TestPrompt(
+    "What are your capabilities? Can you transcribe a media file, answer a general question, and search within a specific website?"
+  );
+}
+
+function TL_AI_TestPrompt(promptText) {
+  const cfg = TL_AI_getConfig_();
+  const prompt = TL_AI_buildPrompt_(String(promptText || ""), cfg.language);
+  const result = TL_AI_callPrompt_(prompt);
+  TLW_logInfo_("ai_test_prompt", {
+    status: result.status,
+    summary: result.summary,
+    proposal: result.proposal
+  });
+  Logger.log("TL_AI_TestPrompt: %s", JSON.stringify(result, null, 2));
+  return result;
+}
+
+function TL_AI_TestLatestIncoming() {
+  const loc = TL_AI_findLatestIncomingRow_();
+  if (!loc) throw new Error("No incoming communication row found in INBOX");
+
+  const rowData = loc.values;
+  const text = String(rowData[TLW_colIndex_("text") - 1] || "").trim();
+  const messageType = String(rowData[TLW_colIndex_("message_type") - 1] || "").trim();
+  const mediaCaption = String(rowData[TLW_colIndex_("media_caption") - 1] || "").trim();
+  const inputText = text || mediaCaption || ("Incoming " + messageType + " message");
+
+  const cfg = TL_AI_getConfig_();
+  const prompt = TL_AI_buildPrompt_(inputText, cfg.language);
+  const result = TL_AI_callPrompt_(prompt);
+
+  loc.sh.getRange(loc.row, TLW_colIndex_("ai_summary")).setValue(result.summary);
+  loc.sh.getRange(loc.row, TLW_colIndex_("ai_proposal")).setValue(result.proposal);
+
+  TLW_logInfo_("ai_test_latest_incoming", {
+    row: loc.row,
+    message_type: messageType,
+    summary: result.summary,
+    proposal: result.proposal
+  });
+
+  Logger.log("TL_AI_TestLatestIncoming: %s", JSON.stringify({
+    row: loc.row,
+    message_type: messageType,
+    summary: result.summary,
+    proposal: result.proposal
+  }, null, 2));
+
+  return {
+    ok: true,
+    row: loc.row,
+    message_type: messageType,
+    input_text: inputText,
+    summary: result.summary,
+    proposal: result.proposal
+  };
+}
+
+function TL_AI_TranscribeLatestVoice() {
+  const loc = TL_AI_findLatestVoiceRow_();
+  if (!loc) throw new Error("No incoming voice row found in INBOX");
+  return TL_AI_TranscribeInboxRow_(loc.row);
+}
+
+function TL_AI_TranscribeInboxRow_(rowNumber) {
+  const loc = TL_AI_getInboxRow_(rowNumber);
+  if (!loc) throw new Error("INBOX row not found: " + rowNumber);
+
+  const rowData = loc.values;
+  const messageType = String(rowData[TLW_colIndex_("message_type") - 1] || "").trim().toLowerCase();
+  const mediaId = String(rowData[TLW_colIndex_("media_id") - 1] || "").trim();
+  const phoneId = String(rowData[TLW_colIndex_("phone_number_id") - 1] || "").trim();
+  const existingText = String(rowData[TLW_colIndex_("text") - 1] || "").trim();
+  const existingNotes = String(rowData[TLW_colIndex_("notes") - 1] || "").trim();
+  const isVoice = String(rowData[TLW_colIndex_("media_is_voice") - 1] || "").trim().toLowerCase() === "true";
+
+  if (!mediaId) throw new Error("Row has no media_id: " + rowNumber);
+  if (!(messageType === "voice" || (messageType === "audio" && isVoice) || isVoice)) {
+    throw new Error("Row is not a voice note: " + rowNumber + " (" + messageType + ")");
+  }
+
+  const media = TL_AI_downloadMetaMedia_(mediaId, phoneId);
+  const transcript = TL_AI_TranscribeAudioBlob_(media.blob, media.mimeType || media.info.mime_type || "audio/ogg");
+
+  const finalText = transcript.transcript || existingText;
+  const noteLines = [
+    "voice_transcription_status=ok",
+    "voice_transcription_mime_type=" + String(media.mimeType || ""),
+    "voice_transcription_bytes=" + String(media.sizeBytes || 0)
+  ];
+  const mergedNotes = existingNotes
+    ? (existingNotes + "\n" + noteLines.join("\n"))
+    : noteLines.join("\n");
+
+  loc.sh.getRange(loc.row, TLW_colIndex_("text")).setValue(finalText);
+  loc.sh.getRange(loc.row, TLW_colIndex_("ai_summary")).setValue(transcript.summary);
+  loc.sh.getRange(loc.row, TLW_colIndex_("notes")).setValue(mergedNotes);
+
+  TLW_logInfo_("ai_voice_transcribed", {
+    row: loc.row,
+    media_id: mediaId,
+    mime_type: media.mimeType,
+    bytes: media.sizeBytes,
+    transcript_preview: finalText.slice(0, 200),
+    summary: transcript.summary
+  });
+
+  Logger.log("TL_AI_TranscribeInboxRow_: %s", JSON.stringify({
+    row: loc.row,
+    media_id: mediaId,
+    mime_type: media.mimeType,
+    transcript: finalText,
+    summary: transcript.summary
+  }, null, 2));
+
+  return {
+    ok: true,
+    row: loc.row,
+    media_id: mediaId,
+    mime_type: media.mimeType,
+    transcript: finalText,
+    summary: transcript.summary
+  };
+}
+
+function TL_AI_TranscribeAudioBlob_(blob, mimeType) {
+  if (!blob) throw new Error("Missing audio blob");
+  const bytes = blob.getBytes();
+  if (!bytes || !bytes.length) throw new Error("Audio blob is empty");
+
+  // Gemini inline audio requests should stay well below the 20 MB total request limit.
+  if (bytes.length > 18 * 1024 * 1024) {
+    throw new Error("Audio too large for inline transcription; add Files API upload flow");
+  }
+
+  const cfg = TL_AI_getConfig_();
+  const prompt = TL_AI_buildTranscriptionPrompt_(cfg.language);
+  const res = TL_AI_call_([{
+    role: "user",
+    parts: [
+      { text: prompt },
+      {
+        inlineData: {
+          mimeType: String(mimeType || "audio/ogg"),
+          data: Utilities.base64Encode(bytes)
+        }
+      }
+    ]
+  }], {
+    temperature: 0.1,
+    responseMimeType: "application/json"
+  });
+
+  const responseText = TL_AI_parseResponseText_(res.body);
+  const parsed = TL_AI_parseJsonBlock_(responseText);
+
+  return {
+    ok: true,
+    status: res.status,
+    transcript: String(parsed.raw.transcript || "").trim(),
+    summary: String(parsed.raw.summary || "").trim(),
+    raw_text: responseText,
+    raw_json: parsed.raw,
+    response_body: res.body
+  };
+}
+
+function TL_AI_fetchMetaMediaInfo_(mediaId, phoneNumberId) {
+  const token = TLW_getMetaAccessToken_();
+  if (!token) throw new Error("Missing Meta access token for media retrieval");
+
+  let url = "https://graph.facebook.com/v19.0/" + encodeURIComponent(String(mediaId || "").trim());
+  if (phoneNumberId) {
+    url += "?phone_number_id=" + encodeURIComponent(String(phoneNumberId || "").trim());
+  }
+
+  const res = UrlFetchApp.fetch(url, {
+    method: "get",
+    muteHttpExceptions: true,
+    headers: {
+      Authorization: "Bearer " + token
+    }
+  });
+
+  const status = res.getResponseCode();
+  const body = res.getContentText();
+  if (status < 200 || status >= 300) {
+    throw new Error("Meta media info request failed: " + status + " :: " + body);
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw new Error("Meta media info is not valid JSON: " + e.message);
+  }
+
+  return parsed;
+}
+
+function TL_AI_downloadMetaMedia_(mediaId, phoneNumberId) {
+  const info = TL_AI_fetchMetaMediaInfo_(mediaId, phoneNumberId);
+  const mediaUrl = String(info.url || "").trim();
+  if (!mediaUrl) throw new Error("Meta media info missing url");
+
+  const token = TLW_getMetaAccessToken_();
+  const res = UrlFetchApp.fetch(mediaUrl, {
+    method: "get",
+    muteHttpExceptions: true,
+    headers: {
+      Authorization: "Bearer " + token
+    }
+  });
+
+  const status = res.getResponseCode();
+  if (status < 200 || status >= 300) {
+    throw new Error("Meta media download failed: " + status + " :: " + res.getContentText());
+  }
+
+  const blob = res.getBlob();
+  return {
+    info: info,
+    blob: blob,
+    mimeType: String(blob.getContentType() || info.mime_type || "").trim(),
+    sizeBytes: blob.getBytes().length
+  };
+}
+
+function TL_AI_findLatestIncomingRow_() {
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+  if (!sh) return null;
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+
+  const width = TL_WEBHOOK.INBOX_HEADERS.length;
+  for (let row = lastRow; row >= 2; row--) {
+    const values = sh.getRange(row, 1, 1, width).getValues()[0];
+    const direction = String(values[TLW_colIndex_("direction") - 1] || "").trim().toLowerCase();
+    const recordClass = String(values[TLW_colIndex_("record_class") - 1] || "").trim().toLowerCase();
+    if (direction === "incoming" && recordClass === "communication") {
+      return { sh: sh, row: row, values: values };
+    }
+  }
+
+  return null;
+}
+
+function TL_AI_findLatestVoiceRow_() {
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+  if (!sh) return null;
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+
+  const width = TL_WEBHOOK.INBOX_HEADERS.length;
+  for (let row = lastRow; row >= 2; row--) {
+    const values = sh.getRange(row, 1, 1, width).getValues()[0];
+    const direction = String(values[TLW_colIndex_("direction") - 1] || "").trim().toLowerCase();
+    const recordClass = String(values[TLW_colIndex_("record_class") - 1] || "").trim().toLowerCase();
+    const messageType = String(values[TLW_colIndex_("message_type") - 1] || "").trim().toLowerCase();
+    const mediaId = String(values[TLW_colIndex_("media_id") - 1] || "").trim();
+    const isVoice = String(values[TLW_colIndex_("media_is_voice") - 1] || "").trim().toLowerCase() === "true";
+    if (direction === "incoming" && recordClass === "communication" && mediaId && (messageType === "voice" || (messageType === "audio" && isVoice) || isVoice)) {
+      return { sh: sh, row: row, values: values };
+    }
+  }
+
+  return null;
+}
+
+function TL_AI_getInboxRow_(rowNumber) {
+  const row = Number(rowNumber || 0);
+  if (!isFinite(row) || row < 2) return null;
+
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+  if (!sh) return null;
+  if (row > sh.getLastRow()) return null;
+
+  return {
+    sh: sh,
+    row: row,
+    values: sh.getRange(row, 1, 1, TL_WEBHOOK.INBOX_HEADERS.length).getValues()[0]
+  };
+}

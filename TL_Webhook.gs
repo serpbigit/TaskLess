@@ -10,6 +10,7 @@
 const TL_WEBHOOK = {
   INBOX_SHEET: "INBOX",
   MAX_IDEMPOTENCY_SCAN_ROWS: 2000,
+  MEDIA_MESSAGE_TYPES: ["image","document","audio","video"],
   INBOX_HEADERS: [
     "timestamp","root_id","event_id","parent_event_id","record_id","record_version","record_class",
     "channel","direction","phone_number_id","display_phone_number","sender","receiver",
@@ -97,7 +98,8 @@ function doPost(e) {
       const duplicate = TLW_isDuplicate_(enriched);
       if (duplicate) { skipped++; return; }
 
-      TLW_appendInboxRow_(enriched, rawJson);
+      const appendedRow = TLW_appendInboxRow_(enriched, rawJson);
+      TLW_tryAutoVoiceTranscription_(enriched, appendedRow);
       appended++;
     });
 
@@ -140,7 +142,8 @@ function COEX_checkPhoneNumberState(phoneNumberId) {
 function TLW_extractMessageContent_(m) {
   const type = String(m && m.type || "");
   const text = (type === "text" && m && m.text && m.text.body) ? String(m.text.body) : "";
-  const media = (m && m[type] && typeof m[type] === "object") ? m[type] : {};
+  const isExplicitMediaType = TL_WEBHOOK.MEDIA_MESSAGE_TYPES.indexOf(type) !== -1;
+  const media = (isExplicitMediaType && m && m[type] && typeof m[type] === "object") ? m[type] : {};
   const caption = String(media.caption || "");
   const filename = String(media.filename || "");
   const mimeType = String(media.mime_type || "");
@@ -674,6 +677,34 @@ function TLW_sendText_(phoneNumberId, toWaId, text) {
   } catch (e) {
     TLW_logInfo_("menu_send_error", { error: String(e) });
     return { ok: false, status: 0, body: String(e) };
+  }
+}
+
+function TLW_tryAutoVoiceTranscription_(enriched, appendedRow) {
+  try {
+    if (typeof TL_AI_TranscribeInboxRow_ !== "function") return;
+    if (!enriched || !appendedRow || !appendedRow.row) return;
+    if (String(TLW_getSetting_("ai_voice_transcription") || "").trim().toLowerCase() !== "true") return;
+    if (String(enriched.direction || "").trim().toLowerCase() !== "incoming") return;
+    if (String(enriched.record_class || "").trim().toLowerCase() !== "communication") return;
+    if (!String(enriched.media_id || "").trim()) return;
+
+    const messageType = String(enriched.message_type || "").trim().toLowerCase();
+    const isVoice = !!enriched.media_is_voice;
+    if (!(messageType === "voice" || (messageType === "audio" && isVoice) || isVoice)) return;
+
+    const result = TL_AI_TranscribeInboxRow_(appendedRow.row);
+    TLW_logInfo_("ai_voice_transcription_auto", {
+      row: appendedRow.row,
+      media_id: enriched.media_id,
+      summary: result && result.summary ? result.summary : ""
+    });
+  } catch (err) {
+    TLW_logInfo_("ai_voice_transcription_error", {
+      row: appendedRow && appendedRow.row ? appendedRow.row : "",
+      message_id: enriched && enriched.message_id ? enriched.message_id : "",
+      err: String(err && err.stack ? err.stack : err)
+    });
   }
 }
 
