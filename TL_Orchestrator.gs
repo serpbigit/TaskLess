@@ -707,11 +707,26 @@ function TL_Reminder_RunDueUnlocked_(batchSize, options) {
     const reminderText = TL_Reminder_buildFireText_(values, dueText);
     const sendResult = sendFn(phoneNumberId, bossPhone, reminderText, item);
     if (sendResult && sendResult.ok) {
+      const parsedSend = typeof TLW_parseSendTextResponse_ === "function"
+        ? TLW_parseSendTextResponse_(sendResult.body, bossPhone)
+        : { messageId: "", waId: bossPhone };
       TL_Orchestrator_updateRowFields_(item.rowNumber, {
         execution_status: "reminder_sent",
         task_status: "reminder_sent",
-        notes: TL_Capture_appendNote_(values, "reminder_fired_at=" + now.toISOString())
+        notes: TL_Capture_appendNote_(
+          values,
+          "reminder_fired_at=" + now.toISOString() +
+          (parsedSend && parsedSend.messageId ? "\nreminder_message_id=" + parsedSend.messageId : "")
+        )
       }, "reminder_fire");
+      TLW_logInfo_("reminder_sent_to_boss", {
+        row: item.rowNumber,
+        to: bossPhone,
+        phone_id: phoneNumberId,
+        due_at: dueAt.toISOString(),
+        message_id: parsedSend && parsedSend.messageId ? parsedSend.messageId : "",
+        text: reminderText
+      });
       result.fired++;
       if (TL_Orchestrator_archiveInboxRow_(item.rowNumber)) {
         result.archived++;
@@ -934,15 +949,35 @@ function TL_Orchestrator_archiveInboxRow_(rowNumber) {
 }
 
 function TL_Reminder_buildFireText_(values, dueText) {
-  const summary = TL_Orchestrator_value_(values, "ai_summary") || TL_Orchestrator_value_(values, "text");
+  const summary = TL_Reminder_cleanSummary_(
+    TL_Orchestrator_value_(values, "ai_summary") || TL_Orchestrator_value_(values, "text")
+  );
+  const originalDueText = TL_Reminder_originalDueTextFromNotes_(TL_Orchestrator_value_(values, "notes"));
   const lines = [
-    "תזכורת",
+    "⏰ תזכורת",
+    "זה הזמן:",
     TL_Menu_Preview_(summary || "יש לך תזכורת.", 180)
   ];
-  if (String(dueText || "").trim()) {
-    lines.push("מועד: " + String(dueText || "").trim());
+  if (String(originalDueText || dueText || "").trim()) {
+    lines.push("הוגדר: " + String(originalDueText || dueText || "").trim());
   }
   return lines.join("\n");
+}
+
+function TL_Reminder_cleanSummary_(text) {
+  const raw = String(text || "").trim().replace(/\s+/g, " ");
+  if (!raw) return "";
+  return raw
+    .replace(/^תזכורת\s*/i, "")
+    .replace(/^תזכיר(?:י|)\s+לי\s*/i, "")
+    .replace(/^בעוד\s+\S+\s+(?:דקה|דקות|שעה|שעות)\s*/i, "")
+    .trim();
+}
+
+function TL_Reminder_originalDueTextFromNotes_(notes) {
+  const text = String(notes || "");
+  const match = text.match(/(?:^|[\n;])reminder_due_text=([^\n;]+)/i);
+  return match ? String(match[1] || "").trim() : "";
 }
 
 function TL_Reminder_parseDueAt_(text, now) {
