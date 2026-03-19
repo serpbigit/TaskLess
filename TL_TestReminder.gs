@@ -11,6 +11,10 @@ function TL_TestReminder_RunAll() {
   };
 }
 
+function TL_RunReminderSweepNow() {
+  return TL_Reminder_RunDue(20);
+}
+
 function TL_TestReminder_ParseDueRun() {
   const base = new Date("2026-03-19T10:00:00Z");
   const inMinutes = TL_Reminder_parseDueAt_("in 10 minutes", base);
