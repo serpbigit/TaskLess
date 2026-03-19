@@ -1152,6 +1152,7 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const index = Number(packet.cursor || 0) + 1;
   const total = packet.items.length;
   const summary = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 220);
+  const duePreview = String(current.duePreview || "").trim();
   const meta = [];
   if (current.isUrgent) meta.push("דחוף");
   else if (current.isHigh) meta.push("חשוב");
@@ -1161,6 +1162,7 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     label ? label : "",
     "הבנתי כך:",
     summary,
+    duePreview ? ("יעד: " + duePreview) : "",
     "",
     "1. אשר",
     "2. ערוך",

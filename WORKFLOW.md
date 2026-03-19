@@ -21,9 +21,8 @@ The main thread should contain decisions and summaries, not raw intermediate wor
 Rules:
 - `DEV_TASKS.md` is the active roadmap and sprint focus file.
 - Robin summarizes; Robin does not dump raw subagent output into the main thread.
-- David reports implementation status to Robin, not as a running stream to Reuven.
-- Tommy reports test outcomes to Robin in pass/fail form with concrete issues only.
-- Reuven should mostly interact with Robin for prioritization, approval, and final execution handoff.
+- the State Manager keeps `active target`, `parked items`, `local vs deployed vs tested`, and runtime state explicit.
+- Reuven should mostly interact with Robin for implementation guidance and with the State Manager for alignment commands such as `checkpoint`, `park this`, and `switch target`.
 
 ## 3. Roles
 
@@ -31,10 +30,10 @@ Agent system nicknames are ephemeral, but when a subagent is active in a session
 - `<system nickname> - Developer`
 - `<system nickname> - Tester`
 - `<system nickname> - Explorer`
+- `<system nickname> - State Manager`
 
 Current example format for this session:
-- `Boole - Developer`
-- `Lovelace - Tester`
+- `<system nickname> - State Manager`
 
 This keeps the visible chat label simple while still exposing the current temporary system nickname and the job being performed.
 
@@ -45,27 +44,27 @@ This keeps the visible chat label simple while still exposing the current tempor
 
 ### Robin
 - Main coordinator
-- Owns roadmap discussion with Reuven
+- Owns implementation guidance and technical direction with Reuven
 - Uses `DEV_TASKS.md` to keep current work focused
 - Breaks work into bounded tasks
-- Delegates to David and Tommy
+- Makes code changes directly unless a helper is explicitly activated
 - Returns only distilled summaries, decisions, blockers, and command blocks
 
-### David
-- Implementation agent
-- Reads relevant code and spec before editing
-- Makes the code changes
-- Reports blockers, assumptions, and technical risks to Robin
-- Tells Tommy when a change is ready for validation and what to verify
-- Prepares deploy and git command blocks for Robin to present to Reuven
-
-### Tommy
-- Testing agent
-- Validates the change after David says it is ready
-- Checks behavior, regressions, and acceptance criteria
-- Reports only test results, failures, evidence, and gaps to Robin
-- Does not become the roadmap owner
-- May clarify test scope with David, but final reporting still goes to Robin
+### `<system nickname> - State Manager`
+- Alignment and state-discipline role
+- Does not own feature design or most code changes
+- Keeps exactly one `active target` visible at a time
+- Maintains:
+  - current active target
+  - parked items
+  - blocked items
+  - local vs deployed vs tested state
+  - trigger state
+  - important runtime settings
+  - last verified test
+- Produces short checkpoints on demand
+- Prevents topic switching from causing state drift
+- Helps Robin and Reuven resume cleanly after brainstorming, bugs, or interruptions
 
 ## 4. Source-of-Truth Hierarchy
 
@@ -76,20 +75,20 @@ Primary document roles:
 - `OPERATIONAL.md`: behavioral and ledger contract
 - `DEV_TASKS.md`: active roadmap, current state, next work
 - `AGENT.md`: coding-agent operating rules
-- `WORKFLOW.md`: how Reuven, Robin, David, and Tommy collaborate
+- `WORKFLOW.md`: how Reuven, Robin, and the State Manager collaborate
 
 ## 5. Standard Delivery Flow
 
-This flow is parallel by default, not fully synchronous.
+This flow is single-lane by default.
 
 That means:
-- Reuven and Robin may continue roadmap discussion while David is implementing a bounded task.
-- Tommy may begin validation as soon as David declares a testable build or change set.
-- Robin only interrupts the roadmap thread when a real blocker, product decision, or ready-for-deploy result needs attention.
+- one active implementation target at a time
+- brainstorming may happen, but non-active ideas should be parked
+- deployment and verification happen before widening scope
 
-The flow becomes synchronous only when:
-- David needs a product or architecture decision
-- Tommy finds a result that requires Reuven's judgment
+The flow becomes broader only when:
+- Robin explicitly activates another helper for bounded work
+- a real blocker requires separate investigation
 - deployment or final signoff is needed
 ### Step 1: Decide the next feature
 Reuven and Robin discuss:
@@ -98,43 +97,42 @@ Reuven and Robin discuss:
 - what is explicitly out of scope
 - what counts as done
 
+The State Manager then records:
+- active target
+- parked items
+- next step
+
 Robin then updates or anchors the task in `DEV_TASKS.md`.
 
 ### Step 2: Robin prepares the implementation brief
-Robin sends David a bounded brief containing:
+Robin prepares a bounded brief containing:
 - objective
 - acceptance criteria
 - relevant files
 - known constraints
 - whether deploy will be needed
 
-### Step 3: David implements
-David:
+### Step 3: Robin implements
+Robin:
 - inspects the relevant code paths
 - edits the necessary files
 - keeps changes scoped to the agreed task
-- reports blockers or design concerns back to Robin
+- surfaces blockers or design concerns to Reuven only when needed
 
-If David discovers a roadmap-level issue, Robin brings that back to Reuven as a decision, not as raw noise.
+If brainstorming or a new idea appears mid-task, the State Manager should park it unless Reuven explicitly switches targets.
 
-### Step 4: Tommy validates
-When David says the change is ready, Tommy validates:
-- intended behavior
-- regression risk
-- manual harnesses or smoke checks
-- any unresolved gaps
+### Step 4: Verify
+Robin and Reuven verify with one real test or deterministic GAS runner.
 
-Tommy returns a short result to Robin:
-- passed
-- failed
-- uncertain
-- needs Reuven decision
-
-David may initiate the testing handoff directly by telling Tommy what changed and what is ready for validation, but Tommy's results still roll up to Robin.
+The State Manager records:
+- what is deployed
+- what exact test ran
+- what is now proven
+- what is still unproven
 
 ### Step 5: Robin decides the next move
-Robin integrates David's implementation summary and Tommy's test result, then chooses one of:
-- send back to David for fixes
+Robin integrates implementation and test results, then chooses one of:
+- send back for fixes
 - ask Reuven a specific decision question
 - mark ready for deployment
 
@@ -156,10 +154,10 @@ After Reuven confirms the deploy and the live change behaves correctly, Robin gi
 Robin is the only agent that should present final command blocks to Reuven.
 
 Rules:
-- David may prepare command blocks, but Robin presents them.
 - Command blocks should be copy-paste ready.
 - Deploy blocks must always use the fixed deployment ID.
 - Git commit messages should mention the feature/fix and, when useful, the successful validation that concluded the task.
+- Prefer giving one chained command when practical so Reuven can paste once.
 
 ## 7. DEV_TASKS Discipline
 
@@ -177,23 +175,30 @@ Do not use it for:
 - long debugging transcripts
 - repeated back-and-forth notes
 
-## 8. When to Use Extra Subagents
+## 8. State Commands
 
-Robin may use additional explorers or sidecar agents for bounded work such as:
-- repo exploration
-- spec drift checks
-- log analysis
-- codebase search
-- isolated risk review
+The State Manager should support these short commands in the main thread:
+- `checkpoint`
+- `park this`
+- `switch target to ...`
+- `what is local vs deployed vs tested`
+- `session handoff`
 
-Do not use extra subagents when:
-- the task is a small one-file change
-- the work is blocked on a single file or single decision
-- parallel agents would edit the same file set and create merge churn
+Expected behavior:
+- `checkpoint`
+  - returns active target, current state, tested, not yet proven, parked, next step
+- `park this`
+  - records the current idea outside the active lane without switching scope
+- `switch target to ...`
+  - creates a checkpoint first, then changes the active target
+- `what is local vs deployed vs tested`
+  - answers exactly that, without roadmap filler
+- `session handoff`
+  - records the clean stopping state for the next session
 
 ## 9. Handoff Format
 
-Robin should keep handoffs short and structured.
+Robin and the State Manager should keep handoffs short and structured.
 
 For Reuven:
 - current task
@@ -201,22 +206,20 @@ For Reuven:
 - blocker or decision needed
 - next action
 
-For David:
-- exact task
-- files in scope
-- acceptance criteria
-
-For Tommy:
-- what changed
-- what to verify
-- what would count as failure
+For the State Manager:
+- active target
+- parked
+- local vs deployed vs tested
+- open risks
+- next recommended step
 
 ## 10. Success Condition
 
 This workflow is working if:
-- Reuven mainly talks to Robin
+- Reuven mainly talks to Robin and the State Manager
 - `DEV_TASKS.md` stays current
-- David and Tommy do most noisy work off-thread
+- the active target is always clear
+- parked items do not get lost
 - the main thread stays decision-focused
 - deployment and git handoffs are explicit and reproducible
 

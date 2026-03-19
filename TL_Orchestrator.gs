@@ -639,7 +639,8 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
 
   if (kind === "reminder") {
     const originalDueText = String(TL_Orchestrator_value_(values, "task_due") || "").trim();
-    const resolvedDueAt = TL_Reminder_parseDueAt_(originalDueText, new Date());
+    const baseDueAt = values[0] instanceof Date ? values[0] : new Date();
+    const resolvedDueAt = TL_Reminder_parseDueAt_(originalDueText, baseDueAt);
     if (resolvedDueAt) {
       updates.task_due = resolvedDueAt.toISOString();
     }
@@ -1922,9 +1923,20 @@ function TL_Capture_buildPacketItem_(childRow, rowNumber) {
     approvalStatus: String(childRow.approval_status || ""),
     executionStatus: String(childRow.execution_status || ""),
     taskStatus: String(childRow.task_status || ""),
+    duePreview: TL_Capture_buildDuePreview_(childRow.task_due, childRow.timestamp),
     isUrgent: String(childRow.urgency_flag || "").toLowerCase() === "true" || String(childRow.needs_owner_now || "").toLowerCase() === "true",
     isHigh: String(childRow.priority_level || "").toLowerCase() === "high" || String(childRow.importance_level || "").toLowerCase() === "high"
   };
+}
+
+function TL_Capture_buildDuePreview_(dueText, baseAt) {
+  const raw = String(dueText || "").trim();
+  if (!raw) return "";
+  const dueAt = TL_Reminder_parseDueAt_(raw, baseAt instanceof Date ? baseAt : new Date());
+  if (!dueAt) return raw;
+  const tz = String(TLW_getSetting_("DEFAULT_TZ") || Session.getScriptTimeZone() || "Asia/Jerusalem").trim();
+  const formatted = Utilities.formatDate(dueAt, tz, "dd/MM HH:mm");
+  return formatted + " (" + raw + ")";
 }
 
 function TL_Capture_buildPacketText_(summary, packetItems, cfg, now) {

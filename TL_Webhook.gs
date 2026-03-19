@@ -373,10 +373,30 @@ function TLW_tryBossMenuFromInboxRow_(enriched, appendedRow, options) {
 
     const normalizedText = inputText.toLowerCase();
     let shouldHandle = false;
+    let recognizedIntent = null;
     if (options && typeof options.shouldHandleFn === "function") {
       shouldHandle = !!options.shouldHandleFn(sender, inputText);
     } else {
-      shouldHandle = !!TL_Menu_ShouldHandleText_(sender, inputText);
+      const explicitMenuTrigger = TL_MENU && TL_MENU.TRIGGERS && TL_MENU.TRIGGERS.some(function(t) {
+        return normalizedText === String(t || "").trim().toLowerCase();
+      });
+      const explicitCostTrigger = TL_MENU && TL_MENU.COST_TRIGGERS && TL_MENU.COST_TRIGGERS.some(function(t) {
+        return normalizedText === String(t || "").trim().toLowerCase();
+      });
+      if (explicitMenuTrigger || explicitCostTrigger ||
+          (typeof TL_Menu_IsAiCostQuery_ === "function" && TL_Menu_IsAiCostQuery_(inputText)) ||
+          (typeof TL_Menu_HasDecisionPacket_ === "function" && TL_Menu_HasDecisionPacket_(sender)) ||
+          (typeof TL_Menu_GetState_ === "function" && TL_Menu_GetState_(sender) !== TL_MENU_STATES.ROOT) ||
+          (typeof TL_Menu_IsNumericChoice_ === "function" && TL_Menu_IsNumericChoice_(normalizedText))) {
+        shouldHandle = true;
+      } else if (typeof TL_AI_RecognizeBossIntent_ === "function") {
+        try {
+          recognizedIntent = TL_AI_RecognizeBossIntent_(inputText);
+          shouldHandle = !!(recognizedIntent && recognizedIntent.intent && recognizedIntent.intent !== "unknown");
+        } catch (e) {
+          shouldHandle = false;
+        }
+      }
     }
     if (!shouldHandle) return null;
 
@@ -395,7 +415,9 @@ function TLW_tryBossMenuFromInboxRow_(enriched, appendedRow, options) {
       phone_number_id: String(enriched.phone_number_id || "").trim()
     }, {
       row: appendedRow.row
-    }, options && options.menuOptions ? options.menuOptions : undefined);
+    }, Object.assign({}, options && options.menuOptions ? options.menuOptions : {}, recognizedIntent ? {
+      intentFn: function() { return recognizedIntent; }
+    } : {}));
 
     const isExplicitTrigger = TL_MENU && TL_MENU.TRIGGERS && TL_MENU.TRIGGERS.some(function(t) {
       return normalizedText === String(t || "").trim().toLowerCase();
