@@ -50,6 +50,194 @@ function TL_TestWebhook_BossMenuTriggerRun() {
   return output;
 }
 
+function TL_TestWebhook_BossVoiceMenuTriggerRun() {
+  const phoneNumberId = TL_TestWebhook_getPhoneNumberId_();
+  const displayPhone = TL_TestWebhook_getDisplayPhoneNumber_();
+  const bossPhone = TL_TestWebhook_getFromWaId_();
+  const messageId = TL_TestWebhook_fakeMessageId_("boss-voice-menu");
+  const row = {
+    timestamp: new Date(),
+    root_id: "root_webhook_boss_voice_menu_" + Utilities.getUuid(),
+    event_id: "EVT_" + Utilities.getUuid(),
+    parent_event_id: "",
+    record_id: "REC_" + Utilities.getUuid(),
+    record_version: 1,
+    record_class: "communication",
+    channel: "whatsapp",
+    direction: "incoming",
+    phone_number_id: phoneNumberId,
+    display_phone_number: displayPhone,
+    sender: bossPhone,
+    receiver: displayPhone,
+    message_id: messageId,
+    message_type: "voice",
+    text: "תפריט",
+    ai_summary: "",
+    ai_proposal: "",
+    approval_required: "",
+    approval_status: "",
+    execution_status: "",
+    status_latest: "",
+    status_timestamp: "",
+    statuses_count: 0,
+    contact_id: "WA_" + phoneNumberId + "_" + bossPhone,
+    raw_payload_ref: "",
+    notes: "voice_transcription_status=ok",
+    task_due: "",
+    task_status: "",
+    task_priority: "",
+    topic_id: "topic_unknown",
+    topic_tagged_at: new Date().toISOString(),
+    biz_stage: "",
+    biz_stage_ts: "",
+    payment_status: "",
+    delivery_due: "",
+    media_id: TL_TestWebhook_fakeMediaId_("boss-voice-menu"),
+    media_mime_type: "audio/ogg; codecs=opus",
+    media_sha256: TL_TestWebhook_fakeSha256_("boss-voice-menu"),
+    media_caption: "",
+    media_filename: "",
+    media_is_voice: true,
+    priority_level: "",
+    importance_level: "",
+    urgency_flag: "",
+    needs_owner_now: "",
+    suggested_action: ""
+  };
+  const appended = TLW_appendInboxRow_(row, TLW_safeStringify_({ source: "TL_TestWebhook_BossVoiceMenuTriggerRun" }, 2000));
+  const sent = [];
+  const originalSend = TLW_sendText_;
+  try {
+    TLW_sendText_ = function(phoneId, toWaId, text) {
+      sent.push({
+        phoneId: String(phoneId || ""),
+        toWaId: String(toWaId || ""),
+        text: String(text || "")
+      });
+      return { ok: true, status: 200, body: "{}" };
+    };
+    const result = TLW_tryBossMenuFromInboxRow_({
+      direction: "incoming",
+      record_class: "communication",
+      sender: bossPhone,
+      receiver: displayPhone,
+      phone_number_id: phoneNumberId,
+      message_id: messageId
+    }, { row: appended.row });
+    const output = {
+      ok: !!result && result.sent === true && sent.length === 1 && sent[0].text.indexOf("מה תרצה לעשות?") !== -1,
+      row: appended.row,
+      sent_count: sent.length,
+      text: sent.length ? sent[0].text : ""
+    };
+    Logger.log("TL_TestWebhook_BossVoiceMenuTriggerRun: %s", JSON.stringify(output, null, 2));
+    return output;
+  } finally {
+    TLW_sendText_ = originalSend;
+  }
+}
+
+function TL_TestWebhook_BossVoiceMenuIntentRun() {
+  const phoneNumberId = TL_TestWebhook_getPhoneNumberId_();
+  const displayPhone = TL_TestWebhook_getDisplayPhoneNumber_();
+  const bossPhone = TL_TestWebhook_getFromWaId_();
+  const messageId = TL_TestWebhook_fakeMessageId_("boss-voice-menu-intent");
+  const row = {
+    timestamp: new Date(),
+    root_id: "root_webhook_boss_voice_menu_intent_" + Utilities.getUuid(),
+    event_id: "EVT_" + Utilities.getUuid(),
+    parent_event_id: "",
+    record_id: "REC_" + Utilities.getUuid(),
+    record_version: 1,
+    record_class: "communication",
+    channel: "whatsapp",
+    direction: "incoming",
+    phone_number_id: phoneNumberId,
+    display_phone_number: displayPhone,
+    sender: bossPhone,
+    receiver: displayPhone,
+    message_id: messageId,
+    message_type: "voice",
+    text: "תפתחי לי את התפריט",
+    ai_summary: "",
+    ai_proposal: "",
+    approval_required: "",
+    approval_status: "",
+    execution_status: "",
+    status_latest: "",
+    status_timestamp: "",
+    statuses_count: 0,
+    contact_id: "WA_" + phoneNumberId + "_" + bossPhone,
+    raw_payload_ref: "",
+    notes: "voice_transcription_status=ok",
+    task_due: "",
+    task_status: "",
+    task_priority: "",
+    topic_id: "topic_unknown",
+    topic_tagged_at: new Date().toISOString(),
+    biz_stage: "",
+    biz_stage_ts: "",
+    payment_status: "",
+    delivery_due: "",
+    media_id: TL_TestWebhook_fakeMediaId_("boss-voice-menu-intent"),
+    media_mime_type: "audio/ogg; codecs=opus",
+    media_sha256: TL_TestWebhook_fakeSha256_("boss-voice-menu-intent"),
+    media_caption: "",
+    media_filename: "",
+    media_is_voice: true,
+    priority_level: "",
+    importance_level: "",
+    urgency_flag: "",
+    needs_owner_now: "",
+    suggested_action: ""
+  };
+  const appended = TLW_appendInboxRow_(row, TLW_safeStringify_({ source: "TL_TestWebhook_BossVoiceMenuIntentRun" }, 2000));
+  const sent = [];
+  const originalSend = TLW_sendText_;
+  try {
+    TLW_sendText_ = function(phoneId, toWaId, text) {
+      sent.push({
+        phoneId: String(phoneId || ""),
+        toWaId: String(toWaId || ""),
+        text: String(text || "")
+      });
+      return { ok: true, status: 200, body: "{}" };
+    };
+    const result = TLW_tryBossMenuFromInboxRow_({
+      direction: "incoming",
+      record_class: "communication",
+      sender: bossPhone,
+      receiver: displayPhone,
+      phone_number_id: phoneNumberId,
+      message_id: messageId
+    }, { row: appended.row }, {
+      shouldHandleFn: function() {
+        TL_Menu_PutCachedIntent_(bossPhone, row.text, {
+          intent: "show_menu",
+          route: "menu",
+          summary_kind: "menu",
+          capture_state: "",
+          confidence: 0.99,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {}
+        });
+        return true;
+      }
+    });
+    const output = {
+      ok: !!result && result.sent === true && sent.length === 1 && sent[0].text.indexOf("מה תרצה לעשות?") !== -1,
+      row: appended.row,
+      sent_count: sent.length,
+      text: sent.length ? sent[0].text : ""
+    };
+    Logger.log("TL_TestWebhook_BossVoiceMenuIntentRun: %s", JSON.stringify(output, null, 2));
+    return output;
+  } finally {
+    TLW_sendText_ = originalSend;
+  }
+}
+
 function TL_TestWebhook_BossVoiceCaptureHandoffRun() {
   const rootId = "root_webhook_boss_voice_" + Utilities.getUuid();
   const phoneNumberId = TL_TestWebhook_getPhoneNumberId_();

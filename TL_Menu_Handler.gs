@@ -58,10 +58,11 @@ const TL_MENU_STATES = {
 };
 
 function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
-  const bossPhone = String(TLW_getSetting_("BOSS_PHONE") || "").trim();
+  const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
   const from = String(ev.from || "").trim();
+  const normalizedFrom = TLW_normalizePhone_(from);
   const bossWaId = from;
-  if (bossPhone && from !== bossPhone) return null; // if boss phone set, enforce; otherwise allow anyone
+  if (bossPhone && normalizedFrom !== bossPhone) return null; // if boss phone set, enforce; otherwise allow anyone
 
   const rawText = String(ev.text || "").trim();
   const text = rawText.toLowerCase();
@@ -497,9 +498,9 @@ function TL_Menu_StateToCaptureMarker_(state) {
 function TL_Menu_ShouldHandleText_(waId, text) {
   const normalized = String(text || "").trim().toLowerCase();
   if (!normalized) return false;
-  const bossPhone = String(TLW_getSetting_("BOSS_PHONE") || "").trim();
-  if (bossPhone && String(waId || "").trim() !== bossPhone) return false;
-  if (TL_MENU.TRIGGERS.some(t => normalized === t)) return true;
+  const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
+  if (bossPhone && TLW_normalizePhone_(waId || "") !== bossPhone) return false;
+  if (TL_MENU.TRIGGERS.some(function(t) { return normalized === String(t || "").trim().toLowerCase(); })) return true;
   if (TL_Menu_HasDecisionPacket_(waId)) return true;
   if (TL_Menu_GetState_(waId) !== TL_MENU_STATES.ROOT) return true;
   if (TL_Menu_IsNumericChoice_(normalized)) return true;
