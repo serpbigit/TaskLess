@@ -35,6 +35,21 @@ function TL_TestWebhook_Voice() {
   return TL_TestWebhook_runPayload_("voice", TL_TestWebhook_buildVoicePayload_());
 }
 
+function TL_TestWebhook_BossMenuTriggerRun() {
+  const payload = TL_TestWebhook_buildMessagePayload_("text", {
+    text: { body: "תפריט" }
+  }, TL_TestWebhook_fakeMessageId_("boss-menu-trigger"));
+  const menuResult = TLW_tryBossMenu_(TLW_extractEvents_(payload));
+  const output = {
+    ok: !!menuResult && !!menuResult.toSend && String(menuResult.text || "").indexOf("מה תרצה לעשות?") !== -1,
+    toSend: menuResult ? !!menuResult.toSend : false,
+    toWaId: menuResult ? String(menuResult.toWaId || "") : "",
+    text: menuResult ? String(menuResult.text || "") : ""
+  };
+  Logger.log("TL_TestWebhook_BossMenuTriggerRun: %s", JSON.stringify(output, null, 2));
+  return output;
+}
+
 function TL_TestWebhook_BossVoiceCaptureHandoffRun() {
   const rootId = "root_webhook_boss_voice_" + Utilities.getUuid();
   const phoneNumberId = TL_TestWebhook_getPhoneNumberId_();

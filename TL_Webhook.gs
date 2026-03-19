@@ -289,7 +289,16 @@ function TLW_tryBossMenu_(events) {
     const text = String(ev.text || "").trim().toLowerCase();
     return TL_Menu_ShouldHandleText_(String(ev.from || "").trim(), text);
   });
-  if (!msg) return null;
+  if (!msg) {
+    TLW_logInfo_("menu_match_none", { candidates: normalized.length });
+    return null;
+  }
+
+  TLW_logInfo_("menu_match_selected", {
+    from: msg.from || "",
+    msg_id: msg.message_id || "",
+    text: String(msg.text || "").trim()
+  });
 
   const enriched = TLW_enrichEvent_(msg, new Date());
   let inboxRow = null;
@@ -316,9 +325,32 @@ function TLW_tryBossMenu_(events) {
     phone_number_id: msg.phone_number_id || ""
   }, inboxRow);
 
-  if (!replyText) return null;
+  const normalizedText = String(msg.text || "").trim().toLowerCase();
+  const isExplicitTrigger = TL_MENU && TL_MENU.TRIGGERS && TL_MENU.TRIGGERS.some(function(t) {
+    return normalizedText === String(t || "").trim().toLowerCase();
+  });
+  const fallbackReply = isExplicitTrigger
+    ? (TL_MENU && TL_MENU.HELP_TRIGGERS && TL_MENU.HELP_TRIGGERS.some(function(t) {
+        return normalizedText === String(t || "").trim().toLowerCase();
+      }) ? TL_Menu_BuildHelpMenu_() : TL_Menu_BuildMenuReply_())
+    : "";
+  const finalReplyText = String(replyText || fallbackReply || "");
+
+  if (!finalReplyText) {
+    TLW_logInfo_("menu_reply_empty", {
+      from: msg.from || "",
+      msg_id: msg.message_id || "",
+      text: String(msg.text || "").trim()
+    });
+    return null;
+  }
   const toPhoneId = msg.phone_number_id || TLW_getSetting_("BUSINESS_PHONE_ID") || TLW_getSetting_("BUSINESS_PHONEID") || TLW_getSetting_("BUSINESS_PHONE");
-  return { toSend: true, toPhoneId, toWaId: msg.from, text: replyText };
+  TLW_logInfo_("menu_reply_ready", {
+    to: msg.from || "",
+    msg_id: msg.message_id || "",
+    text: String(msg.text || "").trim()
+  });
+  return { toSend: true, toPhoneId, toWaId: msg.from, text: finalReplyText };
 }
 
 function TLW_enrichEvent_(ev, ts) {
