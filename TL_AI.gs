@@ -30,6 +30,8 @@ function TL_AI_buildPrompt_(inputText, language, bossName) {
     "The Boss's name is: " + String(bossName || "Reuven"),
     "Required JSON shape:",
     '{"summary":"...","proposal":"..."}',
+    "Example JSON response:",
+    '{"summary":"לקוח מבקש לקבוע פגישה מחר בבוקר.","proposal":"שלום, אפשר לקבוע מחר בבוקר. אשמח אם תאשר שעה שנוחה לך."}',
     "The proposal should be a concise draft reply written on the Boss's behalf.",
     "User message:",
     String(inputText || "")
@@ -44,6 +46,8 @@ function TL_AI_buildTriagePrompt_(inputText, language, bossName) {
     "The Boss's name is: " + String(bossName || "Reuven"),
     "Required JSON shape:",
     '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","summary":"...","proposal":"..."}',
+    "Example JSON response:",
+    '{"priority_level":"high","importance_level":"high","urgency_flag":"true","needs_owner_now":"true","suggested_action":"reply_now","summary":"לקוח מבקש תשובה דחופה לגבי פגישה להיום.","proposal":"השב במהירות, אשר שקיבלת, והצע זמן סופי לפגישה."}',
     "Interpret urgency narrowly: only true when timing matters now or soon.",
     "Interpret importance as business relevance, money, reputation, commitment, or customer risk.",
     "Message:",
@@ -60,6 +64,8 @@ function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
     "The Boss's name is: " + String(bossName || "Reuven"),
     "Required JSON shape:",
     '{"summary":"...","items":[{"kind":"reminder|task|journal","title":"...","summary":"...","proposal":"...","task_due":"...","task_priority":"low|medium|high","approval_required":"true","notes":"..."}]}',
+    "Example JSON response:",
+    '{"summary":"הבוס נתן שלוש הנחיות: תזכורת, משימה ורישום ליומן.","items":[{"kind":"reminder","title":"לקחת תרופה בבוקר","summary":"תזכורת לקחת תרופה מחר בבוקר.","proposal":"לקבוע תזכורת למחר בבוקר לקחת תרופה.","task_due":"מחר בבוקר","task_priority":"high","approval_required":"true","notes":""},{"kind":"task","title":"להתקשר ליעקב","summary":"צריך להתקשר ליעקב.","proposal":"ליצור משימה להתקשר ליעקב.","task_due":"","task_priority":"medium","approval_required":"true","notes":""},{"kind":"journal","title":"לקחתי כדור בערב","summary":"נרשם ביומן שנלקח כדור בערב בשעה 22:00.","proposal":"לרשום ביומן: לקחתי כדור הערב בשעה 22:00.","task_due":"","task_priority":"low","approval_required":"true","notes":""}]}',
     "Rules:",
     "Emit one item per distinct intent.",
     "Keep reminder and task items concrete and actionable.",
@@ -79,6 +85,8 @@ function TL_AI_buildTranscriptionPrompt_(language) {
     "Language preference: " + String(language || "Hebrew"),
     "Required JSON shape:",
     '{"transcript":"...","summary":"..."}',
+    "Example JSON response:",
+    '{"transcript":"בוקר טוב, תזכירי לי להתקשר לרואה החשבון מחר.","summary":"הדובר מבקש תזכורת להתקשר לרואה החשבון מחר."}',
     "The transcript should preserve the spoken wording as closely as possible.",
     "The summary should be one short sentence."
   ].join("\n");

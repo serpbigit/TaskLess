@@ -10,12 +10,16 @@ const TL_EMAIL = {
   DEFAULT_CHARS_PER_MESSAGE: 6000,
   DEFAULT_TOTAL_CHARS: 22000,
   DEFAULT_HISTORY_DEPTH: 5,
-  DEFAULT_HISTORY_EXPANDED_DEPTH: 10
+  DEFAULT_HISTORY_EXPANDED_DEPTH: 10,
+  PROP_LAST_PULL_AT: "TL_EMAIL_LAST_PULL_AT",
+  PROP_LAST_PULL_QUERY: "TL_EMAIL_LAST_PULL_QUERY",
+  PROP_LAST_PULL_MAX_MSG_AT: "TL_EMAIL_LAST_PULL_MAX_MSG_AT"
 };
 
 function TL_Email_PullImportant_Run(opts) {
   const options = opts || {};
-  const query = String(options.query || TL_EMAIL.DEFAULT_QUERY);
+  const checkpoint = TL_Email_getPullCheckpoint_();
+  const query = TL_Email_buildPullQuery_(String(options.query || TL_EMAIL.DEFAULT_QUERY), checkpoint, options);
   const maxThreads = TL_Email_int_(options.maxThreads, TL_EMAIL.DEFAULT_PULL_LIMIT);
   const maxMessagesPerThread = TL_Email_int_(options.maxMessagesPerThread, TL_EMAIL.DEFAULT_MESSAGES_PER_THREAD);
   const maxCharsPerMessage = TL_Email_int_(options.maxCharsPerMessage, TL_EMAIL.DEFAULT_CHARS_PER_MESSAGE);
@@ -29,6 +33,7 @@ function TL_Email_PullImportant_Run(opts) {
   const out = [];
   let ingested = 0;
   let skipped = 0;
+  let latestMsgAtIso = "";
 
   for (let i = 0; i < threads.length; i++) {
     const snapshot = TL_Email_NormalizeThread_(threads[i], {
@@ -49,11 +54,24 @@ function TL_Email_PullImportant_Run(opts) {
     TL_Email_UpsertThreadRow_(snapshot, TL_Email_tabOpen_());
     ingested++;
     out.push({ refId: snapshot.refId, subject: snapshot.subject, latestMsgId: snapshot.latestMsgId });
+    if (snapshot.latestMsgDateIso && snapshot.latestMsgDateIso > latestMsgAtIso) {
+      latestMsgAtIso = snapshot.latestMsgDateIso;
+    }
   }
+
+  TL_Email_recordPullCheckpoint_({
+    query: query,
+    completedAtIso: pulledAtIso,
+    latestMsgAtIso: latestMsgAtIso,
+    threadCount: threads.length,
+    ingested: ingested,
+    skipped: skipped
+  });
 
   return {
     ok: true,
     query: query,
+    checkpoint: TL_Email_getPullCheckpoint_(),
     ownerEmail: ownerEmail,
     pulled: threads.length,
     ingested: ingested,
@@ -468,6 +486,8 @@ function TL_Email_buildTriagePrompt_(inputText, language, bossName, history, pay
     "The Boss's name is: " + String(bossName || "Reuven"),
     "Required JSON shape:",
     '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","significance_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","summary":"...","proposal":"..."}',
+    "Example JSON response:",
+    '{"priority_level":"high","importance_level":"high","urgency_flag":"false","significance_flag":"true","needs_owner_now":"false","suggested_action":"review_manually","summary":"לקוח חשוב מבקש אישור להצעת מחיר ומצפה לתשובה מסודרת.","proposal":"הכן תשובה עניינית שמאשרת שקיבלת את המייל ומבטיחה חזרה מסודרת עם תשובה להצעת המחיר."}',
     historyText ? "Recent sender history:\n" + historyText : "Recent sender history: none",
     "Email thread:",
     String(inputText || ""),
@@ -769,4 +789,50 @@ function TL_Email_int_(value, fallback) {
   const def = Number(fallback || 0);
   if (!isFinite(n) || n <= 0) return def;
   return Math.max(1, Math.floor(n));
+}
+
+function TL_Email_getPullCheckpoint_() {
+  const props = PropertiesService.getScriptProperties();
+  return {
+    lastPullAtIso: String(props.getProperty(TL_EMAIL.PROP_LAST_PULL_AT) || ""),
+    lastPullQuery: String(props.getProperty(TL_EMAIL.PROP_LAST_PULL_QUERY) || ""),
+    lastPullMaxMsgAtIso: String(props.getProperty(TL_EMAIL.PROP_LAST_PULL_MAX_MSG_AT) || "")
+  };
+}
+
+function TL_Email_buildPullQuery_(baseQuery, checkpoint, opts) {
+  const options = opts || {};
+  const query = String(baseQuery || TL_EMAIL.DEFAULT_QUERY).trim();
+  if (options.useCheckpoint === false) return query;
+
+  const state = checkpoint || TL_Email_getPullCheckpoint_();
+  const lastPullAtIso = String(state.lastPullAtIso || "").trim();
+  if (!lastPullAtIso) return query;
+
+  const afterPart = TL_Email_queryAfterDate_(lastPullAtIso);
+  if (!afterPart) return query;
+  if (/\bafter:/i.test(query)) return query;
+  return query + " " + afterPart;
+}
+
+function TL_Email_queryAfterDate_(isoText) {
+  const dt = new Date(String(isoText || ""));
+  if (isNaN(dt.getTime())) return "";
+  return "after:" + Utilities.formatDate(dt, Session.getScriptTimeZone(), "yyyy/MM/dd");
+}
+
+function TL_Email_recordPullCheckpoint_(state) {
+  const props = PropertiesService.getScriptProperties();
+  const completedAtIso = String((state && state.completedAtIso) || new Date().toISOString());
+  const next = {
+    [TL_EMAIL.PROP_LAST_PULL_AT]: completedAtIso,
+    [TL_EMAIL.PROP_LAST_PULL_QUERY]: String((state && state.query) || ""),
+    [TL_EMAIL.PROP_LAST_PULL_MAX_MSG_AT]: String((state && state.latestMsgAtIso) || "")
+  };
+  props.setProperties(next, false);
+  return {
+    ok: true,
+    checkpoint: TL_Email_getPullCheckpoint_(),
+    written: next
+  };
 }

@@ -573,6 +573,8 @@ function TL_Orchestrator_buildThreadSynthesis_(thread, options) {
         "You are TaskLess.",
         "Return strict JSON only.",
         '{"summary":"...","proposal":"..."}',
+        "Example JSON response:",
+        '{"summary":"הלקוח מבקש לעדכן את מועד הפגישה וממתין לאישור.","proposal":"שלום, ראיתי את הבקשה לעדכון מועד הפגישה. אפשר לקבוע ליום חמישי בשעה 15:00 אם זה מתאים לך."}',
         "The Boss's name is: " + bossName,
         "Summarize this WhatsApp thread and draft a concise Boss-ready reply proposal on the Boss's behalf.",
         "Thread messages:",
