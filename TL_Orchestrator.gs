@@ -16,6 +16,16 @@ const TL_ORCHESTRATOR = {
 };
 
 function TL_Orchestrator_Run() {
+  if (!TL_Automation_IsEnabled_()) {
+    const result = {
+      ok: true,
+      version: TL_ORCHESTRATOR.VERSION,
+      skipped: true,
+      reason: "automation_disabled"
+    };
+    TLW_logInfo_("orchestrator_run_skipped", result);
+    return result;
+  }
   return TL_Orchestrator_withLock_("orchestrator", function() {
     const result = {
       ok: true,
@@ -76,8 +86,92 @@ function TL_Orchestrator_RemoveTriggers() {
   return { ok: true, removed: removed };
 }
 
+function TL_Orchestrator_Status() {
+  const triggers = ScriptApp.getProjectTriggers().filter(function(trigger) {
+    return trigger.getHandlerFunction() === TL_ORCHESTRATOR.TRIGGER_HANDLER;
+  });
+  return {
+    ok: true,
+    handler: TL_ORCHESTRATOR.TRIGGER_HANDLER,
+    trigger_count: triggers.length,
+    automation_enabled: TLW_getSetting_("AUTOMATION_ENABLED"),
+    boss_interrupt_level: TLW_getSetting_("BOSS_INTERRUPT_LEVEL"),
+    do_not_disturb_enabled: TLW_getSetting_("DO_NOT_DISTURB_ENABLED"),
+    urgent_push_enabled: TLW_getSetting_("URGENT_PUSH_ENABLED")
+  };
+}
+
+function TL_Orchestrator_RestoreBackgroundSafely() {
+  const updates = {};
+  updates.AUTOMATION_ENABLED = TL_Orchestrator_setSettingValue_("AUTOMATION_ENABLED", "TRUE");
+  updates.BOSS_INTERRUPT_LEVEL = TL_Orchestrator_setSettingValue_("BOSS_INTERRUPT_LEVEL", "manual_only");
+  updates.DO_NOT_DISTURB_ENABLED = TL_Orchestrator_setSettingValue_("DO_NOT_DISTURB_ENABLED", "TRUE");
+  const trigger = TL_Orchestrator_EnsureTrigger_5m();
+  return {
+    ok: true,
+    settings: updates,
+    trigger: trigger,
+    note: "Background workers restored with boss proactive pushes muted."
+  };
+}
+
+function TL_Automation_Status() {
+  return TL_Orchestrator_Status();
+}
+
+function TL_Automation_DisableAll() {
+  const updates = {};
+  updates.AUTOMATION_ENABLED = TL_Orchestrator_setSettingValue_("AUTOMATION_ENABLED", "FALSE");
+  updates.BOSS_INTERRUPT_LEVEL = TL_Orchestrator_setSettingValue_("BOSS_INTERRUPT_LEVEL", "manual_only");
+  updates.DO_NOT_DISTURB_ENABLED = TL_Orchestrator_setSettingValue_("DO_NOT_DISTURB_ENABLED", "TRUE");
+  updates.URGENT_PUSH_ENABLED = TL_Orchestrator_setSettingValue_("URGENT_PUSH_ENABLED", "FALSE");
+  const removed = TL_Orchestrator_RemoveTriggers();
+  return {
+    ok: true,
+    settings: updates,
+    removed: removed,
+    note: "All outbound automation disabled and orchestrator triggers removed."
+  };
+}
+
+function TL_Automation_EnableAll() {
+  const updated = TL_Orchestrator_setSettingValue_("AUTOMATION_ENABLED", "TRUE");
+  return {
+    ok: true,
+    setting: updated,
+    note: "Automation enabled. Restore triggers separately if desired."
+  };
+}
+
 function TL_Orchestrator_RunNow() {
   return TL_Orchestrator_Run();
+}
+
+function TL_Orchestrator_setSettingValue_(key, value) {
+  const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+  if (!sheetId) return { ok: false, reason: "missing_sheet_id", key: key };
+  const ss = SpreadsheetApp.openById(sheetId);
+  const sh = ss.getSheetByName("SETTINGS");
+  if (!sh) return { ok: false, reason: "missing_settings_sheet", key: key };
+  const lastRow = sh.getLastRow();
+  const normalizedKey = TLW_normalizeSettingKey_(key);
+  if (lastRow >= 2) {
+    const vals = sh.getRange(2, 1, lastRow - 1, 2).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      if (TLW_normalizeSettingKey_(vals[i][0]) === normalizedKey) {
+        sh.getRange(i + 2, 2).setValue(String(value || ""));
+        return { ok: true, key: key, value: String(value || ""), row: i + 2, existing: true };
+      }
+    }
+  }
+  sh.appendRow([String(key || ""), String(value || ""), "set by TL_Orchestrator_RestoreBackgroundSafely"]);
+  return { ok: true, key: key, value: String(value || ""), row: sh.getLastRow(), existing: false };
+}
+
+function TL_Automation_IsEnabled_() {
+  const raw = String(TLW_getSetting_("AUTOMATION_ENABLED") || "").trim().toLowerCase();
+  if (!raw) return true;
+  return !(raw === "false" || raw === "0" || raw === "no");
 }
 
 function TL_Repair_Run(batchSize) {

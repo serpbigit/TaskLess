@@ -977,6 +977,20 @@ function TLW_logOutboundTextSend_(phoneNumberId, toWaId, text, responseBody) {
 }
 
 function TLW_sendText_(phoneNumberId, toWaId, text) {
+  if (typeof TL_Automation_IsEnabled_ === "function" && !TL_Automation_IsEnabled_()) {
+    const blocked = {
+      ok: false,
+      status: 0,
+      body: "automation_disabled",
+      blocked: true
+    };
+    TLW_logInfo_("send_blocked_automation_disabled", {
+      to: String(toWaId || "").trim(),
+      phone_id: String(phoneNumberId || "").trim(),
+      text_preview: String(text || "").trim().slice(0, 120)
+    });
+    return blocked;
+  }
   const token = TLW_getMetaAccessToken_();
   if (!token) throw new Error("Missing Meta access token (TL_META_SYSTEM_USER_TOKEN/TL_SYSTEM_TOKEN/META_USER_ACCESS_TOKEN/TL_USER_ACCESS_TOKEN/API TOKEN)");
   const url = "https://graph.facebook.com/v19.0/" + encodeURIComponent(phoneNumberId) + "/messages";

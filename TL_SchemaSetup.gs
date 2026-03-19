@@ -45,6 +45,7 @@ const TL_SCHEMA = {
     "LOG"
   ],
   SETTINGS_DEFAULTS: [
+    ["AUTOMATION_ENABLED","true","global kill switch for outbound automation and background runs"],
     ["WORK_HOURS_START","09:00","used for suggesting available scheduling"],
     ["WORK_HOURS_END","17:00","used for suggesting available scheduling"],
     ["DEFAULT_MEETING_MINUTES","60","used for suggesting available scheduling"],

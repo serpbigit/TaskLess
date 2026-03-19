@@ -583,3 +583,21 @@ Logging and learning loops are critical for improvement.
 - “What should I do now?” decision mode:
   - a focused mode that returns the best next actions with the least cognitive load, prioritized for practical execution rather than information dump.
 
+## Safety and operational controls
+- Global automation on/off switch:
+  - one clear kill switch for outbound automation and background automation
+  - should be controllable from `SETTINGS`, Apps Script admin functions, and later from an emergency Boss/admin WhatsApp command
+  - when OFF:
+    - background automation must stop
+    - outbound automated sends must be blocked
+    - Boss should automatically receive a short status message such as:
+      - "Sorry for the inconvenience. The automation layer is temporarily down. We are working to restore it as soon as possible. Your phone and WhatsApp can continue working normally until automation is restored."
+- Safe degraded mode:
+  - when automation is disabled, the human WhatsApp/business phone should continue to work as a normal communication device
+  - TaskLess should fail closed on automation, not break the user’s base communication channel
+- Circuit breakers and anti-loop rails:
+  - max automated Boss packets per time window
+  - duplicate packet cooldown
+  - per-root / per-event loop breaker
+  - one-click emergency stop for all background processing
+
