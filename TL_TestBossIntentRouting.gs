@@ -8,7 +8,8 @@ function TL_TestBossIntentRouting_RunAll() {
   return {
     recognition: TL_TestBossIntentRouting_RecognitionRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
-    capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun()
+    capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
+    out_of_scope: TL_TestBossIntentRouting_OutOfScopeRun()
   };
 }
 
@@ -137,6 +138,39 @@ function TL_TestBossIntentRouting_CreateTaskRouteRun() {
     reply: reply
   };
   Logger.log("TL_TestBossIntentRouting_CreateTaskRouteRun: %s", JSON.stringify(output, null, 2));
+  return output;
+}
+
+function TL_TestBossIntentRouting_OutOfScopeRun() {
+  const reply = TL_Menu_HandleBossMessage_({
+    from: TL_TestBossIntentRouting_getBossPhone_(),
+    text: "what is the weather today?"
+  }, null, {
+    intentFn: function(text) {
+      return {
+        intent: "out_of_scope",
+        route: "none",
+        summary_kind: "none",
+        capture_state: "",
+        confidence: 0.99,
+        needs_clarification: "false",
+        reply: "",
+        parameters: {
+          query: text,
+          capture_kind: "",
+          capture_mode: "",
+          time_hint: "",
+          target: ""
+        }
+      };
+    }
+  });
+
+  const output = {
+    ok: String(reply || "").indexOf("מצטערת") !== -1 && String(reply || "").indexOf("מה תרצה לעשות?") !== -1,
+    reply: reply
+  };
+  Logger.log("TL_TestBossIntentRouting_OutOfScopeRun: %s", JSON.stringify(output, null, 2));
   return output;
 }
 

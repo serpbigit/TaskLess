@@ -444,6 +444,14 @@ function TL_Menu_BuildPlaceholderReply_(title, body) {
   ].join("\n");
 }
 
+function TL_Menu_BuildOutOfScopeReply_() {
+  return [
+    "מצטערת, כאן אני מטפלת רק בניהול, תזכורות, משימות, יומן, הודעות עבודה והחלטות לאישור.",
+    "",
+    TL_Menu_BuildMenuReply_()
+  ].join("\n");
+}
+
 function TL_Menu_AnnotateBossCapture_(inboxRow, state, extraNote) {
   const rowNumber = inboxRow && inboxRow.row ? Number(inboxRow.row) : 0;
   if (!rowNumber || typeof TL_Orchestrator_updateRowFields_ !== "function") return false;
@@ -565,6 +573,11 @@ function TL_Menu_HandleBossIntent_(ev, inboxRow, intent) {
   const bossWaId = String(ev && ev.from ? ev.from : "").trim();
   const normalized = TL_AI_normalizeBossIntent_(intent || {});
   if (!normalized || normalized.intent === "unknown") return null;
+
+  if (normalized.intent === "out_of_scope") {
+    TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
+    return TL_Menu_BuildOutOfScopeReply_();
+  }
 
   if (normalized.route === "menu" || normalized.intent === "show_menu" || normalized.intent === "help") {
     TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);

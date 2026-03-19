@@ -84,18 +84,20 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Reuven"),
     "Supported intents:",
-    "show_menu, help, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, unknown",
+    "show_menu, help, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, out_of_scope, unknown",
     "Strict JSON shape:",
     '{"intent":"...","route":"menu|summary|capture|none","summary_kind":"pending|urgent|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|menu|help|verticals|settings|reminders|tasks|none","capture_state":"TL_MENU_STATES value or empty string","confidence":0.0,"needs_clarification":"true|false","reply":"...","parameters":{"query":"...","capture_kind":"...","capture_mode":"...","time_hint":"...","target":"..."}}',
     "Routing rules:",
     "Use summary routes for list/status questions.",
     "Use capture routes for create/add/log/remind/schedule requests.",
     "Prefer a specific capture_state when the message clearly matches a menu capture path.",
-    "Return unknown only when no supported intent applies.",
+    "Use out_of_scope when the message asks for weather, news, trivia, jokes, sports, or general chat outside TaskLess secretary capabilities.",
+    "Return unknown only when the message is too ambiguous to classify and is not clearly out of scope.",
     "Examples:",
     '{"intent":"list_approvals","route":"summary","summary_kind":"approvals","capture_state":"","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את מה שממתין לאישור.","parameters":{"query":"approvals","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"create_task_with_due","route":"capture","summary_kind":"none","capture_state":"CAPTURE_TASK_WITH_DUE","confidence":0.97,"needs_clarification":"false","reply":"קיבלתי, אכין משימה עם תאריך יעד.","parameters":{"query":"send proposal by Thursday","capture_kind":"task","capture_mode":"with_due","time_hint":"Thursday","target":""}}',
     '{"intent":"create_log_journal","route":"capture","summary_kind":"none","capture_state":"CAPTURE_LOG_JOURNAL","confidence":0.96,"needs_clarification":"false","reply":"נרשם, אכין מזה פריט יומן.","parameters":{"query":"met with Dana","capture_kind":"journal","capture_mode":"journal","time_hint":"","target":""}}',
+    '{"intent":"out_of_scope","route":"none","summary_kind":"none","capture_state":"","confidence":0.99,"needs_clarification":"false","reply":"מחוץ לתחום","parameters":{"query":"weather","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     "Message:",
     String(inputText || "")
   ].join("\n");
@@ -774,6 +776,7 @@ function TL_AI_normalizeBossIntentName_(value) {
     "create_task_no_due","create_task_with_due","create_task_dependent","create_task_personal","create_task_business",
     "create_log_health","create_log_habits","create_log_journal","create_log_note",
     "create_schedule_business","create_schedule_family","create_schedule_reminder",
+    "out_of_scope",
     "unknown"
   ];
   return allowed.indexOf(v) !== -1 ? v : "unknown";
