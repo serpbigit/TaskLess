@@ -6,6 +6,7 @@ TaskLess (a.k.a. BossAI) is a WhatsApp-first, human-in-the-loop automation syste
 - PRODUCT.md — product vision and long-term direction
 - ARCHITECTURE.md — system structure and routing model
 - OPERATIONAL.md — operational contract and canonical ledger schema
+- WORKFLOW.md — human/agent collaboration workflow for TaskLess development
 - FEATURES.md — feature definitions (when present)
 - RECONSTRUCTION.md — disaster recovery and rebuild steps
 - DEV_TASKS.md — current work/state ledger

@@ -100,9 +100,9 @@ function doPost(e) {
       if (duplicate) { skipped++; return; }
 
       const appendedRow = TLW_appendInboxRow_(enriched, rawJson);
-      TLW_tryAutoVoiceTranscription_(enriched, appendedRow);
-      TLW_tryAutoAiTriage_(enriched, appendedRow);
+      const repairedCount = TLW_tryApplyCachedStatuses_(enriched.phone_number_id || "", enriched.message_id || "", appendedRow.row);
       appended++;
+      updated += repairedCount;
     });
 
     if ((appended + updated) === 0) {
@@ -300,7 +300,10 @@ function TLW_tryBossMenu_(events) {
       if (existing) inboxRow = { row: existing.row };
     } else {
       const appended = TLW_appendInboxRow_(enriched, "");
-      if (appended) inboxRow = { row: appended.row };
+      if (appended) {
+        inboxRow = { row: appended.row };
+        TLW_tryApplyCachedStatuses_(enriched.phone_number_id || "", enriched.message_id || "", appended.row);
+      }
     }
   }
 
@@ -346,7 +349,7 @@ function TLW_enrichEvent_(ev, ts) {
     receiver = String(ev.display_phone_number || "");
   } else {
     sender = String(ev.display_phone_number || ""); // business
-    receiver = contactNumber;
+    receiver = contactNumber || TLW_resolveOutgoingReceiverFallback_(phoneId, msgId, baseRecipient, ev.text || "", ts);
   }
 
   // record ids
@@ -498,18 +501,166 @@ function TLW_upsertStatus_(ev, rawJson) {
   if (!messageId) return false;
 
   const loc = TLW_findRowByMessageId_(ev.phone_number_id || "", messageId);
-  if (!loc) return false;
+  if (!loc) {
+    return TLW_cacheLateStatus_(ev, rawJson);
+  }
 
   const { sh, row } = loc;
   const current = Number(sh.getRange(row, 24).getValue() || 0); // statuses_count col (X)
-  const version = Number(sh.getRange(row, 6).getValue() || 1); // record_version col F
   sh.getRange(row, 22).setValue(String(ev.message_type || ""));       // status_latest
   sh.getRange(row, 23).setValue(String(ev.status_timestamp || ""));   // status_timestamp
   sh.getRange(row, 24).setValue(current + 1);                         // statuses_count
   sh.getRange(row, 26).setValue(rawJson);                             // raw_payload_ref
-  sh.getRange(row, 6).setValue(version + 1);                          // record_version
+  TLW_applyVersionBump_(row, "status_merge");
   TLW_logDebug_("status_merge", { phone: ev.phone_number_id, msg: messageId, row });
   return true;
+}
+
+function TLW_cacheLateStatus_(ev, rawJson) {
+  if (String(TLW_getSetting_("status_cache_enabled") || "true").trim().toLowerCase() !== "true") {
+    TLW_logInfo_("status_cache_disabled", { phone: ev.phone_number_id, msg: ev.message_id });
+    return false;
+  }
+
+  const key = TLW_lateStatusCacheKey_(ev.phone_number_id, ev.message_id);
+  const payload = TLW_safeStringify_({
+    phone_number_id: String(ev.phone_number_id || ""),
+    message_id: String(ev.message_id || ""),
+    status_latest: String(ev.message_type || ""),
+    status_timestamp: String(ev.status_timestamp || ""),
+    raw_payload_ref: rawJson
+  }, 8000);
+
+  const existing = TLW_getLateStatusCacheMap_().get(key) || [];
+  existing.push(payload);
+  PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(existing));
+  TLW_logInfo_("status_cached", { phone: ev.phone_number_id, msg: ev.message_id, count: existing.length });
+  return false;
+}
+
+function TLW_tryApplyCachedStatuses_(phoneId, messageId, rowNumber) {
+  const key = TLW_lateStatusCacheKey_(phoneId, messageId);
+  const raw = PropertiesService.getScriptProperties().getProperty(key);
+  if (!raw) return 0;
+
+  let cached = [];
+  try {
+    cached = JSON.parse(raw);
+  } catch (e) {
+    PropertiesService.getScriptProperties().deleteProperty(key);
+    return 0;
+  }
+  if (!cached.length) {
+    PropertiesService.getScriptProperties().deleteProperty(key);
+    return 0;
+  }
+
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+  if (!sh) return 0;
+
+  let applied = 0;
+  cached.forEach(item => {
+    let payload = null;
+    try {
+      payload = JSON.parse(item);
+    } catch (e) {
+      return;
+    }
+    if (!payload) return;
+    const current = Number(sh.getRange(rowNumber, 24).getValue() || 0);
+    sh.getRange(rowNumber, 22).setValue(String(payload.status_latest || ""));
+    sh.getRange(rowNumber, 23).setValue(String(payload.status_timestamp || ""));
+    sh.getRange(rowNumber, 24).setValue(current + 1);
+    sh.getRange(rowNumber, 26).setValue(String(payload.raw_payload_ref || ""));
+    TLW_applyVersionBump_(rowNumber, "late_status_repair");
+    applied++;
+  });
+
+  PropertiesService.getScriptProperties().deleteProperty(key);
+  if (applied) {
+    TLW_logInfo_("status_cache_repaired", { phone: phoneId, msg: messageId, row: rowNumber, applied: applied });
+  }
+  return applied;
+}
+
+function TLW_lateStatusCacheKey_(phoneId, messageId) {
+  return "TL_LATE_STATUS_" + String(phoneId || "").trim() + "_" + String(messageId || "").trim();
+}
+
+function TLW_getLateStatusCacheMap_() {
+  const out = new Map();
+  const props = PropertiesService.getScriptProperties();
+  const all = props.getProperties();
+  Object.keys(all).forEach(key => {
+    if (key.indexOf("TL_LATE_STATUS_") === 0) {
+      try {
+        out.set(key, JSON.parse(all[key]));
+      } catch (e) {
+        out.set(key, []);
+      }
+    }
+  });
+  return out;
+}
+
+function TLW_resolveOutgoingReceiverFallback_(phoneId, msgId, baseRecipient, text, ts) {
+  if (baseRecipient) return String(baseRecipient || "");
+  const inferred = TLW_findRecentContactByContext_(phoneId, text, ts);
+  if (inferred) return inferred;
+  const existing = TLW_findRowByMessageId_(phoneId, msgId);
+  if (existing) return String(existing.sh.getRange(existing.row, TLW_colIndex_("receiver")).getValue() || "");
+  return "";
+}
+
+function TLW_findRecentContactByContext_(phoneId, text, ts) {
+  try {
+    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+    const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+    if (!sh) return "";
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return "";
+    const start = Math.max(2, lastRow - TL_WEBHOOK.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
+    const count = lastRow - start + 1;
+    const vals = sh.getRange(start, 1, count, TL_WEBHOOK.INBOX_HEADERS.length).getValues();
+    const normalizedText = String(text || "").trim().toLowerCase();
+    const cutoff = ts ? new Date(ts.getTime() - 2 * 60 * 60 * 1000) : null;
+    let fallbackContact = "";
+    for (let i = vals.length - 1; i >= 0; i--) {
+      const row = vals[i];
+      if (String(row[9] || "") !== String(phoneId || "")) continue;
+      if (cutoff && row[0] instanceof Date && row[0] < cutoff) continue;
+      const direction = String(row[8] || "").trim().toLowerCase();
+      const contact = direction === "incoming" ? String(row[11] || "").trim() : String(row[12] || "").trim();
+      if (!contact) continue;
+      if (!fallbackContact) fallbackContact = contact;
+      const candidateText = String(row[15] || "").trim().toLowerCase();
+      if (!normalizedText || !candidateText || candidateText.indexOf(normalizedText) !== -1 || normalizedText.indexOf(candidateText) !== -1) {
+        return contact;
+      }
+    }
+    if (fallbackContact) return fallbackContact;
+  } catch (e) {}
+  return "";
+}
+
+function TLW_applyVersionBump_(rowNumber, reason) {
+  try {
+    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+    const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+    if (!sh) return false;
+    const current = Number(sh.getRange(rowNumber, TLW_colIndex_("record_version")).getValue() || 1);
+    sh.getRange(rowNumber, TLW_colIndex_("record_version")).setValue(current + 1);
+    sh.getRange(rowNumber, TLW_colIndex_("notes")).setValue(TLW_appendVersionNote_(String(sh.getRange(rowNumber, TLW_colIndex_("notes")).getValue() || ""), reason));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function TLW_appendVersionNote_(existing, reason) {
+  const note = "record_version_bump=" + String(reason || "state_change");
+  return existing ? (existing + "\n" + note) : note;
 }
 
 function TLW_findRowByMessageId_(phoneId, messageId) {
@@ -657,10 +808,13 @@ function TLW_logOutboundTextSend_(phoneNumberId, toWaId, text, responseBody) {
   const enriched = TLW_enrichEvent_(outgoingEvent, new Date());
   if (!enriched) return;
   if (TLW_isDuplicate_(enriched)) return;
-  TLW_appendInboxRow_(enriched, TLW_safeStringify_({
+  const appended = TLW_appendInboxRow_(enriched, TLW_safeStringify_({
     source: "TLW_sendText_",
     send_response: parsed.raw || String(responseBody || "")
   }, 4000));
+  if (appended) {
+    TLW_tryApplyCachedStatuses_(enriched.phone_number_id || "", enriched.message_id || "", appended.row);
+  }
 }
 
 function TLW_sendText_(phoneNumberId, toWaId, text) {

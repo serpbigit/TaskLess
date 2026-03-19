@@ -39,6 +39,68 @@ function TL_TestWebhook_Video() {
   return TL_TestWebhook_runPayload_("video", TL_TestWebhook_buildVideoPayload_());
 }
 
+function TL_TestWebhook_LateStatusRepairSuite() {
+  const messageId = TL_TestWebhook_fakeMessageId_("status-repair");
+  const statusPayload = TL_TestWebhook_buildStatusPayload_(messageId, "delivered");
+  const messagePayload = TL_TestWebhook_buildMessagePayload_("text", {
+    text: { body: "late status repair test" }
+  }, messageId);
+
+  const statusResult = TL_TestWebhook_runPayload_("late-status-first", statusPayload);
+  const messageResult = TL_TestWebhook_runPayload_("late-status-second", messagePayload);
+  const row = TLW_findRowByMessageId_(TL_TestWebhook_getPhoneNumberId_(), messageId);
+  const snapshot = row ? row.sh.getRange(row.row, 1, 1, TL_WEBHOOK.INBOX_HEADERS.length).getValues()[0] : [];
+
+  const result = {
+    message_id: messageId,
+    statusResult: statusResult,
+    messageResult: messageResult,
+    row: row ? row.row : "",
+    final_status_latest: snapshot ? String(snapshot[TLW_colIndex_("status_latest") - 1] || "") : "",
+    final_status_timestamp: snapshot ? String(snapshot[TLW_colIndex_("status_timestamp") - 1] || "") : "",
+    final_statuses_count: snapshot ? Number(snapshot[TLW_colIndex_("statuses_count") - 1] || 0) : 0,
+    final_record_version: snapshot ? Number(snapshot[TLW_colIndex_("record_version") - 1] || 0) : 0
+  };
+  Logger.log("TL_TestWebhook_LateStatusRepairSuite: %s", JSON.stringify(result, null, 2));
+  return result;
+}
+
+function TL_TestWebhook_OutgoingMissingRecipientPreview() {
+  const payload = TL_TestWebhook_buildOutgoingEchoPayload_(false);
+  const result = {
+    name: "outgoing-missing-recipient",
+    events: TLW_extractEvents_(payload)
+  };
+  Logger.log("TL_TestWebhook_OutgoingMissingRecipientPreview: %s", JSON.stringify(result, null, 2));
+  return result;
+}
+
+function TL_TestWebhook_OutgoingMissingRecipientWriteSuite() {
+  const seedMessageId = TL_TestWebhook_fakeMessageId_("seed");
+  const echoMessageId = TL_TestWebhook_fakeMessageId_("echo-missing-recipient");
+  const seedPayload = TL_TestWebhook_buildMessagePayload_("text", {
+    text: { body: "seed conversation for fallback" }
+  }, seedMessageId);
+  const echoPayload = TL_TestWebhook_buildOutgoingEchoPayload_(false, echoMessageId);
+
+  const seedResult = TL_TestWebhook_runPayload_("outgoing-fallback-seed", seedPayload);
+  const echoResult = TL_TestWebhook_runPayload_("outgoing-fallback-echo", echoPayload);
+  const row = TLW_findRowByMessageId_(TL_TestWebhook_getPhoneNumberId_(), echoMessageId);
+  const snapshot = row ? row.sh.getRange(row.row, 1, 1, TL_WEBHOOK.INBOX_HEADERS.length).getValues()[0] : [];
+
+  const result = {
+    seed_message_id: seedMessageId,
+    echo_message_id: echoMessageId,
+    seedResult: seedResult,
+    echoResult: echoResult,
+    row: row ? row.row : "",
+    final_receiver: snapshot ? String(snapshot[TLW_colIndex_("receiver") - 1] || "") : "",
+    final_direction: snapshot ? String(snapshot[TLW_colIndex_("direction") - 1] || "") : ""
+  };
+  Logger.log("TL_TestWebhook_OutgoingMissingRecipientWriteSuite: %s", JSON.stringify(result, null, 2));
+  return result;
+}
+
 function TL_TestWebhook_ImagePreview() {
   return TL_TestWebhook_previewPayload_("image", TL_TestWebhook_buildImagePayload_());
 }
@@ -141,11 +203,11 @@ function TL_TestWebhook_buildVideoPayload_() {
   });
 }
 
-function TL_TestWebhook_buildMessagePayload_(type, bodyFields) {
+function TL_TestWebhook_buildMessagePayload_(type, bodyFields, messageIdOverride) {
   const phoneNumberId = TL_TestWebhook_getPhoneNumberId_();
   const displayPhoneNumber = TL_TestWebhook_getDisplayPhoneNumber_();
   const fromWaId = TL_TestWebhook_getFromWaId_();
-  const messageId = TL_TestWebhook_fakeMessageId_(type);
+  const messageId = String(messageIdOverride || TL_TestWebhook_fakeMessageId_(type));
   const message = {
     from: fromWaId,
     id: messageId,
@@ -174,6 +236,66 @@ function TL_TestWebhook_buildMessagePayload_(type, bodyFields) {
             wa_id: fromWaId
           }],
           messages: [message]
+        }
+      }]
+    }]
+  };
+}
+
+function TL_TestWebhook_buildStatusPayload_(messageId, status, timestamp) {
+  const phoneNumberId = TL_TestWebhook_getPhoneNumberId_();
+  const displayPhoneNumber = TL_TestWebhook_getDisplayPhoneNumber_();
+  return {
+    object: "whatsapp_business_account",
+    entry: [{
+      id: TL_TestWebhook_getWabaId_(),
+      changes: [{
+        field: "messages",
+        value: {
+          messaging_product: "whatsapp",
+          metadata: {
+            display_phone_number: displayPhoneNumber,
+            phone_number_id: phoneNumberId
+          },
+          statuses: [{
+            id: String(messageId || ""),
+            status: String(status || "delivered"),
+            timestamp: String(timestamp || Math.floor(Date.now() / 1000))
+          }]
+        }
+      }]
+    }]
+  };
+}
+
+function TL_TestWebhook_buildOutgoingEchoPayload_(withRecipient, messageIdOverride) {
+  const phoneNumberId = TL_TestWebhook_getPhoneNumberId_();
+  const displayPhoneNumber = TL_TestWebhook_getDisplayPhoneNumber_();
+  const messageId = String(messageIdOverride || TL_TestWebhook_fakeMessageId_("echo"));
+  const echo = {
+    from: "",
+    id: messageId,
+    timestamp: String(Math.floor(Date.now() / 1000)),
+    type: "text",
+    text: { body: "outgoing echo fallback test" }
+  };
+  if (withRecipient) {
+    echo.recipient_id = TL_TestWebhook_getFromWaId_();
+  }
+
+  return {
+    object: "whatsapp_business_account",
+    entry: [{
+      id: TL_TestWebhook_getWabaId_(),
+      changes: [{
+        field: "message_echoes",
+        value: {
+          messaging_product: "whatsapp",
+          metadata: {
+            display_phone_number: displayPhoneNumber,
+            phone_number_id: phoneNumberId
+          },
+          message_echoes: [echo]
         }
       }]
     }]

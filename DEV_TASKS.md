@@ -1,6 +1,7 @@
 # TaskLess - DEV_TASKS
 
 Working instructions: see AGENT.md
+Joint collaboration workflow: see WORKFLOW.md
 Operational model: see OPERATIONAL.md
 Reconstruction guide: see RECONSTRUCTION.md
 
@@ -357,6 +358,13 @@ Communication Processing
 • build unified conversation records  
 • contact resolution
 
+Orchestration
+
+• add `TL_Orchestrator.gs` as the thin deterministic manager inside Apps Script  
+• inspect ledger state and decide eligible next work  
+• dispatch bounded workers instead of growing webhook inline logic indefinitely  
+• coordinate repair, synthesis, approval wait, and approved-send transitions
+
 Task Extraction
 
 • detect tasks from messages  
@@ -480,6 +488,18 @@ Logging and learning loops are critical for improvement.
 - Remaining media gap: image/video analysis and richer downstream processing are still pending.
 
 ## Next steps (AI routine, WhatsApp-first)
+- Add `TL_Orchestrator.gs` as the first explicit orchestration layer inside Apps Script.
+  - start with deterministic routing of pending repairs and downstream WhatsApp work rather than more inline branching inside `TL_Webhook.gs`
+  - initial orchestration targets: late-status repair, post-ingest AI follow-up, quiet-window synthesis eligibility, approval wait state, and approved-send dispatch
+  - keep this layer procedural and auditable; AI remains inside specialist worker steps, not in the manager itself
+  - execution model for v1:
+    - direct webhook work: `doGet(e)`, `doPost(e)`, payload normalization, idempotent ledger write/update, immediate status merge when possible, deferred-work logging when not possible
+    - orchestrator batch work: scan eligible rows/threads and dispatch bounded batches for repair, AI follow-up, quiet-window synthesis, approval-state handling, and approved-send routing
+    - separate worker entrypoints: `TL_Repair_Run()`, `TL_AI_RunPending()`, `TL_Synthesis_Run()`, `TL_Approval_Run()`, `TL_Send_RunApproved()`
+  - trigger model for v1:
+    - WhatsApp webhook remains immediate
+    - `TL_Orchestrator.gs` should wake on a time-driven trigger, starting at every 5 minutes
+    - do not create one installable trigger per task; use the orchestrator as the recurring dispatcher
 - Configure AI endpoint/token in SETTINGS (`API END POINT`, `API TOKEN`, `AI_DEFAULT_LANGUAGE`). Use existing WhatsApp messages as the first channel before adding email/scheduling/tasks.
 - AI flow (initial POC):
   - Amanda now handles first-pass per-message triage for incoming WhatsApp rows.

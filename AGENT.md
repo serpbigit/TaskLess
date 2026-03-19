@@ -57,6 +57,7 @@ Creating a new deployment would change the webhook URL and break the system.
 - All flows must log deterministically: inbound events, proposals, executions, successes, errors.
 - Schema snapshots live in SCHEMA.json; export and commit schema changes when they occur.
 - For sheet schema inspection, request TL_Sheets_ExportSchemaJson() output when needed.
+- Every new channel, worker, or orchestration step should include a deterministic GAS test runner or smoke function so runtime behavior can be validated without relying only on ad hoc manual testing.
 
 ## 9. Response Style
 - Keep responses concise and operational; include verification guidance when relevant.

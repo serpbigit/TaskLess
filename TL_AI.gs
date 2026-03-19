@@ -210,6 +210,7 @@ function TL_AI_TestLatestIncoming() {
 
   loc.sh.getRange(loc.row, TLW_colIndex_("ai_summary")).setValue(result.summary);
   loc.sh.getRange(loc.row, TLW_colIndex_("ai_proposal")).setValue(result.proposal);
+  TLW_applyVersionBump_(loc.row, "ai_test_latest_incoming");
 
   TLW_logInfo_("ai_test_latest_incoming", {
     row: loc.row,
@@ -264,6 +265,7 @@ function TL_AI_TriageInboxRow_(rowNumber) {
   loc.sh.getRange(loc.row, TLW_colIndex_("suggested_action")).setValue(triage.suggested_action);
   loc.sh.getRange(loc.row, TLW_colIndex_("ai_summary")).setValue(triage.summary);
   loc.sh.getRange(loc.row, TLW_colIndex_("ai_proposal")).setValue(triage.proposal);
+  TLW_applyVersionBump_(loc.row, "ai_triage");
 
   TLW_logInfo_("ai_triage_row", {
     row: loc.row,
@@ -328,6 +330,7 @@ function TL_AI_TranscribeInboxRow_(rowNumber) {
   loc.sh.getRange(loc.row, TLW_colIndex_("text")).setValue(finalText);
   loc.sh.getRange(loc.row, TLW_colIndex_("ai_summary")).setValue(transcript.summary);
   loc.sh.getRange(loc.row, TLW_colIndex_("notes")).setValue(mergedNotes);
+  TLW_applyVersionBump_(loc.row, "voice_transcription");
 
   TLW_logInfo_("ai_voice_transcribed", {
     row: loc.row,

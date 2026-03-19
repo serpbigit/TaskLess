@@ -94,6 +94,7 @@ function TL_Menu_LogNote_(ev, inboxRow, taskStatus) {
   // record_class = instruction, task_status = logged
   sh.getRange(r, TLW_colIndex_("record_class")).setValue("instruction");
   sh.getRange(r, TLW_colIndex_("task_status")).setValue(taskStatus || "logged");
+  TLW_applyVersionBump_(r, "menu_note");
 }
 
 function TL_Menu_LogMeetingRequest_(ev, inboxRow) {
@@ -103,6 +104,7 @@ function TL_Menu_LogMeetingRequest_(ev, inboxRow) {
   const r = inboxRow.row;
   sh.getRange(r, TLW_colIndex_("record_class")).setValue("instruction");
   sh.getRange(r, TLW_colIndex_("task_status")).setValue("pending");
+  TLW_applyVersionBump_(r, "menu_meeting");
   // naive parse: leave task_due blank for now; future: parse date/time
 }
 
