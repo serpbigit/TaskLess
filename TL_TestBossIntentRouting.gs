@@ -9,6 +9,7 @@ function TL_TestBossIntentRouting_RunAll() {
     recognition: TL_TestBossIntentRouting_RecognitionRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
+    reminders_route: TL_TestBossIntentRouting_ListRemindersRouteRun(),
     out_of_scope: TL_TestBossIntentRouting_OutOfScopeRun()
   };
 }
@@ -138,6 +139,50 @@ function TL_TestBossIntentRouting_CreateTaskRouteRun() {
     reply: reply
   };
   Logger.log("TL_TestBossIntentRouting_CreateTaskRouteRun: %s", JSON.stringify(output, null, 2));
+  return output;
+}
+
+function TL_TestBossIntentRouting_ListRemindersRouteRun() {
+  const reminderRow = TL_TestBossIntentRouting_seedRow_({
+    root_id: "root_intent_reminders_" + Utilities.getUuid(),
+    record_class: "instruction",
+    task_status: "reminder_pending",
+    execution_status: "reminder_pending",
+    task_due: "מחר ב-08:00",
+    ai_summary: "תזכורת לקחת תרופה מחר בבוקר.",
+    notes: "boss_capture_kind=reminder\nboss_capture_finalized=reminder"
+  });
+
+  const reply = TL_Menu_HandleBossMessage_({
+    from: TL_TestBossIntentRouting_getBossPhone_(),
+    text: "show my reminders"
+  }, null, {
+    intentFn: function(text) {
+      return {
+        intent: "list_reminders",
+        route: "summary",
+        summary_kind: "reminders",
+        capture_state: "",
+        confidence: 0.98,
+        needs_clarification: "false",
+        reply: "",
+        parameters: {
+          query: text,
+          capture_kind: "",
+          capture_mode: "",
+          time_hint: "",
+          target: ""
+        }
+      };
+    }
+  });
+
+  const output = {
+    ok: String(reply || "").indexOf("רשימת תזכורות") !== -1 && String(reply || "").indexOf("מחר ב-08:00") !== -1,
+    seeded_row: reminderRow.rowNumber,
+    reply: reply
+  };
+  Logger.log("TL_TestBossIntentRouting_ListRemindersRouteRun: %s", JSON.stringify(output, null, 2));
   return output;
 }
 

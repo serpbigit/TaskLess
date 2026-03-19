@@ -173,7 +173,7 @@ function TL_Menu_HandleRemindersChoice_(waId, choice) {
   if (choice === "1") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_REMINDER_RELATIVE, "כתוב/אמור את התזכורת. לדוגמה: \"תזכירי לי בעוד שעתיים להתקשר ליעקב\".");
   if (choice === "2") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_REMINDER_DATETIME, "כתוב/אמור את התזכורת עם תאריך ושעה. לדוגמה: \"תזכירי לי מחר ב-08:00 לקחת תרופה\".");
   if (choice === "3") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_REMINDER_RECURRING, "כתוב/אמור את התזכורת החוזרת. לדוגמה: \"תזכירי לי כל יום ב-22:00 לקחת כדור\".");
-  if (choice === "4") return TL_Menu_BuildPlaceholderReply_("רשימת תזכורות", "תצוגת רשימת התזכורות עוד לא חוברה. בינתיים אני שומר לכידה והצעות לאישור.");
+  if (choice === "4") return TL_Menu_BuildRemindersSummary_();
   if (choice === "5") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
   if (choice === "6") return TL_Menu_BuildMenuReply_();
   return TL_Menu_BuildRemindersMenu_();
@@ -629,7 +629,7 @@ function TL_Menu_HandleSummaryIntent_(intent) {
     case "help": return TL_Menu_BuildHelpMenu_();
     case "verticals": return TL_Menu_BuildVerticalsMenu_();
     case "settings": return TL_Menu_BuildSettingsMenu_();
-    case "reminders": return TL_Menu_BuildPendingSummary_();
+    case "reminders": return TL_Menu_BuildRemindersSummary_();
     case "tasks": return TL_Menu_BuildOpenTasksSummary_();
     default: return TL_Menu_BuildPendingSummary_();
   }
@@ -1097,9 +1097,11 @@ function TL_Menu_FormatRowSummary_(item) {
   const text = TL_Orchestrator_value_(values, "text") || TL_Orchestrator_value_(values, "ai_summary") || TL_Orchestrator_value_(values, "ai_proposal") || "";
   const preview = TL_Menu_Preview_(text, 100);
   const status = TL_Orchestrator_value_(values, "task_status") || TL_Orchestrator_value_(values, "approval_status") || TL_Orchestrator_value_(values, "execution_status") || "";
+  const due = TL_Orchestrator_value_(values, "task_due");
   const rootId = TL_Orchestrator_value_(values, "root_id");
   const prefix = status ? ("[" + status + "] ") : "";
-  return "- " + prefix + preview + (rootId ? (" (root " + rootId + ")") : "");
+  const duePart = due ? (" | יעד: " + due) : "";
+  return "- " + prefix + preview + duePart + (rootId ? (" (root " + rootId + ")") : "");
 }
 
 function TL_Menu_BuildSummaryBlock_(title, rows, emptyText) {
@@ -1180,6 +1182,24 @@ function TL_Menu_BuildOpenTasksSummary_() {
     return status === "pending" || status === "approved" || status === "captured";
   }, TL_MENU.MAX_PENDING_SUMMARY);
   return TL_Menu_BuildSummaryBlock_("משימות פתוחות", rows, "אין כרגע משימות פתוחות.");
+}
+
+function TL_Menu_BuildRemindersSummary_() {
+  const rows = TL_Menu_FilterRecentRows_(function(item) {
+    const values = item.values;
+    const taskStatus = TL_Orchestrator_value_(values, "task_status").toLowerCase();
+    const approvalStatus = TL_Orchestrator_value_(values, "approval_status").toLowerCase();
+    const executionStatus = TL_Orchestrator_value_(values, "execution_status").toLowerCase();
+    const notes = TL_Orchestrator_value_(values, "notes").toLowerCase();
+    return notes.indexOf("boss_capture_kind=reminder") !== -1 ||
+      notes.indexOf("menu_route=reminder_") !== -1 ||
+      taskStatus === "reminder_pending" ||
+      taskStatus === "reminder_approved" ||
+      approvalStatus === "awaiting_approval" && notes.indexOf("boss_capture_kind=reminder") !== -1 ||
+      executionStatus === "reminder_pending" ||
+      executionStatus === "awaiting_approval" && notes.indexOf("boss_capture_kind=reminder") !== -1;
+  }, TL_MENU.MAX_PENDING_SUMMARY);
+  return TL_Menu_BuildSummaryBlock_("רשימת תזכורות", rows, "אין כרגע תזכורות פתוחות.");
 }
 
 function TL_Menu_BuildBlockedTasksSummary_() {

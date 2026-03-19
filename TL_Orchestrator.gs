@@ -11,6 +11,7 @@ const TL_ORCHESTRATOR = {
   DEFAULT_SCAN_ROWS: 400,
   DEFAULT_QUIET_WINDOW_MINUTES: 120,
   DEFAULT_POST_INGEST_MINUTES: 1,
+  DEFAULT_REMINDER_POLL_MINUTES: 5,
   TRIGGER_HANDLER: "TL_Orchestrator_Run"
 };
 
@@ -24,6 +25,7 @@ function TL_Orchestrator_Run() {
       ai: TL_AI_RunPendingUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
       synthesis: TL_Synthesis_RunUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
       approval: TL_Approval_RunUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
+      reminders: TL_Reminder_RunDueUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
       send: TL_Send_RunApprovedUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
       boss: TL_BossPolicy_RunUnlocked_()
     };
@@ -46,6 +48,19 @@ function TL_Orchestrator_InstallTrigger_5m() {
     handler: TL_ORCHESTRATOR.TRIGGER_HANDLER,
     cadence: "every 5 minutes"
   };
+}
+
+function TL_Orchestrator_EnsureTrigger_5m() {
+  const triggers = ScriptApp.getProjectTriggers().filter(function(trigger) {
+    return trigger.getHandlerFunction() === TL_ORCHESTRATOR.TRIGGER_HANDLER;
+  });
+  if (triggers.length === 1) {
+    return { ok: true, handler: TL_ORCHESTRATOR.TRIGGER_HANDLER, cadence: "every 5 minutes", existing: true };
+  }
+  if (triggers.length > 1) {
+    TL_Orchestrator_RemoveTriggers();
+  }
+  return TL_Orchestrator_InstallTrigger_5m();
 }
 
 function TL_Orchestrator_RemoveTriggers() {
@@ -98,6 +113,12 @@ function TL_Approval_Run(batchSize) {
 function TL_Send_RunApproved(batchSize, options) {
   return TL_Orchestrator_withLock_("send", function() {
     return TL_Send_RunApprovedUnlocked_(batchSize, options);
+  });
+}
+
+function TL_Reminder_RunDue(batchSize, options) {
+  return TL_Orchestrator_withLock_("reminder", function() {
+    return TL_Reminder_RunDueUnlocked_(batchSize, options);
   });
 }
 
@@ -468,7 +489,7 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
     direction: "incoming",
     sender: sender,
     receiver: receiver,
-    execution_status: kind === "journal" ? "logged" : "approved",
+    execution_status: kind === "journal" ? "logged" : (kind === "reminder" ? "reminder_pending" : "approved"),
     notes: TL_Capture_appendNote_(values, "boss_capture_finalized=" + kind)
   };
 
@@ -477,11 +498,82 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
     updates.task_status = "logged";
   } else {
     updates.record_class = "instruction";
-    updates.task_status = "pending";
+    updates.task_status = kind === "reminder" ? "reminder_pending" : "pending";
   }
 
   TL_Orchestrator_updateRowFields_(rowNumber, updates, "boss_capture_finalized");
   return true;
+}
+
+function TL_Reminder_RunDueUnlocked_(batchSize, options) {
+  const limit = TL_Orchestrator_normalizeBatchSize_(batchSize);
+  const sendFn = options && typeof options.sendFn === "function" ? options.sendFn : TLW_sendText_;
+  const now = options && options.now instanceof Date ? options.now : new Date();
+  const rows = TL_Orchestrator_readRecentRows_(TL_ORCHESTRATOR.DEFAULT_SCAN_ROWS);
+  const result = {
+    ok: true,
+    scanned: 0,
+    fired: 0,
+    archived: 0,
+    skipped: 0,
+    failed: 0
+  };
+
+  for (let i = rows.length - 1; i >= 0 && result.scanned < limit; i--) {
+    const item = rows[i];
+    const values = item.values;
+    const recordClass = TL_Orchestrator_value_(values, "record_class").toLowerCase();
+    const taskStatus = TL_Orchestrator_value_(values, "task_status").toLowerCase();
+    const executionStatus = TL_Orchestrator_value_(values, "execution_status").toLowerCase();
+    const notes = TL_Orchestrator_value_(values, "notes");
+    if (recordClass !== "instruction" || taskStatus !== "reminder_pending") continue;
+    if (executionStatus === "reminder_sent" || String(notes || "").toLowerCase().indexOf("reminder_fired_at=") !== -1) {
+      result.skipped++;
+      continue;
+    }
+
+    result.scanned++;
+    const dueText = TL_Orchestrator_value_(values, "task_due");
+    const dueAt = TL_Reminder_parseDueAt_(dueText, now);
+    if (!dueAt) {
+      result.skipped++;
+      continue;
+    }
+    if (dueAt.getTime() > now.getTime()) {
+      result.skipped++;
+      continue;
+    }
+
+    const phoneNumberId = TL_Orchestrator_value_(values, "phone_number_id");
+    const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "") || TLW_normalizePhone_(TL_Orchestrator_value_(values, "sender"));
+    if (!phoneNumberId || !bossPhone) {
+      result.failed++;
+      continue;
+    }
+
+    const reminderText = TL_Reminder_buildFireText_(values, dueText);
+    const sendResult = sendFn(phoneNumberId, bossPhone, reminderText, item);
+    if (sendResult && sendResult.ok) {
+      TL_Orchestrator_updateRowFields_(item.rowNumber, {
+        execution_status: "reminder_sent",
+        task_status: "reminder_sent",
+        notes: TL_Capture_appendNote_(values, "reminder_fired_at=" + now.toISOString())
+      }, "reminder_fire");
+      result.fired++;
+      if (TL_Orchestrator_archiveInboxRow_(item.rowNumber)) {
+        result.archived++;
+      }
+    } else {
+      TL_Orchestrator_updateRowFields_(item.rowNumber, {
+        execution_status: "reminder_send_failed",
+        notes: TL_Capture_appendNote_(values, "reminder_fire_failed_at=" + now.toISOString())
+      }, "reminder_fire_failed");
+      result.failed++;
+    }
+  }
+
+  TLW_logInfo_("reminder_run_due", result);
+  return result;
 }
 
 function TL_Send_RunApprovedUnlocked_(batchSize, options) {
@@ -671,6 +763,77 @@ function TL_Orchestrator_updateRowFields_(rowNumber, updates, reason) {
   });
   TLW_applyVersionBump_(rowNumber, reason || "orchestrator_update");
   return true;
+}
+
+function TL_Orchestrator_archiveInboxRow_(rowNumber) {
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  const inbox = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+  const archive = ss.getSheetByName("ARCHIVE");
+  if (!inbox || !archive || !rowNumber) return false;
+  if (rowNumber < 2 || rowNumber > inbox.getLastRow()) return false;
+  const values = inbox.getRange(rowNumber, 1, 1, TL_WEBHOOK.INBOX_HEADERS.length).getValues();
+  archive.getRange(archive.getLastRow() + 1, 1, 1, TL_WEBHOOK.INBOX_HEADERS.length).setValues(values);
+  inbox.deleteRow(rowNumber);
+  return true;
+}
+
+function TL_Reminder_buildFireText_(values, dueText) {
+  const summary = TL_Orchestrator_value_(values, "ai_summary") || TL_Orchestrator_value_(values, "text");
+  const lines = [
+    "תזכורת",
+    TL_Menu_Preview_(summary || "יש לך תזכורת.", 180)
+  ];
+  if (String(dueText || "").trim()) {
+    lines.push("מועד: " + String(dueText || "").trim());
+  }
+  return lines.join("\n");
+}
+
+function TL_Reminder_parseDueAt_(text, now) {
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+  const base = now instanceof Date ? new Date(now.getTime()) : new Date();
+  const lowered = raw.toLowerCase();
+
+  var match = lowered.match(/(?:in|within)\s+(\d+)\s*(minute|minutes|min|hour|hours|hr|hrs)/i);
+  if (match) {
+    const amount = Number(match[1] || 0);
+    const unit = String(match[2] || "").toLowerCase();
+    if (!amount) return null;
+    const out = new Date(base.getTime());
+    out.setMinutes(out.getMinutes() + (unit.indexOf("hour") === 0 || unit.indexOf("hr") === 0 ? amount * 60 : amount));
+    return out;
+  }
+
+  match = raw.match(/(?:בעוד)\s*(\d+)\s*(דקות|דקה|שעות|שעה)/);
+  if (match) {
+    const amountHe = Number(match[1] || 0);
+    const unitHe = String(match[2] || "");
+    if (!amountHe) return null;
+    const outHe = new Date(base.getTime());
+    outHe.setMinutes(outHe.getMinutes() + (unitHe.indexOf("ש") === 0 ? amountHe * 60 : amountHe));
+    return outHe;
+  }
+
+  match = raw.match(/(?:מחר)\s*(?:ב[- ]?)?(\d{1,2})[:.](\d{2})/);
+  if (match) {
+    const outTomorrow = new Date(base.getTime());
+    outTomorrow.setDate(outTomorrow.getDate() + 1);
+    outTomorrow.setHours(Number(match[1] || 0), Number(match[2] || 0), 0, 0);
+    return outTomorrow;
+  }
+
+  match = raw.match(/(\d{1,2})[:.](\d{2})/);
+  if (match) {
+    const outTime = new Date(base.getTime());
+    outTime.setHours(Number(match[1] || 0), Number(match[2] || 0), 0, 0);
+    if (outTime.getTime() < base.getTime() - 60000) {
+      outTime.setDate(outTime.getDate() + 1);
+    }
+    return outTime;
+  }
+
+  return null;
 }
 
 function TL_Orchestrator_resolveSendTarget_(values) {
