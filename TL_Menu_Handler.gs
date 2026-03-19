@@ -751,9 +751,10 @@ function TL_Menu_StoreDecisionPacket_(waId, kind, items) {
     return !!item.rowNumber;
   });
   if (!packetItems.length) return false;
+  const initialStage = String(kind || "decision") === "capture" && packetItems.length === 1 ? "one_by_one" : "root";
   return TL_Menu_SetDecisionPacket_(waId, {
     kind: kind || "decision",
-    stage: "root",
+    stage: initialStage,
     cursor: 0,
     created_at: new Date().toISOString(),
     items: packetItems
@@ -765,7 +766,10 @@ function TL_Menu_HandleDecisionPacketReply_(waId, text) {
   if (!packet) return null;
 
   const choice = String(text || "").trim();
-  if (!choice) return TL_Menu_BuildDecisionPacketReply_(packet);
+  if (!choice) {
+    if (packet.stage === "edit") return TL_Menu_BuildDecisionPacketEditReply_(packet);
+    return TL_Menu_BuildDecisionPacketReply_(packet);
+  }
 
   if (packet.stage === "root") {
     return TL_Menu_HandleDecisionPacketRootReply_(waId, packet, choice);
@@ -778,6 +782,9 @@ function TL_Menu_HandleDecisionPacketReply_(waId, text) {
   }
   if (packet.stage === "one_by_one") {
     return TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice);
+  }
+  if (packet.stage === "edit") {
+    return TL_Menu_HandleDecisionPacketEditReply_(waId, packet, text);
   }
 
   TL_Menu_ClearDecisionPacket_(waId);
@@ -907,11 +914,15 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
     TL_Menu_ApprovePacketItems_([current]);
     packet.cursor = Number(packet.cursor || 0) + 1;
   } else if (choice === "2") {
-    packet.cursor = Number(packet.cursor || 0) + 1;
+    packet.stage = "edit";
+    TL_Menu_SetDecisionPacket_(waId, packet);
+    return TL_Menu_BuildDecisionPacketEditReply_(packet);
   } else if (choice === "3") {
+    packet.cursor = Number(packet.cursor || 0) + 1;
+  } else if (choice === "4") {
     TL_Menu_ClearDecisionPacket_(waId);
     return "עצרתי את הסקירה אחד-אחד.";
-  } else if (choice === "4") {
+  } else if (choice === "5") {
     TL_Menu_ClearDecisionPacket_(waId);
     return TL_Menu_BuildMenuReply_();
   } else {
@@ -925,6 +936,33 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
 
   TL_Menu_SetDecisionPacket_(waId, packet);
   return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
+}
+
+function TL_Menu_HandleDecisionPacketEditReply_(waId, packet, text) {
+  const current = packet.items[packet.cursor || 0];
+  if (!current) {
+    TL_Menu_ClearDecisionPacket_(waId);
+    return "אין כרגע פריט לעריכה.";
+  }
+
+  const choice = String(text || "").trim();
+  if (!choice) return TL_Menu_BuildDecisionPacketEditReply_(packet);
+  if (choice === "1") {
+    packet.stage = "one_by_one";
+    TL_Menu_SetDecisionPacket_(waId, packet);
+    return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, "ביטלתי את העריכה.");
+  }
+  if (choice === "2") {
+    TL_Menu_ClearDecisionPacket_(waId);
+    return TL_Menu_BuildMenuReply_();
+  }
+
+  const revised = TL_Menu_ReviseDecisionRow_(current.rowNumber, choice);
+  current.summary = revised.summary;
+  current.proposal = revised.proposal;
+  packet.stage = "one_by_one";
+  TL_Menu_SetDecisionPacket_(waId, packet);
+  return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, "עדכנתי את הנוסח. אשר אם זה נכון, או ערוך שוב.");
 }
 
 function TL_Menu_ApprovePacketItems_(items) {
@@ -980,6 +1018,53 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
   }
 }
 
+function TL_Menu_ReviseDecisionRow_(rowNumber, revisedText) {
+  const cleaned = String(revisedText || "").trim().replace(/\s+/g, " ");
+  if (!rowNumber || !cleaned) {
+    return {
+      summary: cleaned,
+      proposal: cleaned
+    };
+  }
+  try {
+    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+    const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+    if (!sh) {
+      return {
+        summary: cleaned,
+        proposal: cleaned
+      };
+    }
+    const values = sh.getRange(rowNumber, 1, 1, TL_WEBHOOK.INBOX_HEADERS.length).getValues()[0];
+    const existingNotes = String(values[TLW_colIndex_("notes") - 1] || "");
+    const nextNotes = TL_Capture_appendNote_(values, "boss_revision_text=" + cleaned);
+    const updates = {
+      text: cleaned,
+      ai_summary: cleaned,
+      ai_proposal: cleaned,
+      approval_required: "true",
+      approval_status: "awaiting_approval",
+      execution_status: "proposal_ready",
+      task_status: "proposal_ready",
+      notes: nextNotes || existingNotes
+    };
+    if (typeof TL_Orchestrator_updateRowFields_ === "function") {
+      TL_Orchestrator_updateRowFields_(rowNumber, updates, "boss_revise");
+    } else {
+      Object.keys(updates).forEach(function(key) {
+        sh.getRange(rowNumber, TLW_colIndex_(key)).setValue(updates[key]);
+      });
+      TLW_applyVersionBump_(rowNumber, "boss_revise");
+    }
+  } catch (e) {
+    // Keep the interaction flowing even if the row update fails.
+  }
+  return {
+    summary: cleaned,
+    proposal: cleaned
+  };
+}
+
 function TL_Menu_BuildDecisionPacketReply_(packet) {
   return [
     TL_Menu_BuildDecisionPacketHeader_(packet),
@@ -1025,23 +1110,54 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   if (!current) return "אין עוד פריטים בחבילה.";
   const index = Number(packet.cursor || 0) + 1;
   const total = packet.items.length;
-  const actor = current.receiver || current.sender || current.contactId || current.rootId || "לא ידוע";
-  const summary = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 140);
-  return [
-    "בדיקה אחד-אחד " + index + "/" + total,
-    actor,
+  const summary = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 220);
+  const meta = [];
+  if (current.isUrgent) meta.push("דחוף");
+  else if (current.isHigh) meta.push("חשוב");
+  const label = meta.length ? ("[" + meta.join(" · ") + "]") : "";
+  const lines = [
+    "סקירה אחד-אחד " + index + "/" + total,
+    label ? label : "",
+    "הבנתי כך:",
     summary,
+    "",
     "1. אשר",
-    "2. דלג",
-    "3. עצור",
-    "4. חזרה לתפריט ראשי",
+    "2. ערוך",
+    "3. דלג",
+    "4. עצור",
+    "5. חזרה לתפריט ראשי",
     "שלח את מספר האפשרות שתבחר"
+  ];
+  if (arguments.length > 1 && arguments[1]) {
+    lines.unshift(String(arguments[1]));
+  }
+  return lines.filter(Boolean).join("\n");
+}
+
+function TL_Menu_BuildDecisionPacketEditReply_(packet) {
+  const current = packet.items[packet.cursor || 0];
+  if (!current) return "אין כרגע פריט לעריכה.";
+  const summary = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 220);
+  return [
+    "עריכת פריט",
+    "הנוסח הנוכחי:",
+    summary,
+    "",
+    "כתוב או אמור עכשיו את הנוסח החדש שתרצה שאציע לאישור.",
+    "1. ביטול עריכה",
+    "2. חזרה לתפריט ראשי"
   ].join("\n");
 }
 
 function TL_Menu_BuildDecisionPacketHeader_(packet) {
   const total = packet.items.length;
   const urgent = packet.items.filter(function(item) { return item.isUrgent; }).length;
+  if (total === 1) {
+    return [
+      "יש פריט אחד שמחכה לאישור שלך.",
+      "אפשר לאשר, לערוך, לדלג או לחזור לתפריט הראשי."
+    ].join("\n");
+  }
   return [
     "האם לאשר את הפריטים הבאים?",
     "סה\"כ פריטים: " + total,

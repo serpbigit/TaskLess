@@ -1680,10 +1680,18 @@ function TL_Capture_buildPacketItem_(childRow, rowNumber) {
 }
 
 function TL_Capture_buildPacketText_(summary, packetItems, cfg, now) {
-  const title = "Boss capture";
+  if (packetItems && packetItems.length === 1 && typeof TL_Menu_BuildDecisionPacketOneByOneReply_ === "function") {
+    return TL_Menu_BuildDecisionPacketOneByOneReply_({
+      kind: "capture",
+      stage: "one_by_one",
+      cursor: 0,
+      items: packetItems
+    });
+  }
+  const title = "בקשת החלטה";
   const lines = [
     title,
-    "Summary: " + TL_BossPolicy_preview_(summary || "", 120)
+    "הבנתי כך: " + TL_BossPolicy_preview_(summary || "", 120)
   ];
   const detail = TL_BossPolicy_buildPacketText_("decision", packetItems, cfg, now);
   lines.push(detail);
