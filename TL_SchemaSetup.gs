@@ -35,6 +35,9 @@ const TL_SCHEMA = {
   LOG_HEADERS: [
     "timestamp","level","component","message","meta_json"
   ],
+  AI_COST_TRACKER_HEADERS: [
+    "Date","Model","Input_Tokens","Output_Tokens","Cost_ILS"
+  ],
   ALLOWED_TABS: [
     "INBOX",
     "ARCHIVE",
@@ -42,7 +45,8 @@ const TL_SCHEMA = {
     "CONTACT_ENRICHMENTS",
     "TOPICS",
     "SETTINGS",
-    "LOG"
+    "LOG",
+    "AI_Cost_Tracker"
   ],
   SETTINGS_DEFAULTS: [
     ["AUTOMATION_ENABLED","true","global kill switch for outbound automation and background runs"],
@@ -81,6 +85,7 @@ function TL_EnsureSchema() {
   ensureTab_(ss, "TOPICS", TL_SCHEMA.TOPICS_HEADERS, false);
   ensureTab_(ss, "SETTINGS", TL_SCHEMA.SETTINGS_HEADERS, false);
   ensureTab_(ss, "LOG", TL_SCHEMA.LOG_HEADERS, false);
+  ensureTab_(ss, "AI_Cost_Tracker", TL_SCHEMA.AI_COST_TRACKER_HEADERS, false);
   seedSettings_(ss);
 }
 
@@ -93,6 +98,7 @@ function TL_ResetSchema(forceClear) {
   ensureTab_(ss, "TOPICS", TL_SCHEMA.TOPICS_HEADERS, !!forceClear);
   ensureTab_(ss, "SETTINGS", TL_SCHEMA.SETTINGS_HEADERS, !!forceClear);
   ensureTab_(ss, "LOG", TL_SCHEMA.LOG_HEADERS, !!forceClear);
+  ensureTab_(ss, "AI_Cost_Tracker", TL_SCHEMA.AI_COST_TRACKER_HEADERS, !!forceClear);
   seedSettings_(ss);
 }
 

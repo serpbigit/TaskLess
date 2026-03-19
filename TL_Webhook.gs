@@ -8,28 +8,14 @@
  *
  */
 const TL_WEBHOOK = {
-  INBOX_SHEET: "INBOX",
+  INBOX_SHEET: TL_INBOX.SHEET,
   MAX_IDEMPOTENCY_SCAN_ROWS: 2000,
   MEDIA_MESSAGE_TYPES: ["image","document","audio","video"],
-  INBOX_HEADERS: [
-    "timestamp","root_id","event_id","parent_event_id","record_id","record_version","record_class",
-    "channel","direction","phone_number_id","display_phone_number","sender","receiver",
-    "message_id","message_type","text","ai_summary","ai_proposal",
-    "approval_required","approval_status","execution_status",
-    "status_latest","status_timestamp","statuses_count",
-    "contact_id","raw_payload_ref","notes",
-    "task_due","task_status","task_priority",
-    "topic_id","topic_tagged_at",
-    "biz_stage","biz_stage_ts","payment_status","delivery_due",
-    "media_id","media_mime_type","media_sha256","media_caption","media_filename","media_is_voice",
-    "priority_level","importance_level","urgency_flag","needs_owner_now","suggested_action"
-  ]
+  INBOX_HEADERS: TL_INBOX.HEADERS
 };
 
 function TLW_colIndex_(headerName) {
-  const idx = TL_WEBHOOK.INBOX_HEADERS.indexOf(String(headerName || "").trim());
-  if (idx === -1) throw new Error("Unknown INBOX header: " + headerName);
-  return idx + 1;
+  return TL_colIndex_(headerName);
 }
 
 function doGet(e) {

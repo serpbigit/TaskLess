@@ -16,6 +16,7 @@
 const TL_MENU = {
   TRIGGERS: ["תפריט","menu","/menu","עזרה","help","מה אפשר לעשות","what can i do","what can i say"],
   HELP_TRIGGERS: ["עזרה","help","מה אפשר לעשות","what can i do","what can i say"],
+  COST_TRIGGERS: ["עלות","cost","ai cost","עלות ai","עלות ה-ai","עלות של ai"],
   STATE_KEY_PREFIX: "MENU_STATE_", // + wa_id
   PACKET_KEY_PREFIX: "MENU_PACKET_", // + wa_id
   MAX_PENDING_SUMMARY: 5
@@ -70,6 +71,11 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
 
   const packetReply = TL_Menu_HandleDecisionPacketReply_(bossWaId, text);
   if (packetReply) return packetReply;
+
+  if (TL_MENU.COST_TRIGGERS.some(function(t) { return text === t; }) || TL_Menu_IsAiCostQuery_(rawText)) {
+    TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
+    return TL_AI_BuildMonthToDateSpendReport_();
+  }
 
   // Check triggers
   if (TL_MENU.TRIGGERS.some(t => text === t)) {
@@ -521,6 +527,8 @@ function TL_Menu_ShouldHandleText_(waId, text) {
   const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
   if (bossPhone && TLW_normalizePhone_(waId || "") !== bossPhone) return false;
   if (TL_MENU.TRIGGERS.some(function(t) { return normalized === String(t || "").trim().toLowerCase(); })) return true;
+  if (TL_MENU.COST_TRIGGERS.some(function(t) { return normalized === String(t || "").trim().toLowerCase(); })) return true;
+  if (TL_Menu_IsAiCostQuery_(normalized)) return true;
   if (TL_Menu_HasDecisionPacket_(waId)) return true;
   if (TL_Menu_GetState_(waId) !== TL_MENU_STATES.ROOT) return true;
   if (TL_Menu_IsNumericChoice_(normalized)) return true;
@@ -638,6 +646,7 @@ function TL_Menu_HandleBossIntent_(ev, inboxRow, intent) {
 function TL_Menu_HandleSummaryIntent_(intent) {
   const summaryKind = String(intent && intent.summary_kind || "").trim().toLowerCase();
   switch (summaryKind) {
+    case "ai_cost": return TL_AI_BuildMonthToDateSpendReport_();
     case "pending": return TL_Menu_BuildPendingSummary_();
     case "urgent": return TL_Menu_BuildUrgentSummary_();
     case "approvals": return TL_Menu_BuildAwaitingApprovalSummary_();
@@ -655,6 +664,16 @@ function TL_Menu_HandleSummaryIntent_(intent) {
     case "tasks": return TL_Menu_BuildOpenTasksSummary_();
     default: return TL_Menu_BuildPendingSummary_();
   }
+}
+
+function TL_Menu_IsAiCostQuery_(text) {
+  const normalized = String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized) return false;
+  if (normalized === "עלות") return true;
+  if (normalized.indexOf("cost") !== -1 && normalized.indexOf("ai") !== -1) return true;
+  if (normalized.indexOf("עלות") !== -1 && (normalized.indexOf("ai") !== -1 || normalized.indexOf("בינה") !== -1 || normalized.indexOf("מודל") !== -1)) return true;
+  if (normalized.indexOf("כמה") !== -1 && normalized.indexOf("עלה") !== -1 && (normalized.indexOf("ai") !== -1 || normalized.indexOf("בינה") !== -1)) return true;
+  return false;
 }
 
 function TL_Menu_CaptureStateForIntent_(intentName, explicitState) {
@@ -1002,10 +1021,10 @@ function TL_Menu_ApprovePacketItems_(items) {
 function TL_Menu_ApproveDecisionRow_(rowNumber) {
   try {
     const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
-    const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+    const sh = ss.getSheetByName(TL_INBOX.SHEET);
     if (!sh || !rowNumber) return false;
 
-    const values = sh.getRange(rowNumber, 1, 1, TL_WEBHOOK.INBOX_HEADERS.length).getValues()[0];
+    const values = sh.getRange(rowNumber, 1, 1, TL_INBOX.HEADERS.length).getValues()[0];
     const approvalRequired = String(values[TLW_colIndex_("approval_required") - 1] || "").trim().toLowerCase() === "true";
     const approvalStatus = String(values[TLW_colIndex_("approval_status") - 1] || "").trim().toLowerCase();
     const executionStatus = String(values[TLW_colIndex_("execution_status") - 1] || "").trim().toLowerCase();
@@ -1026,7 +1045,7 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
       TL_Orchestrator_updateRowFields_(rowNumber, updates, "boss_confirm");
     } else {
       Object.keys(updates).forEach(function(key) {
-        sh.getRange(rowNumber, TLW_colIndex_(key)).setValue(updates[key]);
+        sh.getRange(rowNumber, TL_colIndex_(key)).setValue(updates[key]);
       });
       TLW_applyVersionBump_(rowNumber, "boss_confirm");
     }
@@ -1050,15 +1069,15 @@ function TL_Menu_ReviseDecisionRow_(rowNumber, revisedText) {
   }
   try {
     const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
-    const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+    const sh = ss.getSheetByName(TL_INBOX.SHEET);
     if (!sh) {
       return {
         summary: cleaned,
         proposal: cleaned
       };
     }
-    const values = sh.getRange(rowNumber, 1, 1, TL_WEBHOOK.INBOX_HEADERS.length).getValues()[0];
-    const existingNotes = String(values[TLW_colIndex_("notes") - 1] || "");
+    const values = sh.getRange(rowNumber, 1, 1, TL_INBOX.HEADERS.length).getValues()[0];
+    const existingNotes = String(values[TL_colIndex_("notes") - 1] || "");
     const nextNotes = TL_Capture_appendNote_(values, "boss_revision_text=" + cleaned);
     const updates = {
       text: cleaned,
@@ -1074,7 +1093,7 @@ function TL_Menu_ReviseDecisionRow_(rowNumber, revisedText) {
       TL_Orchestrator_updateRowFields_(rowNumber, updates, "boss_revise");
     } else {
       Object.keys(updates).forEach(function(key) {
-        sh.getRange(rowNumber, TLW_colIndex_(key)).setValue(updates[key]);
+        sh.getRange(rowNumber, TL_colIndex_(key)).setValue(updates[key]);
       });
       TLW_applyVersionBump_(rowNumber, "boss_revise");
     }
@@ -1197,22 +1216,22 @@ function TL_Menu_Preview_(text, limit) {
 function TL_Menu_LogNote_(ev, inboxRow, taskStatus) {
   // reuse existing inbox row; enrich fields
   const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
-  const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+  const sh = ss.getSheetByName(TL_INBOX.SHEET);
   if (!sh || !inboxRow) return;
   const r = inboxRow.row;
   // record_class = instruction, task_status = logged
-  sh.getRange(r, TLW_colIndex_("record_class")).setValue("instruction");
-  sh.getRange(r, TLW_colIndex_("task_status")).setValue(taskStatus || "logged");
+  sh.getRange(r, TL_colIndex_("record_class")).setValue("instruction");
+  sh.getRange(r, TL_colIndex_("task_status")).setValue(taskStatus || "logged");
   TLW_applyVersionBump_(r, "menu_note");
 }
 
 function TL_Menu_LogMeetingRequest_(ev, inboxRow) {
   const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
-  const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+  const sh = ss.getSheetByName(TL_INBOX.SHEET);
   if (!sh || !inboxRow) return;
   const r = inboxRow.row;
-  sh.getRange(r, TLW_colIndex_("record_class")).setValue("instruction");
-  sh.getRange(r, TLW_colIndex_("task_status")).setValue("pending");
+  sh.getRange(r, TL_colIndex_("record_class")).setValue("instruction");
+  sh.getRange(r, TL_colIndex_("task_status")).setValue("pending");
   TLW_applyVersionBump_(r, "menu_meeting");
   // naive parse: leave task_due blank for now; future: parse date/time
 }

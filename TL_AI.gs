@@ -5,6 +5,15 @@
  * and writes results back into INBOX only when explicitly invoked.
  */
 
+const TL_AI_COST = {
+  MODEL_NAME: "Gemini 2.5 Flash",
+  EXPECTED_ENDPOINT: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+  TRACKER_SHEET: "AI_Cost_Tracker",
+  INPUT_USD_PER_TOKEN: 0.30 / 1000000,
+  OUTPUT_USD_PER_TOKEN: 2.50 / 1000000,
+  USD_ILS: 3.65
+};
+
 function TL_AI_getConfig_() {
   const endpoint = String(TLW_getSetting_("API END POINT") || "").trim();
   const token = String(TLW_getSetting_("API TOKEN") || "").trim();
@@ -13,13 +22,105 @@ function TL_AI_getConfig_() {
 
   if (!endpoint) throw new Error("Missing SETTINGS value: API END POINT");
   if (!token) throw new Error("Missing SETTINGS value: API TOKEN");
+  if (endpoint !== TL_AI_COST.EXPECTED_ENDPOINT) {
+    throw new Error("API END POINT must be set to " + TL_AI_COST.EXPECTED_ENDPOINT);
+  }
 
   return {
     endpoint: endpoint,
     token: token,
     language: language,
-    bossName: bossName
+    bossName: bossName,
+    modelName: TL_AI_COST.MODEL_NAME
   };
+}
+
+function TL_AI_EnsureCostTrackerSheet() {
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  return TL_AI_ensureCostTrackerSheet_(ss);
+}
+
+function TL_AI_ensureCostTrackerSheet_(ss) {
+  if (!ss) throw new Error("Spreadsheet not available for AI cost tracker");
+  let sh = ss.getSheetByName(TL_AI_COST.TRACKER_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(TL_AI_COST.TRACKER_SHEET);
+  }
+  const headers = ["Date","Model","Input_Tokens","Output_Tokens","Cost_ILS"];
+  const range = sh.getRange(1, 1, 1, headers.length);
+  const existing = range.getValues()[0];
+  const needs = existing.some(function(v, i) { return String(v || "") !== headers[i]; });
+  if (needs) {
+    range.setValues([headers]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function TL_AI_parseUsageMetadata_(bodyText) {
+  let parsed = null;
+  try {
+    parsed = JSON.parse(String(bodyText || "{}"));
+  } catch (e) {
+    return { inputTokens: 0, outputTokens: 0 };
+  }
+  const usage = parsed && parsed.usageMetadata ? parsed.usageMetadata : {};
+  return {
+    inputTokens: Number(usage.promptTokenCount || 0),
+    outputTokens: Number(usage.candidatesTokenCount || 0)
+  };
+}
+
+function TL_AI_calculateCostIls_(inputTokens, outputTokens) {
+  const usd = (Number(inputTokens || 0) * TL_AI_COST.INPUT_USD_PER_TOKEN) +
+    (Number(outputTokens || 0) * TL_AI_COST.OUTPUT_USD_PER_TOKEN);
+  return usd * TL_AI_COST.USD_ILS;
+}
+
+function TL_AI_trackCost_(usage) {
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  const sh = TL_AI_ensureCostTrackerSheet_(ss);
+  const inputTokens = Number(usage && usage.inputTokens || 0);
+  const outputTokens = Number(usage && usage.outputTokens || 0);
+  const costIls = TL_AI_calculateCostIls_(inputTokens, outputTokens);
+  sh.appendRow([
+    new Date(),
+    TL_AI_COST.MODEL_NAME,
+    inputTokens,
+    outputTokens,
+    Number(costIls.toFixed(6))
+  ]);
+  return {
+    inputTokens: inputTokens,
+    outputTokens: outputTokens,
+    costIls: Number(costIls.toFixed(6))
+  };
+}
+
+function TL_AI_BuildMonthToDateSpendReport_() {
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  const sh = TL_AI_ensureCostTrackerSheet_(ss);
+  const lastRow = sh.getLastRow();
+  let total = 0;
+  if (lastRow >= 2) {
+    const values = sh.getRange(2, 1, lastRow - 1, 5).getValues();
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    values.forEach(function(row) {
+      const dateValue = row[0];
+      const cost = Number(row[4] || 0);
+      const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+      if (!isNaN(date.getTime()) && date.getFullYear() === year && date.getMonth() === month) {
+        total += cost;
+      }
+    });
+  }
+  return [
+    "*TaskLess AI Report*",
+    "Model: " + TL_AI_COST.MODEL_NAME,
+    "Month To Date Spend: ₪" + total.toFixed(2)
+  ].join("\n");
 }
 
 function TL_AI_buildPrompt_(inputText, language, bossName) {
@@ -84,7 +185,7 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Reuven"),
     "Supported intents:",
-    "show_menu, help, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, out_of_scope, unknown",
+    "show_menu, help, show_ai_cost, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, out_of_scope, unknown",
     "Strict JSON shape:",
     '{"intent":"...","route":"menu|summary|capture|none","summary_kind":"pending|urgent|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|menu|help|verticals|settings|reminders|tasks|none","capture_state":"TL_MENU_STATES value or empty string","confidence":0.0,"needs_clarification":"true|false","reply":"...","parameters":{"query":"...","capture_kind":"...","capture_mode":"...","time_hint":"...","target":"..."}}',
     "Routing rules:",
@@ -95,6 +196,7 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Return unknown only when the message is too ambiguous to classify and is not clearly out of scope.",
     "Examples:",
     '{"intent":"list_approvals","route":"summary","summary_kind":"approvals","capture_state":"","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את מה שממתין לאישור.","parameters":{"query":"approvals","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"show_ai_cost","route":"summary","summary_kind":"ai_cost","capture_state":"","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את עלות ה-AI המצטברת.","parameters":{"query":"ai cost","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"create_task_with_due","route":"capture","summary_kind":"none","capture_state":"CAPTURE_TASK_WITH_DUE","confidence":0.97,"needs_clarification":"false","reply":"קיבלתי, אכין משימה עם תאריך יעד.","parameters":{"query":"send proposal by Thursday","capture_kind":"task","capture_mode":"with_due","time_hint":"Thursday","target":""}}',
     '{"intent":"create_log_journal","route":"capture","summary_kind":"none","capture_state":"CAPTURE_LOG_JOURNAL","confidence":0.96,"needs_clarification":"false","reply":"נרשם, אכין מזה פריט יומן.","parameters":{"query":"met with Dana","capture_kind":"journal","capture_mode":"journal","time_hint":"","target":""}}',
     '{"intent":"out_of_scope","route":"none","summary_kind":"none","capture_state":"","confidence":0.99,"needs_clarification":"false","reply":"מחוץ לתחום","parameters":{"query":"weather","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
@@ -234,9 +336,19 @@ function TL_AI_call_(contents, generationConfig) {
     throw new Error("AI request failed: " + status + " :: " + body);
   }
 
+  const usage = TL_AI_parseUsageMetadata_(body);
+  const tracked = TL_AI_trackCost_(usage);
+  TLW_logInfo_("ai_cost_tracked", {
+    model: cfg.modelName,
+    input_tokens: tracked.inputTokens,
+    output_tokens: tracked.outputTokens,
+    cost_ils: tracked.costIls
+  });
+
   return {
     status: status,
-    body: body
+    body: body,
+    usage: tracked
   };
 }
 
@@ -717,6 +829,7 @@ function TL_AI_normalizeBossIntent_(item) {
 function TL_AI_bossRouteFromIntent_(intent) {
   const v = String(intent || "").trim().toLowerCase();
   if (v === "show_menu" || v === "help" || v === "show_settings" || v === "show_verticals") return "menu";
+  if (v === "show_ai_cost") return "summary";
   if (v.indexOf("list_") === 0) return "summary";
   if (v.indexOf("create_") === 0) return "capture";
   return "none";
@@ -736,6 +849,7 @@ function TL_AI_bossSummaryKindFromIntent_(intent) {
     list_followups: "followups",
     list_open_tasks: "open_tasks",
     list_blocked_tasks: "blocked_tasks",
+    show_ai_cost: "ai_cost",
     show_menu: "menu",
     help: "help",
     show_settings: "settings",
@@ -769,7 +883,7 @@ function TL_AI_bossCaptureStateFromIntent_(intent) {
 function TL_AI_normalizeBossIntentName_(value) {
   const v = String(value || "").trim().toLowerCase();
   const allowed = [
-    "show_menu","help","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_next_steps",
+    "show_menu","help","show_ai_cost","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_next_steps",
     "list_draft_replies","list_waiting_on_others","list_followups","list_open_tasks","list_blocked_tasks",
     "show_settings","show_verticals",
     "create_reminder_relative","create_reminder_datetime","create_reminder_recurring",
@@ -790,7 +904,7 @@ function TL_AI_normalizeBossIntentRoute_(value) {
 
 function TL_AI_normalizeBossSummaryKind_(value) {
   const v = String(value || "").trim().toLowerCase();
-  const allowed = ["pending","urgent","approvals","next_steps","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","none"];
+  const allowed = ["pending","urgent","approvals","next_steps","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","ai_cost","none"];
   return allowed.indexOf(v) !== -1 ? v : "none";
 }
 
