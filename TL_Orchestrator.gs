@@ -12,7 +12,8 @@ const TL_ORCHESTRATOR = {
   DEFAULT_QUIET_WINDOW_MINUTES: 120,
   DEFAULT_POST_INGEST_MINUTES: 1,
   DEFAULT_REMINDER_POLL_MINUTES: 5,
-  TRIGGER_HANDLER: "TL_Orchestrator_Run"
+  TRIGGER_HANDLER: "TL_Orchestrator_Run",
+  REMINDER_TRIGGER_HANDLER: "TL_Reminder_RunScheduled"
 };
 
 function TL_Orchestrator_Run() {
@@ -77,7 +78,8 @@ function TL_Orchestrator_RemoveTriggers() {
   const triggers = ScriptApp.getProjectTriggers();
   let removed = 0;
   triggers.forEach(function(trigger) {
-    if (trigger.getHandlerFunction() === TL_ORCHESTRATOR.TRIGGER_HANDLER) {
+    const handler = trigger.getHandlerFunction();
+    if (handler === TL_ORCHESTRATOR.TRIGGER_HANDLER || handler === TL_ORCHESTRATOR.REMINDER_TRIGGER_HANDLER) {
       ScriptApp.deleteTrigger(trigger);
       removed++;
     }
@@ -87,13 +89,18 @@ function TL_Orchestrator_RemoveTriggers() {
 }
 
 function TL_Orchestrator_Status() {
-  const triggers = ScriptApp.getProjectTriggers().filter(function(trigger) {
+  const triggers = ScriptApp.getProjectTriggers();
+  const orchestratorTriggers = triggers.filter(function(trigger) {
     return trigger.getHandlerFunction() === TL_ORCHESTRATOR.TRIGGER_HANDLER;
+  });
+  const reminderTriggers = triggers.filter(function(trigger) {
+    return trigger.getHandlerFunction() === TL_ORCHESTRATOR.REMINDER_TRIGGER_HANDLER;
   });
   return {
     ok: true,
     handler: TL_ORCHESTRATOR.TRIGGER_HANDLER,
-    trigger_count: triggers.length,
+    trigger_count: orchestratorTriggers.length,
+    reminder_trigger_count: reminderTriggers.length,
     automation_enabled: TLW_getSetting_("AUTOMATION_ENABLED"),
     boss_interrupt_level: TLW_getSetting_("BOSS_INTERRUPT_LEVEL"),
     do_not_disturb_enabled: TLW_getSetting_("DO_NOT_DISTURB_ENABLED"),
@@ -107,10 +114,12 @@ function TL_Orchestrator_RestoreBackgroundSafely() {
   updates.BOSS_INTERRUPT_LEVEL = TL_Orchestrator_setSettingValue_("BOSS_INTERRUPT_LEVEL", "manual_only");
   updates.DO_NOT_DISTURB_ENABLED = TL_Orchestrator_setSettingValue_("DO_NOT_DISTURB_ENABLED", "TRUE");
   const trigger = TL_Orchestrator_EnsureTrigger_5m();
+  const reminderTrigger = TL_Reminder_EnsureNextTrigger_();
   return {
     ok: true,
     settings: updates,
     trigger: trigger,
+    reminder_trigger: reminderTrigger,
     note: "Background workers restored with boss proactive pushes muted."
   };
 }
@@ -214,6 +223,23 @@ function TL_Reminder_RunDue(batchSize, options) {
   return TL_Orchestrator_withLock_("reminder", function() {
     return TL_Reminder_RunDueUnlocked_(batchSize, options);
   });
+}
+
+function TL_Reminder_RunScheduled() {
+  if (!TL_Automation_IsEnabled_()) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "automation_disabled"
+    };
+  }
+  const result = TL_Reminder_RunDue(20, { reschedule: false });
+  const next = TL_Reminder_EnsureNextTrigger_();
+  return {
+    ok: true,
+    reminder_run: result,
+    next_trigger: next
+  };
 }
 
 function TL_BossPolicy_Run(options) {
@@ -592,6 +618,7 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
 
   const sender = String(TLW_getSetting_("BOSS_PHONE") || "").trim() || TL_Orchestrator_value_(values, "sender");
   const receiver = TL_Orchestrator_value_(values, "display_phone_number") || TL_Orchestrator_value_(values, "receiver");
+  let notesOut = TL_Capture_appendNote_(values, "boss_capture_finalized=" + kind);
   const updates = {
     approval_required: "false",
     approval_status: "approved",
@@ -599,7 +626,7 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
     sender: sender,
     receiver: receiver,
     execution_status: kind === "journal" ? "logged" : (kind === "reminder" ? "reminder_pending" : "approved"),
-    notes: TL_Capture_appendNote_(values, "boss_capture_finalized=" + kind)
+    notes: notesOut
   };
 
   if (kind === "journal") {
@@ -610,7 +637,25 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
     updates.task_status = kind === "reminder" ? "reminder_pending" : "pending";
   }
 
+  if (kind === "reminder") {
+    const originalDueText = String(TL_Orchestrator_value_(values, "task_due") || "").trim();
+    const resolvedDueAt = TL_Reminder_parseDueAt_(originalDueText, new Date());
+    if (resolvedDueAt) {
+      updates.task_due = resolvedDueAt.toISOString();
+    }
+    if (originalDueText) {
+      const dueNote = "reminder_due_text=" + originalDueText.replace(/\n+/g, " ");
+      if (String(notesOut || "").indexOf(dueNote) === -1) {
+        notesOut = String(notesOut || "") ? (String(notesOut || "") + "\n" + dueNote) : dueNote;
+      }
+      updates.notes = notesOut;
+    }
+  }
+
   TL_Orchestrator_updateRowFields_(rowNumber, updates, "boss_capture_finalized");
+  if (kind === "reminder" && TL_Automation_IsEnabled_()) {
+    TL_Reminder_EnsureNextTrigger_();
+  }
   return true;
 }
 
@@ -642,8 +687,7 @@ function TL_Reminder_RunDueUnlocked_(batchSize, options) {
     }
 
     result.scanned++;
-    const dueText = TL_Orchestrator_value_(values, "task_due");
-    const dueAt = TL_Reminder_parseDueAt_(dueText, now);
+    const dueAt = TL_Reminder_resolveDueAtFromValues_(values, now);
     if (!dueAt) {
       result.skipped++;
       continue;
@@ -681,6 +725,9 @@ function TL_Reminder_RunDueUnlocked_(batchSize, options) {
     }
   }
 
+  if (!(options && options.reschedule === false) && TL_Automation_IsEnabled_()) {
+    result.next_trigger = TL_Reminder_EnsureNextTrigger_();
+  }
   TLW_logInfo_("reminder_run_due", result);
   return result;
 }
@@ -902,6 +949,10 @@ function TL_Reminder_parseDueAt_(text, now) {
   const raw = String(text || "").trim();
   if (!raw) return null;
   const base = now instanceof Date ? new Date(now.getTime()) : new Date();
+  if (/^\d{4}-\d{2}-\d{2}t\d{2}:\d{2}:\d{2}/i.test(raw)) {
+    const iso = new Date(raw);
+    return isNaN(iso.getTime()) ? null : iso;
+  }
   const lowered = raw.toLowerCase();
 
   var match = lowered.match(/(?:in|within)\s+(\d+)\s*(minute|minutes|min|hour|hours|hr|hrs)/i);
@@ -943,6 +994,74 @@ function TL_Reminder_parseDueAt_(text, now) {
   }
 
   return null;
+}
+
+function TL_Reminder_resolveDueAtFromValues_(values, fallbackNow) {
+  if (!values) return null;
+  const dueText = TL_Orchestrator_value_(values, "task_due");
+  const rowTimestamp = values[0] instanceof Date ? values[0] : null;
+  const base = rowTimestamp || (fallbackNow instanceof Date ? fallbackNow : new Date());
+  return TL_Reminder_parseDueAt_(dueText, base);
+}
+
+function TL_Reminder_EnsureNextTrigger_() {
+  TL_Reminder_RemoveTriggers_();
+  if (!TL_Automation_IsEnabled_()) {
+    return { ok: true, skipped: true, reason: "automation_disabled" };
+  }
+  const next = TL_Reminder_FindNextPending_(new Date());
+  if (!next || !next.dueAt) {
+    return { ok: true, skipped: true, reason: "no_pending_reminders" };
+  }
+  const fireAt = new Date(Math.max(next.dueAt.getTime(), Date.now() + 15000));
+  ScriptApp.newTrigger(TL_ORCHESTRATOR.REMINDER_TRIGGER_HANDLER)
+    .timeBased()
+    .at(fireAt)
+    .create();
+  return {
+    ok: true,
+    rowNumber: next.rowNumber,
+    due_at: next.dueAt.toISOString(),
+    scheduled_for: fireAt.toISOString()
+  };
+}
+
+function TL_Reminder_RemoveTriggers_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let removed = 0;
+  triggers.forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === TL_ORCHESTRATOR.REMINDER_TRIGGER_HANDLER) {
+      ScriptApp.deleteTrigger(trigger);
+      removed++;
+    }
+  });
+  return { ok: true, removed: removed };
+}
+
+function TL_Reminder_FindNextPending_(now) {
+  const base = now instanceof Date ? new Date(now.getTime()) : new Date();
+  const rows = TL_Orchestrator_readRecentRows_(TL_ORCHESTRATOR.DEFAULT_SCAN_ROWS);
+  let best = null;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const item = rows[i];
+    const values = item.values;
+    const recordClass = TL_Orchestrator_value_(values, "record_class").toLowerCase();
+    const taskStatus = TL_Orchestrator_value_(values, "task_status").toLowerCase();
+    const executionStatus = TL_Orchestrator_value_(values, "execution_status").toLowerCase();
+    const notes = TL_Orchestrator_value_(values, "notes");
+    if (recordClass !== "instruction" || taskStatus !== "reminder_pending") continue;
+    if (executionStatus === "reminder_sent" || String(notes || "").toLowerCase().indexOf("reminder_fired_at=") !== -1) continue;
+    const dueAt = TL_Reminder_resolveDueAtFromValues_(values, base);
+    if (!dueAt) continue;
+    if (!best || dueAt.getTime() < best.dueAt.getTime()) {
+      best = {
+        rowNumber: item.rowNumber,
+        dueAt: dueAt,
+        values: values
+      };
+    }
+  }
+  return best;
 }
 
 function TL_Orchestrator_resolveSendTarget_(values) {
