@@ -282,13 +282,9 @@ function TLW_tryBossMenu_(events) {
   const candidates = events.filter(ev => ev.message_type === "text");
   const normalized = candidates.map(e=>({from:e.from, type:e.event_type, msg_id:e.message_id, text:String(e.text||"").trim().toLowerCase()}));
   TLW_logInfo_("menu_match_attempt", { candidates: normalized });
-  const triggerText = ["תפריט","menu","/menu"];
   const msg = candidates.find(ev => {
     const text = String(ev.text || "").trim().toLowerCase();
-    if (!text) return false;
-    if (triggerText.includes(text)) return true;
-    if (TL_MENU.CHOICES.includes(text)) return true;
-    return TL_Menu_GetState_(String(ev.from || "").trim()) !== "idle";
+    return TL_Menu_ShouldHandleText_(String(ev.from || "").trim(), text);
   });
   if (!msg) return null;
 
@@ -724,20 +720,37 @@ function TLW_json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj||{})).setMimeType(ContentService.MimeType.JSON);
 }
 
+function TLW_normalizeSettingKey_(key) {
+  return String(key || "").trim().replace(/\s+/g, " ").toUpperCase();
+}
+
 function TLW_getSetting_(key) {
-  const k = String(key || "").trim();
-  if (!k) return "";
-  const sp = PropertiesService.getScriptProperties().getProperty(k);
-  if (sp) return String(sp).trim();
+  const rawKey = String(key || "").trim();
+  const normalizedKey = TLW_normalizeSettingKey_(rawKey);
+  if (!normalizedKey) return "";
+
+  try {
+    const props = PropertiesService.getScriptProperties().getProperties();
+    const propKeys = Object.keys(props || {});
+    for (let i = 0; i < propKeys.length; i++) {
+      const candidateKey = propKeys[i];
+      if (TLW_normalizeSettingKey_(candidateKey) === normalizedKey) {
+        return String(props[candidateKey] || "").trim();
+      }
+    }
+  } catch (e) {}
+
   try {
     const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
     const sh = ss.getSheetByName("SETTINGS");
     if (!sh) return "";
     const lastRow = sh.getLastRow();
     if (lastRow < 2) return "";
-    const vals = sh.getRange(2,1,lastRow-1,2).getValues(); // key,value
-    for (let i=0;i<vals.length;i++){
-      if (String(vals[i][0]||"").trim() === k) return String(vals[i][1]||"").trim();
+    const vals = sh.getRange(2, 1, lastRow - 1, 2).getValues(); // key,value
+    for (let i = 0; i < vals.length; i++) {
+      if (TLW_normalizeSettingKey_(vals[i][0]) === normalizedKey) {
+        return String(vals[i][1] || "").trim();
+      }
     }
   } catch (e) {}
   return "";

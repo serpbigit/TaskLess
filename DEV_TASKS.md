@@ -501,6 +501,17 @@ Logging and learning loops are critical for improvement.
     - `TL_Orchestrator.gs` should wake on a time-driven trigger, starting at every 5 minutes
     - do not create one installable trigger per task; use the orchestrator as the recurring dispatcher
 - Configure AI endpoint/token in SETTINGS (`API END POINT`, `API TOKEN`, `AI_DEFAULT_LANGUAGE`). Use existing WhatsApp messages as the first channel before adding email/scheduling/tasks.
+- Extend `SETTINGS` for the Boss-secretary relationship and workload shaping:
+  - `URGENT_PUSH_ENABLED`
+  - `BOSS_INTERRUPT_LEVEL`
+  - `BOSS_UPDATE_INTERVAL_MINUTES`
+  - `BOSS_DECISION_REQUEST_INTERVAL_MINUTES`
+  - `BOSS_DECISION_BATCH_SIZE`
+  - `BOSS_MAX_ITEMS_PER_DIGEST`
+  - `BOSS_URGENT_ITEMS_ALWAYS_FIRST`
+  - `BOSS_INCLUDE_FYI_IN_DIGEST`
+  - `DO_NOT_DISTURB_ENABLED`
+  - use these to control pull-vs-push behavior, digest cadence, and how much decision workload the secretary places on the Boss at a time
 - AI flow (initial POC):
   - Amanda now handles first-pass per-message triage for incoming WhatsApp rows.
   - Next Amanda layer: batch/thread synthesis after quiet-window stabilization so multiple related messages produce one coherent summary, proposal, and decision recommendation.
@@ -519,4 +530,31 @@ Logging and learning loops are critical for improvement.
 - Future voice-output task:
   - add support for AI-generated voice responses: generate approved reply text -> synthesize speech -> send outbound audio/voice note via the appropriate channel.
 - Deferrals for later: email ingestion, calendar/scheduling, and task auto-creation; focus first on WhatsApp AI drafts and Boss approval loop.
+
+## Strategic multipliers (roadmap themes)
+- Multi-intent Boss capture:
+  - one free-form voice/text message can decompose into multiple proposed child records (reminders, tasks, logs, scheduling, reply proposals) under one parent capture and one approval batch.
+- Cross-channel unified context:
+  - WhatsApp, email, calendar, reminders, and tasks should converge into one operational memory rather than acting like separate mini-tools.
+- Batch approval with exception handling:
+  - support approve-all, approve-safe-only, one-by-one review, grouped review, and exception-only review while preserving Boss confirmation as an invariant.
+- Boss workload shaping:
+  - use `SETTINGS` to control push vs pull behavior, digest cadence, decision cadence, batch size, urgent-first ordering, and interruption thresholds.
+- Reusable secretary action templates:
+  - common flows such as follow-up, archive-safe items, create task + reminder, send meeting confirmation, and similar repeatable office work.
+- Contact/relationship memory:
+  - retain stable context such as tone preference, business stage, prior commitments, reputational sensitivity, and recurring contact patterns.
+- Executive brief / “what’s on my plate now” mode:
+  - provide a concise, high-value control surface showing risks, approvals pending, urgent items, and recommended next actions.
+- Editable approval cards:
+  - every meaningful proposal should come back as a structured Boss card with approve, revise, edit, regroup, or defer paths rather than only binary approval.
+- Dependency-aware tasks:
+  - tasks should support blocked-by, waiting-on, after-X, and other sequencing logic so the secretary surfaces work at the right time.
+  - tasks should remain native to TaskLess as rich ledger objects; Google Tasks may later be optional interoperability or sync, but not the source of truth.
+- Specialized vertical packs:
+  - support profession-specific modules such as therapist/patient flows, recurring session summaries, periodic reports, and other industry workflows.
+- Personalized operating style:
+  - the secretary should adapt to the Boss’s preference for interruption level, summary length, approval style, language, and operating cadence.
+- “What should I do now?” decision mode:
+  - a focused mode that returns the best next actions with the least cognitive load, prioritized for practical execution rather than information dump.
 

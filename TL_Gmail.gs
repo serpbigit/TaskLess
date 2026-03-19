@@ -162,6 +162,10 @@ function TL_Gmail_flattenThread_(messages, maxCharsPerMessage, maxTotalChars) {
  * Safe to run multiple times (upsert by refId).
  */
 function TL_Gmail_POC_RunPullImportant() {
+  if (typeof TL_Email_PullImportant_Run === "function") {
+    return TL_Email_PullImportant_Run({ maxThreads: 20 });
+  }
+
   TL_Sheets_bootstrapPOC(); // ensure tabs exist
   return TL_Gmail_pullImportantThreads_A0({ maxThreads: 20 });
 }

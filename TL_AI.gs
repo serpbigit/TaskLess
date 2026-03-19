@@ -9,6 +9,7 @@ function TL_AI_getConfig_() {
   const endpoint = String(TLW_getSetting_("API END POINT") || "").trim();
   const token = String(TLW_getSetting_("API TOKEN") || "").trim();
   const language = String(TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "Hebrew").trim();
+  const bossName = String(TLW_getSetting_("BOSS_NAME") || "Reuven").trim();
 
   if (!endpoint) throw new Error("Missing SETTINGS value: API END POINT");
   if (!token) throw new Error("Missing SETTINGS value: API TOKEN");
@@ -16,28 +17,31 @@ function TL_AI_getConfig_() {
   return {
     endpoint: endpoint,
     token: token,
-    language: language
+    language: language,
+    bossName: bossName
   };
 }
 
-function TL_AI_buildPrompt_(inputText, language) {
+function TL_AI_buildPrompt_(inputText, language, bossName) {
   return [
     "You are TaskLess, a business communication assistant.",
     "Return strict JSON only.",
     "Language: " + String(language || "Hebrew"),
+    "The Boss's name is: " + String(bossName || "Reuven"),
     "Required JSON shape:",
     '{"summary":"...","proposal":"..."}',
-    "The proposal should be a concise draft reply.",
+    "The proposal should be a concise draft reply written on the Boss's behalf.",
     "User message:",
     String(inputText || "")
   ].join("\n");
 }
 
-function TL_AI_buildTriagePrompt_(inputText, language) {
+function TL_AI_buildTriagePrompt_(inputText, language, bossName) {
   return [
     "You are Amanda, the TaskLess AI assistant for business communication triage.",
     "Analyze the incoming message and return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
+    "The Boss's name is: " + String(bossName || "Reuven"),
     "Required JSON shape:",
     '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","summary":"...","proposal":"..."}',
     "Interpret urgency narrowly: only true when timing matters now or soon.",
@@ -163,7 +167,8 @@ function TL_AI_SmokeTest() {
   const cfg = TL_AI_getConfig_();
   const prompt = TL_AI_buildPrompt_(
     "לקוח כתב: האם אפשר לקבוע פגישה מחר ב-10:00?",
-    cfg.language
+    cfg.language,
+    cfg.bossName
   );
   const result = TL_AI_callPrompt_(prompt);
   TLW_logInfo_("ai_smoke_test", {
@@ -183,7 +188,7 @@ function TL_AI_CapabilitiesTest() {
 
 function TL_AI_TestPrompt(promptText) {
   const cfg = TL_AI_getConfig_();
-  const prompt = TL_AI_buildPrompt_(String(promptText || ""), cfg.language);
+  const prompt = TL_AI_buildPrompt_(String(promptText || ""), cfg.language, cfg.bossName);
   const result = TL_AI_callPrompt_(prompt);
   TLW_logInfo_("ai_test_prompt", {
     status: result.status,
@@ -205,7 +210,7 @@ function TL_AI_TestLatestIncoming() {
   const inputText = text || mediaCaption || ("Incoming " + messageType + " message");
 
   const cfg = TL_AI_getConfig_();
-  const prompt = TL_AI_buildPrompt_(inputText, cfg.language);
+  const prompt = TL_AI_buildPrompt_(inputText, cfg.language, cfg.bossName);
   const result = TL_AI_callPrompt_(prompt);
 
   loc.sh.getRange(loc.row, TLW_colIndex_("ai_summary")).setValue(result.summary);
@@ -245,7 +250,7 @@ function TL_AI_TriageInboxRow_(rowNumber) {
   if (!inputText) throw new Error("Row has no usable input text for triage: " + rowNumber);
 
   const cfg = TL_AI_getConfig_();
-  const prompt = TL_AI_buildTriagePrompt_(inputText, cfg.language);
+  const prompt = TL_AI_buildTriagePrompt_(inputText, cfg.language, cfg.bossName);
   const result = TL_AI_callPrompt_(prompt);
 
   const triage = {
