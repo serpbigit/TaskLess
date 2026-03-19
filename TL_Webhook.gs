@@ -916,7 +916,7 @@ function TLW_tryAutoAiTriage_(enriched, appendedRow) {
   }
 }
 
-function TLW_tryAutoBossCapture_(enriched, appendedRow) {
+function TLW_tryAutoBossCapture_(enriched, appendedRow, options) {
   try {
     if (typeof TL_Capture_Run !== "function") return;
     if (!enriched || !appendedRow || !appendedRow.row) return;
@@ -938,12 +938,13 @@ function TLW_tryAutoBossCapture_(enriched, appendedRow) {
       return;
     }
 
-    const result = TL_Capture_Run(1, {
+    const captureOptions = Object.assign({}, (options && options.captureOptions) ? options.captureOptions : {}, {
       rows: [{
         rowNumber: appendedRow.row,
         values: loc.values
       }]
     });
+    const result = TL_Capture_Run(1, captureOptions);
     TLW_logInfo_("boss_capture_auto", {
       row: appendedRow.row,
       message_id: enriched.message_id || "",
@@ -951,12 +952,17 @@ function TLW_tryAutoBossCapture_(enriched, appendedRow) {
       sent: result && result.sent ? result.sent : 0,
       packets: result && result.packets ? result.packets : 0
     });
+    return result;
   } catch (err) {
     TLW_logInfo_("boss_capture_auto_error", {
       row: appendedRow && appendedRow.row ? appendedRow.row : "",
       message_id: enriched && enriched.message_id ? enriched.message_id : "",
       err: String(err && err.stack ? err.stack : err)
     });
+    return {
+      ok: false,
+      err: String(err && err.stack ? err.stack : err)
+    };
   }
 }
 

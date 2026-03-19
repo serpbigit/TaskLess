@@ -35,6 +35,135 @@ function TL_TestWebhook_Voice() {
   return TL_TestWebhook_runPayload_("voice", TL_TestWebhook_buildVoicePayload_());
 }
 
+function TL_TestWebhook_BossVoiceCaptureHandoffRun() {
+  const rootId = "root_webhook_boss_voice_" + Utilities.getUuid();
+  const phoneNumberId = TL_TestWebhook_getPhoneNumberId_();
+  const displayPhone = TL_TestWebhook_getDisplayPhoneNumber_();
+  const bossPhone = TL_TestWebhook_getFromWaId_();
+  const row = {
+    timestamp: new Date(Date.now() - 10 * 60 * 1000),
+    root_id: rootId,
+    event_id: "EVT_" + Utilities.getUuid(),
+    parent_event_id: "",
+    record_id: "REC_" + Utilities.getUuid(),
+    record_version: 1,
+    record_class: "communication",
+    channel: "whatsapp",
+    direction: "incoming",
+    phone_number_id: phoneNumberId,
+    display_phone_number: displayPhone,
+    sender: bossPhone,
+    receiver: displayPhone,
+    message_id: TL_TestWebhook_fakeMessageId_("boss-voice-handoff"),
+    message_type: "voice",
+    text: "Remind me in 10 minutes to take medicine.",
+    ai_summary: "",
+    ai_proposal: "",
+    approval_required: "",
+    approval_status: "",
+    execution_status: "",
+    status_latest: "",
+    status_timestamp: "",
+    statuses_count: 0,
+    contact_id: "WA_" + phoneNumberId + "_" + bossPhone,
+    raw_payload_ref: "",
+    notes: "voice_transcription_status=ok",
+    task_due: "",
+    task_status: "",
+    task_priority: "",
+    topic_id: "topic_unknown",
+    topic_tagged_at: new Date().toISOString(),
+    biz_stage: "",
+    biz_stage_ts: "",
+    payment_status: "",
+    delivery_due: "",
+    media_id: TL_TestWebhook_fakeMediaId_("boss-voice"),
+    media_mime_type: "audio/ogg; codecs=opus",
+    media_sha256: TL_TestWebhook_fakeSha256_("boss-voice"),
+    media_caption: "",
+    media_filename: "",
+    media_is_voice: true,
+    priority_level: "",
+    importance_level: "",
+    urgency_flag: "",
+    needs_owner_now: "",
+    suggested_action: ""
+  };
+
+  const appended = TLW_appendInboxRow_(row, TLW_safeStringify_({
+    source: "TL_TestWebhook_BossVoiceCaptureHandoffRun",
+    root_id: rootId
+  }, 2000));
+  const loc = TL_AI_getInboxRow_(appended.row);
+  const captured = [];
+  const packetStash = [];
+  const result = TLW_tryAutoBossCapture_({
+    direction: "incoming",
+    record_class: "communication",
+    sender: bossPhone,
+    message_id: row.message_id,
+    media_id: row.media_id,
+    media_is_voice: true,
+    message_type: "voice"
+  }, {
+    row: appended.row
+  }, {
+    captureOptions: {
+      useAi: false,
+      promptFn: function() {
+        return {
+          summary: "Boss voice capture summary",
+          items: [{
+            kind: "reminder",
+            title: "Take medicine",
+            summary: "Reminder to take medicine in 10 minutes.",
+            proposal: "Create a reminder for 10 minutes from now to take medicine.",
+            task_due: "in 10 minutes",
+            task_priority: "high",
+            approval_required: "true"
+          }]
+        };
+      },
+      sendFn: function(phoneId, toWaId, text, meta) {
+        captured.push({
+          phoneId: String(phoneId || ""),
+          toWaId: String(toWaId || ""),
+          text: String(text || ""),
+          kind: meta && meta.kind ? String(meta.kind) : ""
+        });
+        return { ok: true, status: 200, body: "{}" };
+      },
+      storePacketFn: function(waId, kind, items) {
+        packetStash.push({
+          waId: String(waId || ""),
+          kind: String(kind || ""),
+          count: items ? items.length : 0
+        });
+        return true;
+      }
+    }
+  });
+
+  const childRows = TL_Orchestrator_readRecentRows_(TL_ORCHESTRATOR.DEFAULT_SCAN_ROWS).filter(function(item) {
+    const values = item.values;
+    return TL_Orchestrator_value_(values, "root_id") === rootId &&
+      TL_Orchestrator_value_(values, "parent_event_id") === String(loc && loc.values ? loc.values[TLW_colIndex_("event_id") - 1] || "" : "") &&
+      TL_Orchestrator_value_(values, "record_class") === "proposal";
+  });
+
+  const output = {
+    ok: !!result && result.captured === 1 && captured.length === 1 && packetStash.length === 1 && childRows.length === 1,
+    source_row: appended.row,
+    root_id: rootId,
+    result: result,
+    sent_count: captured.length,
+    packet_count: packetStash.length,
+    child_count: childRows.length
+  };
+  Logger.log("TL_TestWebhook_BossVoiceCaptureHandoffRun: %s", JSON.stringify(output, null, 2));
+  return output;
+}
+
 function TL_TestWebhook_Video() {
   return TL_TestWebhook_runPayload_("video", TL_TestWebhook_buildVideoPayload_());
 }
