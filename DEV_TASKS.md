@@ -473,7 +473,7 @@ Logging and learning loops are critical for improvement.
 - INBOX/ARCHIVE schema deployed; CONTACTS, CONTACT_ENRICHMENTS, TOPICS, SETTINGS, LOG tabs created.
 - TL_Webhook now writes communication rows and merges statuses by (phone_number_id, message_id); status rows are skipped if no match and logged as status_no_match.
 - Direction normalization: incoming sender=contact, receiver=business; outgoing sender=business, receiver=contact when recipient_id is present.
-- Boss menu flow is now working end-to-end for `תפריט` -> choice (`1/2/3`) -> follow-up capture -> reply send, with outbound API replies logged to INBOX and status callbacks merged back onto the same rows.
+- Boss menu flow now has a full navigable tree scaffold in Hebrew: main menu, submenus, decision-packet approvals, and capture routing markers for reminder/task/log/schedule flows. Creation flows should route into AI proposal + Boss approval rather than silently execute.
 - Menu-handled inbound follow-up text is now appended before the menu handler runs, so free-text captures such as option `1` notes can be persisted and then upgraded to `record_class=instruction` / `task_status=logged`.
 - Known gap: some status messages arrive before the corresponding message row, leading to status_no_match (logged) and no merge. Need a future cache/merge pass for late statuses.
 - Known gap: OUTGOING echo rows have empty receiver when recipient_id missing in payload; need fallback logic (e.g., last contact in root/topic window).
@@ -518,6 +518,31 @@ Logging and learning loops are critical for improvement.
   - Prepare a Boss approval card: Boss edits/approves; on approval, send via WhatsApp and log outbound communication row.
 - Extend inbound WhatsApp parsing beyond text:
   - image/document/video messages: store media type, caption, media id/url metadata, and preserve linkage to the contact/root/topic.
+
+## Boss Menu Spec (current target)
+- Main menu:
+  - `1. תזכיר לי`
+  - `2. משימה חדשה`
+  - `3. רשום לי`
+  - `4. קבע לי`
+  - `5. נהל את העבודה`
+  - `6. הגדרות`
+  - `7. עזרה / מה אפשר להגיד`
+  - `8. כלים ייעודיים`
+- Every submenu should end with numbered `חזרה לתפריט קודם` and `חזרה לתפריט ראשי`.
+- Menu/help triggers should include `תפריט`, `menu`, `עזרה`, `help`, and equivalent voice phrasings.
+- Creation-style menu actions should follow the same contract:
+  - user chooses menu route
+  - user sends free-form details (text or voice)
+  - AI returns structured understanding + proposal JSON
+  - Boss receives approval card / packet
+  - only after approval does the system execute or finalize
+- Retrieval-style menu actions may answer directly:
+  - `מה על הצלחת שלי עכשיו`
+  - `דחוף בלבד`
+  - `ממתין לאישורים`
+  - `טיוטות לתגובה`
+  - `משימות פתוחות`
   - voice/audio notes: transcription is now wired; next step is to feed transcript + summary into downstream task extraction and reply drafting automatically.
 - Add email pipeline:
   - scan important incoming emails where the user is in `To` or `Cc` (not `Bcc`), import them into `INBOX`, and batch-analyze them as JSON.

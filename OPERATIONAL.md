@@ -105,3 +105,14 @@ Class-specific fields:
 
 ## Contract
 OPERATIONAL.md is the behavioral contract of the system. If future code or patches conflict with this document, reconsider the code rather than casually modifying the operational model.
+
+## Boss Menu Contract
+- The Boss menu is a first-class operating surface, not a toy helper.
+- Menu-trigger phrases such as `תפריט`, `menu`, `עזרה`, and `help` should open the navigable menu/help experience.
+- Creation flows from the menu (reminder, task, log, schedule, vertical workflows) should not silently execute.
+- They should route through the same secretary contract as free-form captures:
+  - capture Boss input
+  - AI extracts structured intent and proposal JSON
+  - Boss confirms through approval card / packet
+  - only then execute or finalize
+- Retrieval flows (for example `מה על הצלחת שלי עכשיו`, `דחוף בלבד`, `ממתין לאישורים`) may respond directly from the ledger without an approval card.

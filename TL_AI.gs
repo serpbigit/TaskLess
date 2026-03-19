@@ -77,6 +77,30 @@ function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
   ].join("\n");
 }
 
+function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
+  return [
+    "You are TaskLess's Boss intent router.",
+    "Classify one Boss message into a single intent and return strict JSON only.",
+    "Language preference: " + String(language || "Hebrew"),
+    "The Boss's name is: " + String(bossName || "Reuven"),
+    "Supported intents:",
+    "show_menu, help, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, unknown",
+    "Strict JSON shape:",
+    '{"intent":"...","route":"menu|summary|capture|none","summary_kind":"pending|urgent|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|menu|help|verticals|settings|reminders|tasks|none","capture_state":"TL_MENU_STATES value or empty string","confidence":0.0,"needs_clarification":"true|false","reply":"...","parameters":{"query":"...","capture_kind":"...","capture_mode":"...","time_hint":"...","target":"..."}}',
+    "Routing rules:",
+    "Use summary routes for list/status questions.",
+    "Use capture routes for create/add/log/remind/schedule requests.",
+    "Prefer a specific capture_state when the message clearly matches a menu capture path.",
+    "Return unknown only when no supported intent applies.",
+    "Examples:",
+    '{"intent":"list_approvals","route":"summary","summary_kind":"approvals","capture_state":"","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את מה שממתין לאישור.","parameters":{"query":"approvals","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"create_task_with_due","route":"capture","summary_kind":"none","capture_state":"CAPTURE_TASK_WITH_DUE","confidence":0.97,"needs_clarification":"false","reply":"קיבלתי, אכין משימה עם תאריך יעד.","parameters":{"query":"send proposal by Thursday","capture_kind":"task","capture_mode":"with_due","time_hint":"Thursday","target":""}}',
+    '{"intent":"create_log_journal","route":"capture","summary_kind":"none","capture_state":"CAPTURE_LOG_JOURNAL","confidence":0.96,"needs_clarification":"false","reply":"נרשם, אכין מזה פריט יומן.","parameters":{"query":"met with Dana","capture_kind":"journal","capture_mode":"journal","time_hint":"","target":""}}',
+    "Message:",
+    String(inputText || "")
+  ].join("\n");
+}
+
 function TL_AI_buildTranscriptionPrompt_(language) {
   return [
     "You are TaskLess, a business communication assistant.",
@@ -164,6 +188,24 @@ function TL_AI_parseBossCaptureJson_(text) {
   };
 }
 
+function TL_AI_parseBossIntentJson_(text) {
+  const raw = String(text || "").trim();
+  if (!raw) throw new Error("AI text payload is empty");
+
+  let jsonText = raw;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced && fenced[1]) jsonText = fenced[1].trim();
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (e) {
+    throw new Error("AI text is not valid JSON: " + e.message + " :: " + jsonText.slice(0, 300));
+  }
+
+  return TL_AI_normalizeBossIntent_(parsed);
+}
+
 function TL_AI_call_(contents, generationConfig) {
   const cfg = TL_AI_getConfig_();
   const payload = {
@@ -234,6 +276,34 @@ function TL_AI_ExtractBossCapture_(inputText) {
     raw_json: parsed.raw,
     response_body: result.response_body
   };
+}
+
+function TL_AI_RecognizeBossIntent_(inputText, options) {
+  const cfg = TL_AI_getConfig_();
+  const text = String(inputText || "").trim();
+  if (!text) {
+    return TL_AI_normalizeBossIntent_({
+      intent: "unknown",
+      route: "none",
+      summary_kind: "none",
+      capture_state: "",
+      confidence: 0,
+      needs_clarification: "false",
+      reply: "",
+      parameters: { query: "", capture_kind: "", capture_mode: "", time_hint: "", target: "" }
+    });
+  }
+
+  let parsed = null;
+  if (options && typeof options.intentFn === "function") {
+    parsed = options.intentFn(text, options);
+  } else {
+    const prompt = TL_AI_buildBossIntentPrompt_(text, cfg.language, cfg.bossName);
+    const result = TL_AI_callPrompt_(prompt);
+    parsed = TL_AI_parseBossIntentJson_(result.raw_text);
+  }
+
+  return TL_AI_normalizeBossIntent_(parsed);
 }
 
 function TL_AI_SmokeTest() {
@@ -612,6 +682,131 @@ function TL_AI_normalizeBossCaptureItem_(item) {
     approval_required: "true",
     notes: notes
   };
+}
+
+function TL_AI_normalizeBossIntent_(item) {
+  const safe = item && typeof item === "object" ? item : {};
+  const params = safe.parameters && typeof safe.parameters === "object" ? safe.parameters : {};
+  const intent = TL_AI_normalizeBossIntentName_(safe.intent);
+  const route = TL_AI_normalizeBossIntentRoute_(safe.route || TL_AI_bossRouteFromIntent_(intent));
+  const summaryKind = TL_AI_normalizeBossSummaryKind_(safe.summary_kind || TL_AI_bossSummaryKindFromIntent_(intent));
+  const captureState = TL_AI_normalizeBossCaptureState_(safe.capture_state || TL_AI_bossCaptureStateFromIntent_(intent));
+  const confidence = TL_AI_normalizeBossConfidence_(safe.confidence);
+  const needsClarification = TL_AI_normalizeBooleanString_(safe.needs_clarification);
+  return {
+    intent: intent,
+    route: route,
+    summary_kind: summaryKind,
+    capture_state: captureState,
+    confidence: confidence,
+    needs_clarification: needsClarification,
+    reply: String(safe.reply || "").trim(),
+    parameters: {
+      query: String(params.query || "").trim(),
+      capture_kind: String(params.capture_kind || "").trim(),
+      capture_mode: String(params.capture_mode || "").trim(),
+      time_hint: String(params.time_hint || "").trim(),
+      target: String(params.target || "").trim()
+    },
+    raw: safe
+  };
+}
+
+function TL_AI_bossRouteFromIntent_(intent) {
+  const v = String(intent || "").trim().toLowerCase();
+  if (v === "show_menu" || v === "help" || v === "show_settings" || v === "show_verticals") return "menu";
+  if (v.indexOf("list_") === 0) return "summary";
+  if (v.indexOf("create_") === 0) return "capture";
+  return "none";
+}
+
+function TL_AI_bossSummaryKindFromIntent_(intent) {
+  const v = String(intent || "").trim().toLowerCase();
+  const map = {
+    list_reminders: "reminders",
+    list_tasks: "tasks",
+    list_approvals: "approvals",
+    list_pending: "pending",
+    list_urgent: "urgent",
+    list_next_steps: "next_steps",
+    list_draft_replies: "draft_replies",
+    list_waiting_on_others: "waiting_on_others",
+    list_followups: "followups",
+    list_open_tasks: "open_tasks",
+    list_blocked_tasks: "blocked_tasks",
+    show_menu: "menu",
+    help: "help",
+    show_settings: "settings",
+    show_verticals: "verticals"
+  };
+  return map[v] || "none";
+}
+
+function TL_AI_bossCaptureStateFromIntent_(intent) {
+  const v = String(intent || "").trim().toLowerCase();
+  const map = {
+    create_reminder_relative: "CAPTURE_REMINDER_RELATIVE",
+    create_reminder_datetime: "CAPTURE_REMINDER_DATETIME",
+    create_reminder_recurring: "CAPTURE_REMINDER_RECURRING",
+    create_task_no_due: "CAPTURE_TASK_NO_DUE",
+    create_task_with_due: "CAPTURE_TASK_WITH_DUE",
+    create_task_dependent: "CAPTURE_TASK_DEPENDENT",
+    create_task_personal: "CAPTURE_TASK_PERSONAL",
+    create_task_business: "CAPTURE_TASK_BUSINESS",
+    create_log_health: "CAPTURE_LOG_HEALTH",
+    create_log_habits: "CAPTURE_LOG_HABITS",
+    create_log_journal: "CAPTURE_LOG_JOURNAL",
+    create_log_note: "CAPTURE_LOG_NOTE",
+    create_schedule_business: "CAPTURE_SCHEDULE_BUSINESS",
+    create_schedule_family: "CAPTURE_SCHEDULE_FAMILY",
+    create_schedule_reminder: "CAPTURE_SCHEDULE_REMINDER"
+  };
+  return map[v] || "";
+}
+
+function TL_AI_normalizeBossIntentName_(value) {
+  const v = String(value || "").trim().toLowerCase();
+  const allowed = [
+    "show_menu","help","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_next_steps",
+    "list_draft_replies","list_waiting_on_others","list_followups","list_open_tasks","list_blocked_tasks",
+    "show_settings","show_verticals",
+    "create_reminder_relative","create_reminder_datetime","create_reminder_recurring",
+    "create_task_no_due","create_task_with_due","create_task_dependent","create_task_personal","create_task_business",
+    "create_log_health","create_log_habits","create_log_journal","create_log_note",
+    "create_schedule_business","create_schedule_family","create_schedule_reminder",
+    "unknown"
+  ];
+  return allowed.indexOf(v) !== -1 ? v : "unknown";
+}
+
+function TL_AI_normalizeBossIntentRoute_(value) {
+  const v = String(value || "").trim().toLowerCase();
+  if (v === "summary" || v === "capture" || v === "menu" || v === "none") return v;
+  return "none";
+}
+
+function TL_AI_normalizeBossSummaryKind_(value) {
+  const v = String(value || "").trim().toLowerCase();
+  const allowed = ["pending","urgent","approvals","next_steps","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","none"];
+  return allowed.indexOf(v) !== -1 ? v : "none";
+}
+
+function TL_AI_normalizeBossCaptureState_(value) {
+  const v = String(value || "").trim();
+  const allowed = [
+    "CAPTURE_REMINDER_RELATIVE","CAPTURE_REMINDER_DATETIME","CAPTURE_REMINDER_RECURRING",
+    "CAPTURE_TASK_NO_DUE","CAPTURE_TASK_WITH_DUE","CAPTURE_TASK_DEPENDENT","CAPTURE_TASK_PERSONAL","CAPTURE_TASK_BUSINESS",
+    "CAPTURE_LOG_HEALTH","CAPTURE_LOG_HABITS","CAPTURE_LOG_JOURNAL","CAPTURE_LOG_NOTE",
+    "CAPTURE_SCHEDULE_BUSINESS","CAPTURE_SCHEDULE_FAMILY","CAPTURE_SCHEDULE_REMINDER"
+  ];
+  return allowed.indexOf(v) !== -1 ? v : "";
+}
+
+function TL_AI_normalizeBossConfidence_(value) {
+  const n = Number(value);
+  if (!isFinite(n) || n < 0) return 0;
+  if (n > 1) return 1;
+  return Math.round(n * 1000) / 1000;
 }
 
 function TL_AI_findLatestVoiceRow_() {

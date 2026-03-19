@@ -1,0 +1,235 @@
+/**
+ * TL_TestBossIntentRouting
+ *
+ * Deterministic runners for Boss free-form intent recognition and routing.
+ */
+
+function TL_TestBossIntentRouting_RunAll() {
+  return {
+    recognition: TL_TestBossIntentRouting_RecognitionRun(),
+    summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
+    capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun()
+  };
+}
+
+function TL_TestBossIntentRouting_RecognitionRun() {
+  const result = TL_AI_RecognizeBossIntent_("what approvals are waiting?", {
+    intentFn: function(text) {
+      return {
+        intent: "list_approvals",
+        route: "summary",
+        summary_kind: "approvals",
+        capture_state: "",
+        confidence: 0.98,
+        needs_clarification: "false",
+        reply: "מראה לך את מה שממתין לאישור.",
+        parameters: {
+          query: "approvals",
+          capture_kind: "",
+          capture_mode: "",
+          time_hint: "",
+          target: ""
+        }
+      };
+    }
+  });
+
+  const output = {
+    ok: result.intent === "list_approvals" && result.route === "summary" && result.summary_kind === "approvals",
+    intent: result.intent,
+    route: result.route,
+    summary_kind: result.summary_kind,
+    confidence: result.confidence,
+    reply: result.reply
+  };
+  Logger.log("TL_TestBossIntentRouting_RecognitionRun: %s", JSON.stringify(output, null, 2));
+  return output;
+}
+
+function TL_TestBossIntentRouting_ListApprovalsRouteRun() {
+  const approvalRow = TL_TestBossIntentRouting_seedRow_({
+    root_id: "root_intent_approvals_" + Utilities.getUuid(),
+    record_class: "proposal",
+    approval_status: "awaiting_approval",
+    execution_status: "proposal_ready",
+    task_status: "proposal_ready",
+    ai_summary: "Pending approval summary",
+    ai_proposal: "Please approve this item."
+  });
+
+  const reply = TL_Menu_HandleBossMessage_({
+    from: TL_TestBossIntentRouting_getBossPhone_(),
+    text: "what approvals are waiting?"
+  }, null, {
+    intentFn: function(text) {
+      return {
+        intent: "list_approvals",
+        route: "summary",
+        summary_kind: "approvals",
+        capture_state: "",
+        confidence: 0.98,
+        needs_clarification: "false",
+        reply: "",
+        parameters: {
+          query: text,
+          capture_kind: "",
+          capture_mode: "",
+          time_hint: "",
+          target: ""
+        }
+      };
+    }
+  });
+
+  const output = {
+    ok: String(reply || "").indexOf("ממתין") !== -1 || String(reply || "").indexOf("אישורים") !== -1,
+    seeded_row: approvalRow.rowNumber,
+    reply: reply
+  };
+  Logger.log("TL_TestBossIntentRouting_ListApprovalsRouteRun: %s", JSON.stringify(output, null, 2));
+  return output;
+}
+
+function TL_TestBossIntentRouting_CreateTaskRouteRun() {
+  const rootId = "root_intent_capture_" + Utilities.getUuid();
+  const bossPhone = TL_TestBossIntentRouting_getBossPhone_();
+  const row = TL_TestBossIntentRouting_seedRow_({
+    root_id: rootId,
+    record_class: "communication",
+    direction: "incoming",
+    sender: bossPhone,
+    receiver: TL_TestBossIntentRouting_getDisplayPhone_(),
+    text: "Please add a task for calling Dana tomorrow."
+  });
+
+  const reply = TL_Menu_HandleBossMessage_({
+    from: bossPhone,
+    text: "Please add a task for calling Dana tomorrow."
+  }, { row: row.rowNumber }, {
+    intentFn: function(text) {
+      return {
+        intent: "create_task_with_due",
+        route: "capture",
+        summary_kind: "none",
+        capture_state: "CAPTURE_TASK_WITH_DUE",
+        confidence: 0.97,
+        needs_clarification: "false",
+        reply: "קיבלתי, אכין משימה עם תאריך יעד.",
+        parameters: {
+          query: text,
+          capture_kind: "task",
+          capture_mode: "with_due",
+          time_hint: "tomorrow",
+          target: "Dana"
+        }
+      };
+    }
+  });
+
+  const updated = TL_TestBossIntentRouting_findRowByRoot_(rootId);
+  const notes = updated ? String(updated.values[TLW_colIndex_("notes") - 1] || "") : "";
+  const output = {
+    ok: !!updated && notes.indexOf("menu_route=task_with_due") !== -1 && notes.indexOf("boss_intent=create_task_with_due") !== -1 && String(updated.values[TLW_colIndex_("task_status") - 1] || "") === "captured",
+    seeded_row: row.rowNumber,
+    updated_row: updated ? updated.rowNumber : "",
+    task_status: updated ? String(updated.values[TLW_colIndex_("task_status") - 1] || "") : "",
+    notes: notes,
+    reply: reply
+  };
+  Logger.log("TL_TestBossIntentRouting_CreateTaskRouteRun: %s", JSON.stringify(output, null, 2));
+  return output;
+}
+
+function TL_TestBossIntentRouting_seedRow_(overrides) {
+  const phoneNumberId = TL_TestBossIntentRouting_getPhoneNumberId_();
+  const displayPhone = TL_TestBossIntentRouting_getDisplayPhone_();
+  const row = {
+    timestamp: new Date(Date.now() - 60 * 60 * 1000),
+    root_id: String(overrides && overrides.root_id ? overrides.root_id : "root_intent_" + Utilities.getUuid()),
+    event_id: "EVT_" + Utilities.getUuid(),
+    parent_event_id: "",
+    record_id: "REC_" + Utilities.getUuid(),
+    record_version: 1,
+    record_class: String(overrides && overrides.record_class ? overrides.record_class : "communication"),
+    channel: "whatsapp",
+    direction: String(overrides && overrides.direction ? overrides.direction : "incoming"),
+    phone_number_id: phoneNumberId,
+    display_phone_number: displayPhone,
+    sender: String(overrides && overrides.sender ? overrides.sender : TL_TestBossIntentRouting_getBossPhone_()),
+    receiver: String(overrides && overrides.receiver ? overrides.receiver : displayPhone),
+    message_id: "msg_" + Utilities.getUuid(),
+    message_type: "text",
+    text: String(overrides && overrides.text ? overrides.text : ""),
+    ai_summary: String(overrides && overrides.ai_summary ? overrides.ai_summary : ""),
+    ai_proposal: String(overrides && overrides.ai_proposal ? overrides.ai_proposal : ""),
+    approval_required: String(overrides && overrides.approval_required ? overrides.approval_required : ""),
+    approval_status: String(overrides && overrides.approval_status ? overrides.approval_status : ""),
+    execution_status: String(overrides && overrides.execution_status ? overrides.execution_status : ""),
+    status_latest: "",
+    status_timestamp: "",
+    statuses_count: 0,
+    contact_id: "",
+    raw_payload_ref: "",
+    notes: String(overrides && overrides.notes ? overrides.notes : ""),
+    task_due: "",
+    task_status: String(overrides && overrides.task_status ? overrides.task_status : ""),
+    task_priority: "",
+    topic_id: "",
+    topic_tagged_at: "",
+    biz_stage: "",
+    biz_stage_ts: "",
+    payment_status: "",
+    delivery_due: "",
+    media_id: "",
+    media_mime_type: "",
+    media_sha256: "",
+    media_caption: "",
+    media_filename: "",
+    media_is_voice: false,
+    priority_level: "",
+    importance_level: "",
+    urgency_flag: "",
+    needs_owner_now: "",
+    suggested_action: ""
+  };
+  const appended = TLW_appendInboxRow_(row, TLW_safeStringify_({
+    source: "TL_TestBossIntentRouting",
+    root_id: row.root_id,
+    record_class: row.record_class
+  }, 2000));
+  return {
+    rowNumber: appended.row,
+    rootId: row.root_id
+  };
+}
+
+function TL_TestBossIntentRouting_findRowByRoot_(rootId) {
+  const rows = TL_Orchestrator_readRecentRows_(TL_ORCHESTRATOR.DEFAULT_SCAN_ROWS);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (TL_Orchestrator_value_(rows[i].values, "root_id") === String(rootId || "")) {
+      return rows[i];
+    }
+  }
+  return null;
+}
+
+function TL_TestBossIntentRouting_getBossPhone_() {
+  return String(TLW_getSetting_("BOSS_PHONE") || "972500000999").trim();
+}
+
+function TL_TestBossIntentRouting_getPhoneNumberId_() {
+  return String(
+    PropertiesService.getScriptProperties().getProperty("TL_META_PHONE_NUMBER_ID") ||
+    TLW_getSetting_("BUSINESS_PHONE_ID") ||
+    TLW_getSetting_("BUSINESS_PHONEID") ||
+    "896133996927016"
+  ).trim();
+}
+
+function TL_TestBossIntentRouting_getDisplayPhone_() {
+  return String(
+    TLW_getSetting_("BUSINESS_PHONE") ||
+    TLW_getSetting_("DISPLAY_PHONE_NUMBER") ||
+    "972506847373"
+  ).trim();
+}
