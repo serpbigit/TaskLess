@@ -286,6 +286,15 @@ function TL_Capture_RunUnlocked_(batchSize, options) {
       continue;
     }
 
+    if (TL_Orchestrator_isInterfaceRequestRow_(values, captureText)) {
+      TL_Orchestrator_updateRowFields_(item.rowNumber, {
+        notes: TL_Capture_appendNote_(values, "boss_capture_state=ignored_interface"),
+        execution_status: "interface_handled"
+      }, "boss_capture_ignore_interface");
+      result.skipped++;
+      continue;
+    }
+
     result.scanned++;
     let extraction = null;
     try {
@@ -388,6 +397,7 @@ function TL_Synthesis_RunUnlocked_(batchSize, options) {
   const promptFn = options && typeof options.promptFn === "function" ? options.promptFn : null;
   const useAi = !(options && options.useAi === false);
   const threads = TL_Orchestrator_indexThreads_(rows);
+  const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
   const result = {
     ok: true,
     scanned: Object.keys(threads).length,
@@ -405,6 +415,11 @@ function TL_Synthesis_RunUnlocked_(batchSize, options) {
     const rootId = roots[i];
     const thread = threads[rootId];
     if (!thread.latestIncomingRow) {
+      result.skipped++;
+      continue;
+    }
+    const latestSender = TLW_normalizePhone_(TL_Orchestrator_value_(thread.latestIncomingRow.values, "sender"));
+    if (bossPhone && latestSender === bossPhone) {
       result.skipped++;
       continue;
     }
@@ -984,16 +999,23 @@ function TL_BossPolicy_getRows_(options) {
 }
 
 function TL_BossPolicy_collectItems_(rows) {
+  const eventMap = {};
+  (rows || []).forEach(function(item) {
+    if (!item || !item.values) return;
+    const eventId = TL_Orchestrator_value_(item.values, "event_id");
+    if (eventId) eventMap[eventId] = item;
+  });
   return (rows || []).map(function(item) {
-    return TL_BossPolicy_classifyItem_(item);
+    return TL_BossPolicy_classifyItem_(item, eventMap);
   }).filter(function(item) {
     return !!item;
   });
 }
 
-function TL_BossPolicy_classifyItem_(item) {
+function TL_BossPolicy_classifyItem_(item, eventMap) {
   if (!item || !item.values) return null;
   const values = item.values;
+  if (TL_Orchestrator_isInterfaceArtifactRow_(values, eventMap)) return null;
   const recordClass = TL_Orchestrator_value_(values, "record_class").toLowerCase();
   const direction = TL_Orchestrator_value_(values, "direction").toLowerCase();
   const approvalRequired = TL_Orchestrator_value_(values, "approval_required").toLowerCase() === "true";
@@ -1047,6 +1069,52 @@ function TL_BossPolicy_classifyItem_(item) {
     isHigh: isHigh,
     isFYI: isFYI
   };
+}
+
+function TL_Orchestrator_isInterfaceArtifactRow_(values, eventMap) {
+  if (!values) return false;
+  if (TL_Orchestrator_isInterfaceRequestRow_(values)) return true;
+
+  const parentEventId = TL_Orchestrator_value_(values, "parent_event_id");
+  if (!parentEventId) return false;
+  const parent = eventMap && eventMap[parentEventId] ? eventMap[parentEventId] : null;
+  if (!parent || !parent.values) return false;
+  return TL_Orchestrator_isInterfaceRequestRow_(parent.values);
+}
+
+function TL_Orchestrator_isInterfaceRequestRow_(values, overrideText) {
+  if (!values) return false;
+  const direction = TL_Orchestrator_value_(values, "direction").toLowerCase();
+  const recordClass = TL_Orchestrator_value_(values, "record_class").toLowerCase();
+  const sender = TLW_normalizePhone_(TL_Orchestrator_value_(values, "sender"));
+  const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
+  if (direction !== "incoming" || recordClass !== "communication" || !bossPhone || sender !== bossPhone) return false;
+
+  const notes = TL_Orchestrator_value_(values, "notes").toLowerCase();
+  if (notes.indexOf("boss_intent=show_menu") !== -1 || notes.indexOf("boss_intent=help") !== -1 || notes.indexOf("boss_intent=out_of_scope") !== -1) {
+    return true;
+  }
+
+  const text = String(overrideText || TL_Capture_getInputText_(values) || "").trim();
+  if (!text) return false;
+  const normalized = text.toLowerCase();
+  if (TL_MENU && TL_MENU.TRIGGERS && TL_MENU.TRIGGERS.some(function(t) {
+    return normalized === String(t || "").trim().toLowerCase();
+  })) {
+    return true;
+  }
+
+  try {
+    if (typeof TL_AI_RecognizeBossIntent_ === "function") {
+      const intent = TL_AI_RecognizeBossIntent_(text);
+      const route = String(intent && intent.route || "").trim().toLowerCase();
+      const name = String(intent && intent.intent || "").trim().toLowerCase();
+      if (name === "out_of_scope") return true;
+      if (route === "menu" || route === "summary") return true;
+    }
+  } catch (e) {}
+
+  return false;
 }
 
 function TL_BossPolicy_selectUrgentItems_(items, cfg, consumed) {
