@@ -344,7 +344,9 @@ function TLW_tryBossMenu_(events) {
         return normalizedText === String(t || "").trim().toLowerCase();
       }) ? TL_Menu_BuildHelpMenu_() : TL_Menu_BuildMenuReply_())
     : "";
-  const finalReplyText = String(replyText || fallbackReply || "");
+  const finalReplyText = replyText === null || typeof replyText === "undefined"
+    ? String(fallbackReply || "")
+    : String(replyText);
 
   if (!finalReplyText) {
     TLW_logInfo_("menu_reply_empty", {
@@ -409,10 +411,17 @@ function TLW_tryBossMenuFromInboxRow_(enriched, appendedRow, options) {
       row: appendedRow.row
     }, options && options.menuOptions ? options.menuOptions : undefined);
 
-    const fallbackReply = TL_MENU && TL_MENU.HELP_TRIGGERS && TL_MENU.HELP_TRIGGERS.some(function(t) {
+    const isExplicitTrigger = TL_MENU && TL_MENU.TRIGGERS && TL_MENU.TRIGGERS.some(function(t) {
       return normalizedText === String(t || "").trim().toLowerCase();
-    }) ? TL_Menu_BuildHelpMenu_() : TL_Menu_BuildMenuReply_();
-    const finalReplyText = String(replyText || fallbackReply || "");
+    });
+    const fallbackReply = isExplicitTrigger
+      ? (TL_MENU && TL_MENU.HELP_TRIGGERS && TL_MENU.HELP_TRIGGERS.some(function(t) {
+          return normalizedText === String(t || "").trim().toLowerCase();
+        }) ? TL_Menu_BuildHelpMenu_() : TL_Menu_BuildMenuReply_())
+      : "";
+    const finalReplyText = replyText === null || typeof replyText === "undefined"
+      ? String(fallbackReply || "")
+      : String(replyText);
     if (!finalReplyText) {
       TLW_logInfo_("menu_voice_reply_empty", {
         row: appendedRow.row,

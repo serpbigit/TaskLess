@@ -88,6 +88,8 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
   if (TL_Menu_IsCaptureState_(state)) {
     TL_Menu_AnnotateBossCapture_(inboxRow, state);
     TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
+    const immediateCapture = TL_Menu_RunImmediateCapture_(inboxRow);
+    if (immediateCapture && immediateCapture.sent) return "";
     return [
       "קיבלתי.",
       "אבנה מזה הצעת פעולה מסודרת לאישור שלך לפני ביצוע.",
@@ -474,6 +476,24 @@ function TL_Menu_AnnotateBossCapture_(inboxRow, state, extraNote) {
   return true;
 }
 
+function TL_Menu_RunImmediateCapture_(inboxRow) {
+  try {
+    if (typeof TL_Capture_Run !== "function") return null;
+    const rowNumber = inboxRow && inboxRow.row ? Number(inboxRow.row) : 0;
+    if (!rowNumber || typeof TL_AI_getInboxRow_ !== "function") return null;
+    const loc = TL_AI_getInboxRow_(rowNumber);
+    if (!loc || !loc.values) return null;
+    return TL_Capture_Run(1, {
+      rows: [{
+        rowNumber: rowNumber,
+        values: loc.values
+      }]
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
 function TL_Menu_StateToCaptureMarker_(state) {
   const value = String(state || "");
   const mapping = {};
@@ -597,6 +617,8 @@ function TL_Menu_HandleBossIntent_(ev, inboxRow, intent) {
     TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
     if (inboxRow) {
       TL_Menu_AnnotateBossCapture_(inboxRow, captureState, "boss_intent=" + normalized.intent);
+      const immediateCapture = TL_Menu_RunImmediateCapture_(inboxRow);
+      if (immediateCapture && immediateCapture.sent) return "";
     }
     return TL_Menu_BuildCaptureAck_(normalized);
   }
