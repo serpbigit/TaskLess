@@ -20,6 +20,7 @@ function TL_Orchestrator_Run() {
       ok: true,
       version: TL_ORCHESTRATOR.VERSION,
       repair: TL_Repair_RunUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
+      capture: TL_Capture_RunUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
       ai: TL_AI_RunPendingUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
       synthesis: TL_Synthesis_RunUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
       approval: TL_Approval_RunUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
@@ -73,6 +74,12 @@ function TL_Repair_Run(batchSize) {
 function TL_AI_RunPending(batchSize) {
   return TL_Orchestrator_withLock_("ai", function() {
     return TL_AI_RunPendingUnlocked_(batchSize);
+  });
+}
+
+function TL_Capture_Run(batchSize, options) {
+  return TL_Orchestrator_withLock_("capture", function() {
+    return TL_Capture_RunUnlocked_(batchSize, options);
   });
 }
 
@@ -135,6 +142,7 @@ function TL_AI_RunPendingUnlocked_(batchSize) {
   const limit = TL_Orchestrator_normalizeBatchSize_(batchSize);
   const rows = TL_Orchestrator_readRecentRows_(TL_ORCHESTRATOR.DEFAULT_SCAN_ROWS);
   const cutoff = new Date(Date.now() - TL_ORCHESTRATOR.DEFAULT_POST_INGEST_MINUTES * 60000);
+  const bossPhone = String(TLW_getSetting_("BOSS_PHONE") || "").trim();
   const result = {
     ok: true,
     scanned: 0,
@@ -148,6 +156,7 @@ function TL_AI_RunPendingUnlocked_(batchSize) {
     const values = item.values;
     const direction = TL_Orchestrator_value_(values, "direction");
     const recordClass = TL_Orchestrator_value_(values, "record_class");
+    const sender = TL_Orchestrator_value_(values, "sender");
     const rowTs = values[0];
     if (direction !== "incoming" || recordClass !== "communication") {
       continue;
@@ -159,6 +168,10 @@ function TL_AI_RunPendingUnlocked_(batchSize) {
 
     result.scanned++;
     try {
+      if (bossPhone && sender === bossPhone) {
+        result.skipped++;
+        continue;
+      }
       const messageType = TL_Orchestrator_value_(values, "message_type").toLowerCase();
       const mediaId = TL_Orchestrator_value_(values, "media_id");
       const notes = TL_Orchestrator_value_(values, "notes");
@@ -183,6 +196,167 @@ function TL_AI_RunPendingUnlocked_(batchSize) {
   }
 
   TLW_logInfo_("ai_run_pending", result);
+  return result;
+}
+
+function TL_Capture_RunUnlocked_(batchSize, options) {
+  const limit = TL_Orchestrator_normalizeBatchSize_(batchSize);
+  const rows = TL_Capture_getRows_(options);
+  const cfg = TL_BossPolicy_getConfig_(options);
+  const promptFn = options && typeof options.promptFn === "function" ? options.promptFn : null;
+  const storePacketFn = options && typeof options.storePacketFn === "function" ? options.storePacketFn : null;
+  const sendFn = cfg.sendFn;
+  const useAi = !(options && options.useAi === false);
+  const now = TL_BossPolicy_now_(options);
+  const result = {
+    ok: true,
+    scanned: 0,
+    captured: 0,
+    skipped: 0,
+    sent: 0,
+    packets: 0,
+    items: []
+  };
+
+  if (!cfg.bossPhone) {
+    result.skipped = rows.length;
+    TLW_logInfo_("boss_capture_run", result);
+    return result;
+  }
+
+  for (let i = rows.length - 1; i >= 0 && result.scanned < limit; i--) {
+    const item = rows[i];
+    const values = item.values;
+    const direction = TL_Orchestrator_value_(values, "direction").toLowerCase();
+    const recordClass = TL_Orchestrator_value_(values, "record_class").toLowerCase();
+    const sender = TL_Orchestrator_value_(values, "sender");
+    const notes = TL_Orchestrator_value_(values, "notes").toLowerCase();
+    if (direction !== "incoming" || recordClass !== "communication") {
+      continue;
+    }
+    if (cfg.bossPhone && sender !== cfg.bossPhone) {
+      continue;
+    }
+    if (notes.indexOf("boss_capture_state=processed") !== -1) {
+      result.skipped++;
+      continue;
+    }
+
+    let captureText = TL_Capture_getInputText_(values);
+    if (!captureText) {
+      const messageType = TL_Orchestrator_value_(values, "message_type").toLowerCase();
+      const mediaId = TL_Orchestrator_value_(values, "media_id");
+      const isVoice = mediaId && (messageType === "voice" || messageType === "audio" || TL_Orchestrator_value_(values, "media_is_voice") === "true");
+      if (isVoice && typeof TL_AI_TranscribeInboxRow_ === "function") {
+        try {
+          TL_AI_TranscribeInboxRow_(item.rowNumber);
+          const refreshed = TL_AI_getInboxRow_(item.rowNumber);
+          captureText = refreshed ? TL_Capture_getInputText_(refreshed.values) : captureText;
+        } catch (err) {
+          TLW_logInfo_("boss_capture_transcribe_error", {
+            row: item.rowNumber,
+            err: String(err && err.stack ? err.stack : err)
+          });
+        }
+      }
+    }
+    if (!captureText) {
+      result.skipped++;
+      continue;
+    }
+
+    result.scanned++;
+    let extraction = null;
+    try {
+      extraction = promptFn ? promptFn(captureText, item, cfg) : (useAi && typeof TL_AI_ExtractBossCapture_ === "function" ? TL_AI_ExtractBossCapture_(captureText) : null);
+    } catch (err) {
+      TLW_logInfo_("boss_capture_extract_error", {
+        row: item.rowNumber,
+        err: String(err && err.stack ? err.stack : err)
+      });
+    }
+
+    const normalized = TL_Capture_normalizeExtraction_(extraction, captureText);
+    if (!normalized.items.length) {
+      normalized.items.push(TL_Capture_makeFallbackItem_(captureText));
+    }
+
+    const packetItems = [];
+    const childResults = [];
+    for (let index = 0; index < normalized.items.length; index++) {
+      const child = normalized.items[index];
+      const childRow = TL_Capture_buildChildRow_(values, item.rowNumber, child, index, cfg, now);
+      const childResult = TL_Capture_upsertChildRow_(childRow);
+      packetItems.push(TL_Capture_buildPacketItem_(childRow, childResult.rowNumber || childResult.row));
+      childResults.push(childResult);
+      result.items.push(childResult);
+    }
+
+    const bossWaId = cfg.bossPhone || sender;
+    const phoneNumberId = TL_Orchestrator_value_(values, "phone_number_id") || TL_BossPolicy_resolveOutboundPhoneId_(packetItems, cfg);
+    const packetText = TL_Capture_buildPacketText_(normalized.summary || captureText, packetItems, cfg, now);
+    let packetStored = false;
+    if (storePacketFn) {
+      try {
+        packetStored = !!storePacketFn(bossWaId, "capture", packetItems);
+      } catch (err) {
+        TLW_logInfo_("boss_capture_packet_store_error", {
+          row: item.rowNumber,
+          err: String(err && err.stack ? err.stack : err)
+        });
+      }
+    } else if (typeof TL_Menu_StoreDecisionPacket_ === "function") {
+      packetStored = !!TL_Menu_StoreDecisionPacket_(bossWaId, "capture", packetItems);
+    }
+
+    let sendResult = { ok: true, skipped: true, reason: "no_send_fn" };
+    if (typeof sendFn === "function") {
+      try {
+        sendResult = sendFn(phoneNumberId, bossWaId, packetText, {
+          kind: "capture",
+          items: packetItems,
+          rowNumber: item.rowNumber,
+          rootId: TL_Orchestrator_value_(values, "root_id")
+        }) || sendResult;
+      } catch (err) {
+        sendResult = {
+          ok: false,
+          status: 0,
+          body: String(err && err.stack ? err.stack : err)
+        };
+      }
+    }
+
+    if (sendResult && sendResult.ok) {
+      TL_Orchestrator_updateRowFields_(item.rowNumber, {
+        ai_summary: normalized.summary || TL_Orchestrator_value_(values, "ai_summary"),
+        notes: TL_Capture_appendNote_(values, [
+          "boss_capture_state=processed",
+          "boss_capture_items=" + String(packetItems.length),
+          "boss_capture_sent=ok"
+        ].join(";")),
+        task_status: "captured",
+        execution_status: "capture_processed"
+      }, "boss_capture");
+      result.sent++;
+    } else {
+      TL_Orchestrator_updateRowFields_(item.rowNumber, {
+        ai_summary: normalized.summary || TL_Orchestrator_value_(values, "ai_summary"),
+        notes: TL_Capture_appendNote_(values, [
+          "boss_capture_state=queued",
+          "boss_capture_items=" + String(packetItems.length),
+          "boss_capture_sent=failed"
+        ].join(";")),
+        task_status: "captured",
+        execution_status: "capture_queued"
+      }, "boss_capture");
+    }
+
+    result.captured++;
+    result.packets += packetStored ? 1 : 0;
+  }
+
+  TLW_logInfo_("boss_capture_run", result);
   return result;
 }
 
@@ -275,6 +449,39 @@ function TL_Approval_RunUnlocked_(batchSize) {
 
   TLW_logInfo_("approval_run", result);
   return result;
+}
+
+function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
+  const loc = TL_AI_getInboxRow_(rowNumber);
+  if (!loc) return false;
+
+  const values = loc.values;
+  const notes = String(TL_Orchestrator_value_(values, "notes") || "").trim();
+  const kind = TL_Orchestrator_captureKindFromNotes_(notes);
+  if (!kind) return false;
+
+  const sender = String(TLW_getSetting_("BOSS_PHONE") || "").trim() || TL_Orchestrator_value_(values, "sender");
+  const receiver = TL_Orchestrator_value_(values, "display_phone_number") || TL_Orchestrator_value_(values, "receiver");
+  const updates = {
+    approval_required: "false",
+    approval_status: "approved",
+    direction: "incoming",
+    sender: sender,
+    receiver: receiver,
+    execution_status: kind === "journal" ? "logged" : "approved",
+    notes: TL_Capture_appendNote_(values, "boss_capture_finalized=" + kind)
+  };
+
+  if (kind === "journal") {
+    updates.record_class = "communication";
+    updates.task_status = "logged";
+  } else {
+    updates.record_class = "instruction";
+    updates.task_status = "pending";
+  }
+
+  TL_Orchestrator_updateRowFields_(rowNumber, updates, "boss_capture_finalized");
+  return true;
 }
 
 function TL_Send_RunApprovedUnlocked_(batchSize, options) {
@@ -1038,4 +1245,232 @@ function TL_Orchestrator_withLock_(label, fn) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function TL_Capture_getRows_(options) {
+  if (options && Array.isArray(options.rows)) {
+    return options.rows.slice();
+  }
+  return TL_Orchestrator_readRecentRows_(TL_ORCHESTRATOR.DEFAULT_SCAN_ROWS);
+}
+
+function TL_Capture_getInputText_(values) {
+  const text = TL_Orchestrator_value_(values, "text");
+  if (text) return text;
+  const summary = TL_Orchestrator_value_(values, "ai_summary");
+  if (summary) return summary;
+  const caption = TL_Orchestrator_value_(values, "media_caption");
+  if (caption) return caption;
+  const proposal = TL_Orchestrator_value_(values, "ai_proposal");
+  if (proposal) return proposal;
+  return "";
+}
+
+function TL_Capture_normalizeExtraction_(extraction, captureText) {
+  const out = {
+    summary: "",
+    items: []
+  };
+
+  if (!extraction) {
+    return out;
+  }
+
+  const raw = extraction.raw_json || extraction.raw || extraction;
+  out.summary = String(extraction.summary || raw.summary || "").trim();
+
+  const sourceItems = Array.isArray(extraction.items) ? extraction.items : (Array.isArray(raw.items) ? raw.items : []);
+  out.items = sourceItems.map(function(item) {
+    return TL_Capture_normalizeItem_(item);
+  }).filter(function(item) {
+    return !!item;
+  });
+
+  if (!out.summary) {
+    out.summary = TL_BossPolicy_preview_(captureText, 120);
+  }
+
+  return out;
+}
+
+function TL_Capture_normalizeItem_(item) {
+  if (!item || typeof item !== "object") return null;
+  const kind = TL_AI_normalizeBossCaptureKind_(item.kind);
+  const title = String(item.title || "").trim();
+  const summary = String(item.summary || title || "").trim();
+  const proposal = String(item.proposal || summary || title || "").trim();
+  return {
+    kind: kind,
+    title: title,
+    summary: summary,
+    proposal: proposal,
+    task_due: String(item.task_due || "").trim(),
+    task_priority: String(item.task_priority || "").trim().toLowerCase(),
+    approval_required: String(item.approval_required || "true").trim().toLowerCase() === "true",
+    notes: String(item.notes || "").trim()
+  };
+}
+
+function TL_Capture_makeFallbackItem_(captureText) {
+  return {
+    kind: "journal",
+    title: TL_BossPolicy_preview_(captureText, 60),
+    summary: TL_BossPolicy_preview_(captureText, 120),
+    proposal: TL_BossPolicy_preview_(captureText, 120),
+    task_due: "",
+    task_priority: "low",
+    approval_required: true,
+    notes: ""
+  };
+}
+
+function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, cfg, now) {
+  const rootId = TL_Orchestrator_value_(sourceValues, "root_id");
+  const parentEventId = TL_Orchestrator_value_(sourceValues, "event_id");
+  const parentMessageId = TL_Orchestrator_value_(sourceValues, "message_id");
+  const phoneNumberId = TL_Orchestrator_value_(sourceValues, "phone_number_id");
+  const displayPhone = TL_Orchestrator_value_(sourceValues, "display_phone_number");
+  const bossPhone = cfg.bossPhone;
+  const sender = displayPhone || TLW_getSetting_("BUSINESS_PHONE") || TLW_getSetting_("DISPLAY_PHONE_NUMBER") || "";
+  const receiver = bossPhone;
+  const proposalText = String(item.proposal || item.summary || item.title || "").trim();
+  const summary = String(item.summary || item.title || proposalText || "").trim();
+  const kind = String(item.kind || "journal").trim().toLowerCase();
+  const messageId = "CAP_" + parentEventId + "_" + String(index + 1);
+  const recordId = "CAPR_" + parentEventId + "_" + String(index + 1);
+  const notes = [
+    "boss_capture_kind=" + kind,
+    "boss_capture_parent_event_id=" + parentEventId,
+    "boss_capture_parent_message_id=" + parentMessageId,
+    "boss_capture_source_row=" + String(sourceRowNumber || 0)
+  ];
+  if (item.notes) {
+    notes.push("boss_capture_item_notes=" + String(item.notes).replace(/\n+/g, " "));
+  }
+
+  return {
+    timestamp: now,
+    root_id: rootId,
+    event_id: "EVT_" + Utilities.getUuid(),
+    parent_event_id: parentEventId,
+    record_id: recordId,
+    record_version: 1,
+    record_class: "proposal",
+    channel: "whatsapp",
+    direction: "outgoing",
+    phone_number_id: phoneNumberId,
+    display_phone_number: displayPhone,
+    sender: sender,
+    receiver: receiver,
+    message_id: messageId,
+    message_type: "text",
+    text: proposalText,
+    ai_summary: summary,
+    ai_proposal: proposalText,
+    approval_required: "true",
+    approval_status: "draft",
+    execution_status: "proposal_ready",
+    status_latest: "",
+    status_timestamp: "",
+    statuses_count: 0,
+    contact_id: "",
+    raw_payload_ref: "",
+    notes: notes.join(";"),
+    task_due: String(item.task_due || ""),
+    task_status: "proposal_ready",
+    task_priority: String(item.task_priority || ""),
+    topic_id: TL_Orchestrator_value_(sourceValues, "topic_id"),
+    topic_tagged_at: TL_Orchestrator_value_(sourceValues, "topic_tagged_at"),
+    biz_stage: "",
+    biz_stage_ts: "",
+    payment_status: "",
+    delivery_due: "",
+    media_id: "",
+    media_mime_type: "",
+    media_sha256: "",
+    media_caption: "",
+    media_filename: "",
+    media_is_voice: false,
+    priority_level: String(item.task_priority || ""),
+    importance_level: String(item.task_priority || ""),
+    urgency_flag: item.task_priority === "high" ? "true" : "false",
+    needs_owner_now: item.task_priority === "high" ? "true" : "false",
+    suggested_action: kind === "journal" ? "review_manually" : "follow_up"
+  };
+}
+
+function TL_Capture_upsertChildRow_(childRow) {
+  const phoneNumberId = String(childRow.phone_number_id || "").trim();
+  const messageId = String(childRow.message_id || "").trim();
+  const existing = TLW_findRowByMessageId_(phoneNumberId, messageId);
+  if (existing) {
+    return {
+      ok: true,
+      rowNumber: existing.row,
+      row: existing.row,
+      existing: true
+    };
+  }
+
+  const appended = TLW_appendInboxRow_(childRow, TLW_safeStringify_({
+    source: "TL_Capture_Run",
+    root_id: childRow.root_id,
+    parent_event_id: childRow.parent_event_id,
+    capture_kind: TL_Orchestrator_captureKindFromNotes_(childRow.notes)
+  }, 4000));
+  return {
+    ok: true,
+    rowNumber: appended.row,
+    row: appended.row,
+    existing: false
+  };
+}
+
+function TL_Capture_buildPacketItem_(childRow, rowNumber) {
+  return {
+    key: String(childRow.record_id || childRow.event_id || childRow.message_id || ("row_" + rowNumber)),
+    rowNumber: Number(rowNumber || 0),
+    recordId: String(childRow.record_id || ""),
+    rootId: String(childRow.root_id || ""),
+    recordClass: String(childRow.record_class || ""),
+    summary: String(childRow.ai_summary || childRow.text || ""),
+    proposal: String(childRow.ai_proposal || childRow.text || ""),
+    sender: String(childRow.sender || ""),
+    receiver: String(childRow.receiver || ""),
+    contactId: String(childRow.contact_id || ""),
+    approvalStatus: String(childRow.approval_status || ""),
+    executionStatus: String(childRow.execution_status || ""),
+    taskStatus: String(childRow.task_status || ""),
+    isUrgent: String(childRow.urgency_flag || "").toLowerCase() === "true" || String(childRow.needs_owner_now || "").toLowerCase() === "true",
+    isHigh: String(childRow.priority_level || "").toLowerCase() === "high" || String(childRow.importance_level || "").toLowerCase() === "high"
+  };
+}
+
+function TL_Capture_buildPacketText_(summary, packetItems, cfg, now) {
+  const title = "Boss capture";
+  const lines = [
+    title,
+    "Summary: " + TL_BossPolicy_preview_(summary || "", 120)
+  ];
+  const detail = TL_BossPolicy_buildPacketText_("decision", packetItems, cfg, now);
+  lines.push(detail);
+  return lines.join("\n");
+}
+
+function TL_Capture_appendNote_(values, extraLine) {
+  const existing = TL_Orchestrator_value_(values, "notes");
+  const extra = String(extraLine || "").trim();
+  if (!extra) return existing;
+  if (!existing) return extra;
+  if (existing.indexOf(extra) !== -1) return existing;
+  return existing + "\n" + extra;
+}
+
+function TL_Orchestrator_captureKindFromNotes_(notes) {
+  const text = String(notes || "");
+  const match = text.match(/(?:^|[;\n])boss_capture_kind=([^;\n]+)/i);
+  if (!match) return "";
+  const kind = String(match[1] || "").trim().toLowerCase();
+  if (kind === "reminder" || kind === "task" || kind === "journal") return kind;
+  return kind === "log" || kind === "note" ? "journal" : "";
 }

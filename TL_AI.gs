@@ -51,6 +51,26 @@ function TL_AI_buildTriagePrompt_(inputText, language, bossName) {
   ].join("\n");
 }
 
+function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
+  return [
+    "You are TaskLess.",
+    "Split one Boss capture into multiple proposed child records.",
+    "Return strict JSON only.",
+    "Language preference: " + String(language || "Hebrew"),
+    "The Boss's name is: " + String(bossName || "Reuven"),
+    "Required JSON shape:",
+    '{"summary":"...","items":[{"kind":"reminder|task|journal","title":"...","summary":"...","proposal":"...","task_due":"...","task_priority":"low|medium|high","approval_required":"true","notes":"..."}]}',
+    "Rules:",
+    "Emit one item per distinct intent.",
+    "Keep reminder and task items concrete and actionable.",
+    "Keep journal items factual and non-actionable.",
+    "Use empty strings when a field is unknown.",
+    "Always set approval_required to true.",
+    "Capture text:",
+    String(inputText || "")
+  ].join("\n");
+}
+
 function TL_AI_buildTranscriptionPrompt_(language) {
   return [
     "You are TaskLess, a business communication assistant.",
@@ -108,6 +128,34 @@ function TL_AI_parseJsonBlock_(text) {
   };
 }
 
+function TL_AI_parseBossCaptureJson_(text) {
+  const raw = String(text || "").trim();
+  if (!raw) throw new Error("AI text payload is empty");
+
+  let jsonText = raw;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced && fenced[1]) jsonText = fenced[1].trim();
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (e) {
+    throw new Error("AI text is not valid JSON: " + e.message + " :: " + jsonText.slice(0, 300));
+  }
+
+  const items = Array.isArray(parsed.items) ? parsed.items.map(function(item) {
+    return TL_AI_normalizeBossCaptureItem_(item);
+  }).filter(function(item) {
+    return !!item;
+  }) : [];
+
+  return {
+    summary: String(parsed.summary || "").trim(),
+    items: items,
+    raw: parsed
+  };
+}
+
 function TL_AI_call_(contents, generationConfig) {
   const cfg = TL_AI_getConfig_();
   const payload = {
@@ -160,6 +208,23 @@ function TL_AI_callPrompt_(promptText) {
     raw_text: responseText,
     raw_json: parsed.raw,
     response_body: res.body
+  };
+}
+
+function TL_AI_ExtractBossCapture_(inputText) {
+  const cfg = TL_AI_getConfig_();
+  const prompt = TL_AI_buildBossCapturePrompt_(String(inputText || ""), cfg.language, cfg.bossName);
+  const result = TL_AI_callPrompt_(prompt);
+  const parsed = TL_AI_parseBossCaptureJson_(result.raw_text);
+
+  return {
+    ok: true,
+    status: result.status,
+    summary: String(parsed.summary || result.summary || "").trim(),
+    items: parsed.items,
+    raw_text: result.raw_text,
+    raw_json: parsed.raw,
+    response_body: result.response_body
   };
 }
 
@@ -510,6 +575,35 @@ function TL_AI_normalizeSuggestedAction_(value) {
   const v = String(value || "").trim().toLowerCase();
   const allowed = ["reply_now","reply_later","call","schedule","follow_up","wait","ignore","review_manually"];
   return allowed.indexOf(v) !== -1 ? v : "review_manually";
+}
+
+function TL_AI_normalizeBossCaptureKind_(value) {
+  const v = String(value || "").trim().toLowerCase();
+  if (v === "reminder") return "reminder";
+  if (v === "task") return "task";
+  if (v === "journal" || v === "log" || v === "note") return "journal";
+  return "journal";
+}
+
+function TL_AI_normalizeBossCaptureItem_(item) {
+  if (!item || typeof item !== "object") return null;
+  const kind = TL_AI_normalizeBossCaptureKind_(item.kind);
+  const title = String(item.title || "").trim();
+  const summary = String(item.summary || title || "").trim();
+  const proposal = String(item.proposal || summary || title || "").trim();
+  const taskDue = String(item.task_due || "").trim();
+  const taskPriority = TL_AI_normalizeLevel_(item.task_priority);
+  const notes = String(item.notes || "").trim();
+  return {
+    kind: kind,
+    title: title,
+    summary: summary,
+    proposal: proposal,
+    task_due: taskDue,
+    task_priority: taskPriority,
+    approval_required: "true",
+    notes: notes
+  };
 }
 
 function TL_AI_findLatestVoiceRow_() {

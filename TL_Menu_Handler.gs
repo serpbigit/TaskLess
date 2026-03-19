@@ -401,6 +401,9 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
       });
       TLW_applyVersionBump_(rowNumber, "boss_confirm");
     }
+    if (typeof TL_Orchestrator_FinalizeCaptureApproval_ === "function") {
+      TL_Orchestrator_FinalizeCaptureApproval_(rowNumber);
+    }
     if (!approvalRequired && approvalStatus === "approved") return true;
     return true;
   } catch (e) {
