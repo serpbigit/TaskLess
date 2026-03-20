@@ -1153,6 +1153,9 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const total = packet.items.length;
   const summary = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 220);
   const duePreview = String(current.duePreview || "").trim();
+  const dueLabel = String(current.dueLabel || "").trim();
+  const reminderMessage = TL_Menu_Preview_(current.reminderMessage || summary, 220);
+  const isReminder = String(current.captureKind || "").trim().toLowerCase() === "reminder";
   const meta = [];
   if (current.isUrgent) meta.push("דחוף");
   else if (current.isHigh) meta.push("חשוב");
@@ -1161,8 +1164,8 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     "סקירה אחד-אחד " + index + "/" + total,
     label ? label : "",
     "הבנתי כך:",
-    summary,
-    duePreview ? ("יעד: " + duePreview) : "",
+    isReminder ? ("הודעה: " + reminderMessage) : summary,
+    isReminder && dueLabel ? ("זמן הפעלת תזכורת: " + dueLabel) : (duePreview ? ("יעד: " + duePreview) : ""),
     "",
     "1. אשר",
     "2. ערוך",

@@ -170,6 +170,7 @@ function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
     "Rules:",
     "Emit one item per distinct intent.",
     "Keep reminder and task items concrete and actionable.",
+    "For reminder items, keep the reminder message/body in title and summary, and put timing details in task_due instead of repeating them inside the reminder text.",
     "Keep journal items factual and non-actionable.",
     "Use empty strings when a field is unknown.",
     "Always set approval_required to true.",

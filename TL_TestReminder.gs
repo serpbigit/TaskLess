@@ -7,7 +7,8 @@
 function TL_TestReminder_RunAll() {
   return {
     parser: TL_TestReminder_ParseDueRun(),
-    fire_and_archive: TL_TestReminder_FireAndArchiveRun()
+    fire_and_archive: TL_TestReminder_FireAndArchiveRun(),
+    packet_preview: TL_TestReminder_PacketPreviewRun()
   };
 }
 
@@ -106,13 +107,57 @@ function TL_TestReminder_FireAndArchiveRun() {
   const archiveValues = archiveRows > beforeArchive ? archive.getRange(archiveRows, 1, 1, TL_WEBHOOK.INBOX_HEADERS.length).getValues()[0] : null;
   const inboxLoc = TLW_findRowByMessageId_(phoneNumberId, rowObj.message_id);
   const output = {
-    ok: !!result && result.fired === 1 && result.archived === 1 && sent.length === 1 && !inboxLoc && !!archiveValues,
+    ok: !!result &&
+      result.fired === 1 &&
+      result.archived === 1 &&
+      sent.length === 1 &&
+      sent[0] &&
+      sent[0].text.indexOf("הודעה:") !== -1 &&
+      sent[0].text.indexOf("זמן הפעלת תזכורת:") !== -1 &&
+      !inboxLoc &&
+      !!archiveValues,
     source_row: appended.row,
     fired: result ? result.fired : 0,
     archived: result ? result.archived : 0,
     sent_count: sent.length,
+    sent_text: sent[0] ? sent[0].text : "",
     archive_last_record_id: archiveValues ? String(archiveValues[TLW_colIndex_("record_id") - 1] || "") : ""
   };
   Logger.log("TL_TestReminder_FireAndArchiveRun: %s", JSON.stringify(output, null, 2));
+  return output;
+}
+
+function TL_TestReminder_PacketPreviewRun() {
+  const item = TL_Capture_buildPacketItem_({
+    record_id: "REC_packet_preview",
+    root_id: "root_packet_preview",
+    record_class: "proposal",
+    ai_summary: "ללכת לישון בעוד שלוש דקות.",
+    ai_proposal: "ללכת לישון בעוד שלוש דקות.",
+    sender: "",
+    receiver: "",
+    contact_id: "",
+    approval_status: "draft",
+    execution_status: "proposal_ready",
+    task_status: "proposal_ready",
+    task_due: "בעוד 3 דקות",
+    timestamp: new Date("2026-03-20T22:15:00+02:00"),
+    urgency_flag: "true",
+    needs_owner_now: "true",
+    priority_level: "high",
+    importance_level: "high",
+    notes: "boss_capture_kind=reminder\nboss_capture_title=ללכת לישון"
+  }, 999);
+  const reply = TL_Menu_BuildDecisionPacketOneByOneReply_({
+    kind: "capture",
+    stage: "one_by_one",
+    cursor: 0,
+    items: [item]
+  });
+  const output = {
+    ok: reply.indexOf("הודעה: ללכת לישון") !== -1 && reply.indexOf("זמן הפעלת תזכורת: 22:18") !== -1,
+    reply: reply
+  };
+  Logger.log("TL_TestReminder_PacketPreviewRun: %s", JSON.stringify(output, null, 2));
   return output;
 }

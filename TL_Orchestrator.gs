@@ -705,6 +705,7 @@ function TL_Reminder_RunDueUnlocked_(batchSize, options) {
       continue;
     }
 
+    const dueText = TL_Orchestrator_value_(values, "task_due");
     const reminderText = TL_Reminder_buildFireText_(values, dueText);
     const sendResult = sendFn(phoneNumberId, bossPhone, reminderText, item);
     if (sendResult && sendResult.ok) {
@@ -950,19 +951,34 @@ function TL_Orchestrator_archiveInboxRow_(rowNumber) {
 }
 
 function TL_Reminder_buildFireText_(values, dueText) {
-  const summary = TL_Reminder_cleanSummary_(
-    TL_Orchestrator_value_(values, "ai_summary") || TL_Orchestrator_value_(values, "text")
+  const captureTitle = TL_Orchestrator_captureTitleFromNotes_(TL_Orchestrator_value_(values, "notes"));
+  const summary = TL_Reminder_buildMessageText_(
+    TL_Orchestrator_value_(values, "ai_summary") || TL_Orchestrator_value_(values, "text"),
+    dueText,
+    captureTitle
   );
   const originalDueText = TL_Reminder_originalDueTextFromNotes_(TL_Orchestrator_value_(values, "notes"));
+  const dueAt = TL_Reminder_resolveDueAtFromValues_(values, new Date());
+  const dueLabel = dueAt ? TL_Reminder_formatDueLabel_(dueAt, values[0] instanceof Date ? values[0] : dueAt) : "";
   const lines = [
     "⏰ תזכורת",
-    "זה הזמן:",
+    "הודעה:",
     TL_Menu_Preview_(summary || "יש לך תזכורת.", 180)
   ];
-  if (String(originalDueText || dueText || "").trim()) {
+  if (dueLabel) {
+    lines.push("זמן הפעלת תזכורת: " + dueLabel);
+  } else if (String(originalDueText || dueText || "").trim()) {
     lines.push("הוגדר: " + String(originalDueText || dueText || "").trim());
   }
   return lines.join("\n");
+}
+
+function TL_Reminder_buildMessageText_(text, dueText, preferredText) {
+  const preferred = TL_Reminder_cleanSummary_(preferredText);
+  if (preferred) return preferred;
+  const raw = TL_Reminder_cleanSummary_(text);
+  if (!raw) return "";
+  return TL_Reminder_stripDuePhrase_(raw, dueText);
 }
 
 function TL_Reminder_cleanSummary_(text) {
@@ -973,6 +989,25 @@ function TL_Reminder_cleanSummary_(text) {
     .replace(/^תזכיר(?:י|)\s+לי\s*/i, "")
     .replace(/^בעוד\s+\S+\s+(?:דקה|דקות|שעה|שעות)\s*/i, "")
     .trim();
+}
+
+function TL_Reminder_stripDuePhrase_(text, dueText) {
+  let out = String(text || "").trim();
+  const dueRaw = String(dueText || "").trim();
+  if (!out) return "";
+  if (dueRaw) {
+    const escapedDue = dueRaw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp("\\s*" + escapedDue + "\\s*", "ig"), " ");
+  }
+  out = out
+    .replace(/\s+בעוד\s+[^,.;!\n]+(?:דקה|דקות|שעה|שעות|דקות\.|דקה\.|שעה\.|שעות\.)/i, " ")
+    .replace(/\s+מחר(?:\s+ב[- ]?\d{1,2}[:.]\d{2})?/i, " ")
+    .replace(/\s+היום(?:\s+ב[- ]?\d{1,2}[:.]\d{2})?/i, " ")
+    .replace(/\s+ב[- ]?\d{1,2}[:.]\d{2}/i, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;!?])/g, "$1")
+    .trim();
+  return out.replace(/[.,;:!?]+$/g, "").trim();
 }
 
 function TL_Reminder_originalDueTextFromNotes_(notes) {
@@ -1038,6 +1073,17 @@ function TL_Reminder_resolveDueAtFromValues_(values, fallbackNow) {
   const rowTimestamp = values[0] instanceof Date ? values[0] : null;
   const base = rowTimestamp || (fallbackNow instanceof Date ? fallbackNow : new Date());
   return TL_Reminder_parseDueAt_(dueText, base);
+}
+
+function TL_Reminder_formatDueLabel_(dueAt, baseAt) {
+  if (!(dueAt instanceof Date) || isNaN(dueAt.getTime())) return "";
+  const tz = String(TLW_getSetting_("DEFAULT_TZ") || Session.getScriptTimeZone() || "Asia/Jerusalem").trim();
+  const base = baseAt instanceof Date && !isNaN(baseAt.getTime()) ? baseAt : dueAt;
+  const dueDay = Utilities.formatDate(dueAt, tz, "dd/MM");
+  const baseDay = Utilities.formatDate(base, tz, "dd/MM");
+  return dueDay === baseDay
+    ? Utilities.formatDate(dueAt, tz, "HH:mm")
+    : Utilities.formatDate(dueAt, tz, "dd/MM HH:mm");
 }
 
 function TL_Reminder_EnsureNextTrigger_() {
@@ -1815,6 +1861,7 @@ function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, c
   const bossPhone = cfg.bossPhone;
   const sender = displayPhone || TLW_getSetting_("BUSINESS_PHONE") || TLW_getSetting_("DISPLAY_PHONE_NUMBER") || "";
   const receiver = bossPhone;
+  const title = String(item.title || "").trim();
   const proposalText = String(item.proposal || item.summary || item.title || "").trim();
   const summary = String(item.summary || item.title || proposalText || "").trim();
   const kind = String(item.kind || "journal").trim().toLowerCase();
@@ -1828,6 +1875,9 @@ function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, c
   ];
   if (item.notes) {
     notes.push("boss_capture_item_notes=" + String(item.notes).replace(/\n+/g, " "));
+  }
+  if (title) {
+    notes.push("boss_capture_title=" + String(title).replace(/\n+/g, " "));
   }
 
   return {
@@ -1909,34 +1959,53 @@ function TL_Capture_upsertChildRow_(childRow) {
 }
 
 function TL_Capture_buildPacketItem_(childRow, rowNumber) {
+  const notes = String(childRow.notes || "");
+  const captureKind = TL_Orchestrator_captureKindFromNotes_(notes);
+  const dueInfo = TL_Capture_buildDueInfo_(childRow.task_due, childRow.timestamp);
+  const reminderMessage = captureKind === "reminder"
+    ? TL_Reminder_buildMessageText_(
+        childRow.ai_summary || childRow.text || "",
+        childRow.task_due,
+        TL_Orchestrator_captureTitleFromNotes_(notes)
+      )
+    : "";
   return {
     key: String(childRow.record_id || childRow.event_id || childRow.message_id || ("row_" + rowNumber)),
     rowNumber: Number(rowNumber || 0),
     recordId: String(childRow.record_id || ""),
     rootId: String(childRow.root_id || ""),
     recordClass: String(childRow.record_class || ""),
+    captureKind: captureKind,
     summary: String(childRow.ai_summary || childRow.text || ""),
     proposal: String(childRow.ai_proposal || childRow.text || ""),
+    reminderMessage: reminderMessage,
     sender: String(childRow.sender || ""),
     receiver: String(childRow.receiver || ""),
     contactId: String(childRow.contact_id || ""),
     approvalStatus: String(childRow.approval_status || ""),
     executionStatus: String(childRow.execution_status || ""),
     taskStatus: String(childRow.task_status || ""),
-    duePreview: TL_Capture_buildDuePreview_(childRow.task_due, childRow.timestamp),
+    duePreview: dueInfo.preview,
+    dueLabel: dueInfo.label,
     isUrgent: String(childRow.urgency_flag || "").toLowerCase() === "true" || String(childRow.needs_owner_now || "").toLowerCase() === "true",
     isHigh: String(childRow.priority_level || "").toLowerCase() === "high" || String(childRow.importance_level || "").toLowerCase() === "high"
   };
 }
 
-function TL_Capture_buildDuePreview_(dueText, baseAt) {
+function TL_Capture_buildDueInfo_(dueText, baseAt) {
   const raw = String(dueText || "").trim();
-  if (!raw) return "";
+  if (!raw) return { preview: "", label: "" };
   const dueAt = TL_Reminder_parseDueAt_(raw, baseAt instanceof Date ? baseAt : new Date());
-  if (!dueAt) return raw;
-  const tz = String(TLW_getSetting_("DEFAULT_TZ") || Session.getScriptTimeZone() || "Asia/Jerusalem").trim();
-  const formatted = Utilities.formatDate(dueAt, tz, "dd/MM HH:mm");
-  return formatted + " (" + raw + ")";
+  if (!dueAt) return { preview: raw, label: raw };
+  const formatted = TL_Reminder_formatDueLabel_(dueAt, baseAt instanceof Date ? baseAt : dueAt);
+  return {
+    preview: formatted + " (" + raw + ")",
+    label: formatted
+  };
+}
+
+function TL_Capture_buildDuePreview_(dueText, baseAt) {
+  return TL_Capture_buildDueInfo_(dueText, baseAt).preview;
 }
 
 function TL_Capture_buildPacketText_(summary, packetItems, cfg, now) {
@@ -1974,4 +2043,10 @@ function TL_Orchestrator_captureKindFromNotes_(notes) {
   const kind = String(match[1] || "").trim().toLowerCase();
   if (kind === "reminder" || kind === "task" || kind === "journal") return kind;
   return kind === "log" || kind === "note" ? "journal" : "";
+}
+
+function TL_Orchestrator_captureTitleFromNotes_(notes) {
+  const text = String(notes || "");
+  const match = text.match(/(?:^|[;\n])boss_capture_title=([^;\n]+)/i);
+  return match ? String(match[1] || "").trim() : "";
 }
