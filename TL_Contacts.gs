@@ -275,6 +275,47 @@ function TL_Contacts_ProfileStats() {
   return result;
 }
 
+function TL_Contacts_DebugPeopleApi() {
+  TL_Contacts_assertPeopleApiReady_();
+
+  const groupResponse = People.ContactGroups.list({
+    pageSize: 20
+  }) || {};
+
+  const peopleResponse = People.People.Connections.list("people/me", {
+    pageSize: 10,
+    personFields: "names,phoneNumbers,emailAddresses,memberships"
+  }) || {};
+
+  const sampleConnections = (peopleResponse.connections || []).slice(0, 5).map(function(person) {
+    const name = TL_Contacts_pickDisplayName_(person.names);
+    const phones = TL_Contacts_pickValues_(person.phoneNumbers, "value");
+    const emails = TL_Contacts_pickValues_(person.emailAddresses, "value");
+    return {
+      resourceName: String(person.resourceName || ""),
+      name: name,
+      phones: phones,
+      emails: emails
+    };
+  });
+
+  const result = {
+    ok: true,
+    account_email_hint: Session.getActiveUser().getEmail(),
+    contact_groups_count: (groupResponse.contactGroups || []).length,
+    contact_group_names: (groupResponse.contactGroups || []).slice(0, 10).map(function(group) {
+      return String(group && group.name ? group.name : "");
+    }),
+    connections_count_first_page: (peopleResponse.connections || []).length,
+    next_page_token_present: !!peopleResponse.nextPageToken,
+    people_response_keys: Object.keys(peopleResponse || {}),
+    sample_connections: sampleConnections
+  };
+
+  TL_Contacts_logRunnerResult_("TL_Contacts_DebugPeopleApi", result);
+  return result;
+}
+
 function TL_Contacts_pickDisplayName_(names) {
   if (!names || !names.length) return "No Name";
   for (let i = 0; i < names.length; i++) {
