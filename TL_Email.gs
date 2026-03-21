@@ -208,7 +208,10 @@ function TL_Email_TriageSnapshot_(snapshot, opts) {
   }
 
   const cfg = TL_AI_getConfig_();
-  const prompt = TL_Email_buildTriagePrompt_(payload.flattenedText || snapshot.title || "", cfg.language, cfg.bossName, history, payload);
+  const draftContext = typeof TL_DraftContext_BuildForEmailSnapshot_ === "function"
+    ? TL_DraftContext_BuildForEmailSnapshot_(snapshot)
+    : null;
+  const prompt = TL_Email_buildTriagePrompt_(payload.flattenedText || snapshot.title || "", cfg.language, cfg.bossName, history, payload, draftContext && draftContext.promptBrief);
   const result = TL_AI_callPrompt_(prompt);
 
   return {
@@ -221,7 +224,8 @@ function TL_Email_TriageSnapshot_(snapshot, opts) {
     summary: String(result.raw_json.summary || result.summary || "").trim(),
     proposal: String(result.raw_json.proposal || result.proposal || "").trim(),
     historyDepth: history.depth,
-    historyUsed: history.items
+    historyUsed: history.items,
+    draftContext: draftContext
   };
 }
 
@@ -473,7 +477,7 @@ function TL_Email_heuristicTriage_(inputText, payload, history) {
   };
 }
 
-function TL_Email_buildTriagePrompt_(inputText, language, bossName, history, payload) {
+function TL_Email_buildTriagePrompt_(inputText, language, bossName, history, payload, draftContextBrief) {
   const historyText = (history && history.items && history.items.length)
     ? history.items.map(function(item, idx) {
         return "[" + (idx + 1) + "] " + item.subject + "\n" + item.flattenedText;
@@ -488,6 +492,7 @@ function TL_Email_buildTriagePrompt_(inputText, language, bossName, history, pay
     '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","significance_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","summary":"...","proposal":"..."}',
     "Example JSON response:",
     '{"priority_level":"high","importance_level":"high","urgency_flag":"false","significance_flag":"true","needs_owner_now":"false","suggested_action":"review_manually","summary":"לקוח חשוב מבקש אישור להצעת מחיר ומצפה לתשובה מסודרת.","proposal":"הכן תשובה עניינית שמאשרת שקיבלת את המייל ומבטיחה חזרה מסודרת עם תשובה להצעת המחיר."}',
+    draftContextBrief ? draftContextBrief : "Draft context brief: none",
     historyText ? "Recent sender history:\n" + historyText : "Recent sender history: none",
     "Email thread:",
     String(inputText || ""),

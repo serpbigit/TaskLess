@@ -123,7 +123,7 @@ function TL_AI_BuildMonthToDateSpendReport_() {
   ].join("\n");
 }
 
-function TL_AI_buildPrompt_(inputText, language, bossName) {
+function TL_AI_buildPrompt_(inputText, language, bossName, draftContextBrief) {
   return [
     "You are TaskLess, a business communication assistant.",
     "Return strict JSON only.",
@@ -134,12 +134,13 @@ function TL_AI_buildPrompt_(inputText, language, bossName) {
     "Example JSON response:",
     '{"summary":"לקוח מבקש לקבוע פגישה מחר בבוקר.","proposal":"שלום, אפשר לקבוע מחר בבוקר. אשמח אם תאשר שעה שנוחה לך."}',
     "The proposal should be a concise draft reply written on the Boss's behalf.",
+    draftContextBrief ? draftContextBrief : "Draft context brief: none",
     "User message:",
     String(inputText || "")
   ].join("\n");
 }
 
-function TL_AI_buildTriagePrompt_(inputText, language, bossName) {
+function TL_AI_buildTriagePrompt_(inputText, language, bossName, draftContextBrief) {
   return [
     "You are Amanda, the TaskLess AI assistant for business communication triage.",
     "Analyze the incoming message and return strict JSON only.",
@@ -151,6 +152,7 @@ function TL_AI_buildTriagePrompt_(inputText, language, bossName) {
     '{"priority_level":"high","importance_level":"high","urgency_flag":"true","needs_owner_now":"true","suggested_action":"reply_now","summary":"לקוח מבקש תשובה דחופה לגבי פגישה להיום.","proposal":"השב במהירות, אשר שקיבלת, והצע זמן סופי לפגישה."}',
     "Interpret urgency narrowly: only true when timing matters now or soon.",
     "Interpret importance as business relevance, money, reputation, commitment, or customer risk.",
+    draftContextBrief ? draftContextBrief : "Draft context brief: none",
     "Message:",
     String(inputText || "")
   ].join("\n");
@@ -511,7 +513,10 @@ function TL_AI_TestLatestIncoming() {
   const inputText = text || mediaCaption || ("Incoming " + messageType + " message");
 
   const cfg = TL_AI_getConfig_();
-  const prompt = TL_AI_buildPrompt_(inputText, cfg.language, cfg.bossName);
+  const draftContext = typeof TL_DraftContext_BuildForInboxRowValues_ === "function"
+    ? TL_DraftContext_BuildForInboxRowValues_(rowData)
+    : null;
+  const prompt = TL_AI_buildPrompt_(inputText, cfg.language, cfg.bossName, draftContext && draftContext.promptBrief);
   const result = TL_AI_callPrompt_(prompt);
 
   loc.sh.getRange(loc.row, TLW_colIndex_("ai_summary")).setValue(result.summary);
@@ -551,7 +556,10 @@ function TL_AI_TriageInboxRow_(rowNumber) {
   if (!inputText) throw new Error("Row has no usable input text for triage: " + rowNumber);
 
   const cfg = TL_AI_getConfig_();
-  const prompt = TL_AI_buildTriagePrompt_(inputText, cfg.language, cfg.bossName);
+  const draftContext = typeof TL_DraftContext_BuildForInboxRowValues_ === "function"
+    ? TL_DraftContext_BuildForInboxRowValues_(rowData)
+    : null;
+  const prompt = TL_AI_buildTriagePrompt_(inputText, cfg.language, cfg.bossName, draftContext && draftContext.promptBrief);
   const result = TL_AI_callPrompt_(prompt);
 
   const triage = {
@@ -585,6 +593,7 @@ function TL_AI_TriageInboxRow_(rowNumber) {
   Logger.log("TL_AI_TriageInboxRow_: %s", JSON.stringify({
     row: loc.row,
     input_text: inputText,
+    draft_context: draftContext,
     triage: triage
   }, null, 2));
 
