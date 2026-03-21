@@ -16,6 +16,30 @@ function TL_Email_TestPullImportantPreview() {
   };
 }
 
+function TL_Email_TestPullFromBizLatest() {
+  const query = 'is:important from:reuven.cohen@aismart.solutions newer_than:14d';
+  const result = TL_Email_PullImportant_Run({
+    query: query,
+    maxThreads: 5
+  });
+  if (typeof TL_Email_logExecution_ === "function") {
+    TL_Email_logExecution_("TL_Email_TestPullFromBizLatest", result);
+  }
+  return result;
+}
+
+function TL_Email_TestPullTasklessDirect() {
+  const query = 'is:important from:reuven.cohen@aismart.solutions subject:"taskless direct test" newer_than:14d';
+  const result = TL_Email_PullImportant_Run({
+    query: query,
+    maxThreads: 5
+  });
+  if (typeof TL_Email_logExecution_ === "function") {
+    TL_Email_logExecution_("TL_Email_TestPullTasklessDirect", result);
+  }
+  return result;
+}
+
 function TL_Email_TestPullCheckpointQueryPreview() {
   const checkpoint = {
     lastPullAtIso: "2026-03-19T08:30:00.000Z",
