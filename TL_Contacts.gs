@@ -150,7 +150,8 @@ function TL_Contacts_fetchPeople_() {
     const response = People.People.Connections.list("people/me", {
       pageSize: TL_CONTACTS.DEFAULT_PAGE_SIZE,
       pageToken: pageToken || undefined,
-      personFields: "names,phoneNumbers,emailAddresses,organizations,urls,memberships"
+      personFields: "names,phoneNumbers,emailAddresses,organizations,urls,memberships",
+      sources: ["READ_SOURCE_TYPE_CONTACT"]
     });
     const batch = response && response.connections ? response.connections : [];
     for (let i = 0; i < batch.length; i++) out.push(batch[i]);
@@ -186,7 +187,7 @@ function TL_Contacts_fetchGroupNames_() {
 function TL_Contacts_mapGooglePerson_(person, groupNames, nowIso) {
   if (!person || !person.resourceName) return null;
   const personId = String(person.resourceName).split("/").pop();
-  const phones = TL_Contacts_pickValues_(person.phoneNumbers, "value");
+  const phones = TL_Contacts_extractPhones_(person.phoneNumbers);
   const emails = TL_Contacts_pickValues_(person.emailAddresses, "value").map(function(value) {
     return TL_Contacts_normalizeEmail_(value);
   }).filter(Boolean);
@@ -282,9 +283,29 @@ function TL_Contacts_DebugPeopleApi() {
     pageSize: 20
   }) || {};
 
+  let myContactsResponse = {};
+  let otherContactsResponse = {};
+  try {
+    myContactsResponse = People.ContactGroups.get("contactGroups/myContacts", {
+      maxMembers: 10
+    }) || {};
+  } catch (err) {
+    myContactsResponse = { _error: String(err && err.message ? err.message : err) };
+  }
+
+  try {
+    otherContactsResponse = People.OtherContacts.list({
+      pageSize: 10,
+      readMask: "names,emailAddresses,phoneNumbers"
+    }) || {};
+  } catch (err) {
+    otherContactsResponse = { _error: String(err && err.message ? err.message : err) };
+  }
+
   const peopleResponse = People.People.Connections.list("people/me", {
     pageSize: 10,
-    personFields: "names,phoneNumbers,emailAddresses,memberships"
+    personFields: "names,phoneNumbers,emailAddresses,memberships",
+    sources: ["READ_SOURCE_TYPE_CONTACT"]
   }) || {};
 
   const sampleConnections = (peopleResponse.connections || []).slice(0, 5).map(function(person) {
@@ -306,6 +327,11 @@ function TL_Contacts_DebugPeopleApi() {
     contact_group_names: (groupResponse.contactGroups || []).slice(0, 10).map(function(group) {
       return String(group && group.name ? group.name : "");
     }),
+    my_contacts_member_count: myContactsResponse.memberCount,
+    my_contacts_members_sample_count: (myContactsResponse.memberResourceNames || []).length,
+    my_contacts_error: myContactsResponse._error || "",
+    other_contacts_first_page_count: (otherContactsResponse.otherContacts || []).length,
+    other_contacts_error: otherContactsResponse._error || "",
     connections_count_first_page: (peopleResponse.connections || []).length,
     next_page_token_present: !!peopleResponse.nextPageToken,
     people_response_keys: Object.keys(peopleResponse || {}),
@@ -331,6 +357,66 @@ function TL_Contacts_pickValues_(items, fieldName) {
     if (value && out.indexOf(value) === -1) out.push(value);
   });
   return out;
+}
+
+function TL_Contacts_extractPhones_(phoneNumbers) {
+  const out = [];
+  (phoneNumbers || []).forEach(function(item) {
+    const rawValue = String(item && item.value ? item.value : "").trim();
+    TL_Contacts_splitPhoneCandidates_(rawValue).forEach(function(candidate) {
+      if (!candidate || out.indexOf(candidate) !== -1) return;
+      out.push(candidate);
+    });
+  });
+  return out;
+}
+
+function TL_Contacts_splitPhoneCandidates_(rawValue) {
+  const raw = String(rawValue || "").trim();
+  if (!raw) return [];
+
+  const cleaned = raw
+    .replace(/\b(?:ext|extension|x)\b[\s\.:#-]*\d+/gi, " ")
+    .replace(/\bcar\b[\s\.:#-]*/gi, " ")
+    .replace(/[\r\n;,\/]+/g, " | ")
+    .replace(/\s{2,}/g, " | ");
+
+  const parts = cleaned.split("|").map(function(part) {
+    return String(part || "").trim();
+  }).filter(Boolean);
+
+  const out = [];
+  parts.forEach(function(part) {
+    const normalized = TL_Contacts_normalizePhoneCandidate_(part);
+    if (!normalized || out.indexOf(normalized) !== -1) return;
+    out.push(normalized);
+  });
+  return out;
+}
+
+function TL_Contacts_normalizePhoneCandidate_(value) {
+  let digits = String(value || "").replace(/[^\d]/g, "");
+  if (!digits) return "";
+
+  if (digits.indexOf("00") === 0 && digits.length > 4) {
+    digits = digits.slice(2);
+  }
+
+  // Israel local numbers often appear without country code in Contacts.
+  if (digits.indexOf("972") === 0) {
+    return digits;
+  }
+  if (digits.length === 10 && digits.charAt(0) === "0") {
+    return "972" + digits.slice(1);
+  }
+  if (digits.length === 9 && /^[23589]/.test(digits)) {
+    return "972" + digits;
+  }
+  if (digits.length === 8 && /^[23489]/.test(digits)) {
+    return "972" + digits;
+  }
+
+  return digits;
 }
 
 function TL_Contacts_extractLabels_(memberships, groupNames) {
@@ -453,15 +539,15 @@ function TL_Contacts_buildNewRow_(mapped, nowIso) {
 }
 
 function TL_Contacts_chooseSyncValue_(existingValue, mappedValue) {
-  const existing = String(existingValue || "").trim();
-  const mapped = String(mappedValue || "").trim();
+  const existing = TL_Contacts_sanitizeStoredText_(existingValue);
+  const mapped = TL_Contacts_sanitizeStoredText_(mappedValue);
   if (!mapped) return existing;
   return mapped;
 }
 
 function TL_Contacts_choosePhoneSlot_(existingValue, mappedValue, siblingValue) {
-  const existing = String(existingValue || "").trim();
-  const mapped = String(mappedValue || "").trim();
+  const existing = TL_Contacts_sanitizeStoredText_(existingValue);
+  const mapped = TL_Contacts_sanitizeStoredText_(mappedValue);
   const sibling = TL_Contacts_normalizePhoneField_(siblingValue || "");
   if (!mapped) return existing;
   if (!existing) {
@@ -469,17 +555,24 @@ function TL_Contacts_choosePhoneSlot_(existingValue, mappedValue, siblingValue) 
   }
   const existingNorm = TL_Contacts_normalizePhoneField_(existing);
   const mappedNorm = TL_Contacts_normalizePhoneField_(mapped);
+  if (!existingNorm && mappedNorm) return sibling && sibling === mappedNorm ? "" : mapped;
   if (existingNorm === mappedNorm) return existing;
   if (sibling && sibling === mappedNorm) return existing;
   return existing;
 }
 
 function TL_Contacts_normalizePhoneField_(value) {
-  return TLW_normalizePhone_(value || "");
+  return TL_Contacts_normalizePhoneCandidate_(value || "");
 }
 
 function TL_Contacts_normalizeEmail_(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function TL_Contacts_sanitizeStoredText_(value) {
+  const text = String(value == null ? "" : value).trim();
+  if (/^#(?:ERROR|REF|VALUE|NAME|N\/A|DIV\/0)!?$/i.test(text)) return "";
+  return text;
 }
 
 function TL_Contacts_mergeCsvValues_(existingValue, mappedValue) {
@@ -519,14 +612,19 @@ function TL_Contacts_writeRowObject_(sheet, headers, rowNumber, rowObj) {
   const values = headers.map(function(header) {
     return rowObj[header] !== undefined ? rowObj[header] : "";
   });
-  sheet.getRange(rowNumber, 1, 1, headers.length).setValues([values]);
+  const range = sheet.getRange(rowNumber, 1, 1, headers.length);
+  range.setNumberFormat("@");
+  range.setValues([values]);
 }
 
 function TL_Contacts_appendRowObject_(sheet, headers, rowObj) {
   const values = headers.map(function(header) {
     return rowObj[header] !== undefined ? rowObj[header] : "";
   });
-  sheet.appendRow(values);
+  const rowNumber = sheet.getLastRow() + 1;
+  const range = sheet.getRange(rowNumber, 1, 1, headers.length);
+  range.setNumberFormat("@");
+  range.setValues([values]);
 }
 
 function TL_Contacts_reindexRow_(existing, rowObj, rowNumber) {

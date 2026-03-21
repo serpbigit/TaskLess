@@ -8,7 +8,9 @@ function TL_TestContacts_RunAll() {
   return {
     match_by_phone: TL_TestContacts_MatchByPhoneRun(),
     preserve_manual_fields: TL_TestContacts_PreserveManualFieldsRun(),
-    sync_mode_filter: TL_TestContacts_SyncModeFilterRun()
+    sync_mode_filter: TL_TestContacts_SyncModeFilterRun(),
+    phone_candidate_split: TL_TestContacts_PhoneCandidateSplitRun(),
+    replace_error_phone: TL_TestContacts_ReplaceErrorPhoneRun()
   };
 }
 
@@ -137,5 +139,65 @@ function TL_TestContacts_SyncModeFilterRun() {
     both_only_both: TL_Contacts_isImportable_(both, "both_only"),
     both_only_phone: TL_Contacts_isImportable_(phoneOnly, "both_only"),
     both_only_email: TL_Contacts_isImportable_(emailOnly, "both_only")
+  };
+}
+
+function TL_TestContacts_PhoneCandidateSplitRun() {
+  const values = TL_Contacts_extractPhones_([
+    { value: "718-5499000 ext 117 718-5498800" },
+    { value: "917-796-0803 car #  917 2828237" }
+  ]);
+
+  return {
+    ok: values.length === 4 &&
+      values[0] === "7185499000" &&
+      values[1] === "7185498800" &&
+      values[2] === "9177960803" &&
+      values[3] === "9172828237",
+    values: values
+  };
+}
+
+function TL_TestContacts_ReplaceErrorPhoneRun() {
+  const merged = TL_Contacts_mergeRow_({
+    contact_id: "GC_c123",
+    name: "Maria",
+    alias: "",
+    org: "",
+    website: "",
+    phone1: "#ERROR!",
+    phone2: "",
+    email: "maria@example.com",
+    role: "",
+    tags: "",
+    last_note: "",
+    last_enriched_at: "",
+    source_system: "google_contacts",
+    source_id: "people/c123",
+    phone1_normalized: "",
+    phone2_normalized: "",
+    email_normalized: "maria@example.com",
+    labels: "",
+    sync_status: "synced",
+    last_synced_at: "",
+    notes_internal: ""
+  }, {
+    contact_id: "GC_c123",
+    name: "Maria",
+    phone1: "972546629996",
+    phone2: "",
+    email: "maria@example.com",
+    source_system: "google_contacts",
+    source_id: "people/c123",
+    phone1_normalized: "972546629996",
+    phone2_normalized: "",
+    email_normalized: "maria@example.com",
+    labels: "",
+    notes_internal: "google_contact_id=c123"
+  }, "2026-03-21T13:50:00Z");
+
+  return {
+    ok: merged.phone1 === "972546629996" && merged.phone1_normalized === "972546629996",
+    merged: merged
   };
 }
