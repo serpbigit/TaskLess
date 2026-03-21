@@ -46,6 +46,7 @@ const TL_MENU_STATES = {
   CAPTURE_LOG_HABITS: "capture_log_habits",
   CAPTURE_LOG_JOURNAL: "capture_log_journal",
   CAPTURE_LOG_NOTE: "capture_log_note",
+  CAPTURE_CONTACT_ENRICH: "capture_contact_enrich",
   CAPTURE_SCHEDULE_BUSINESS: "capture_schedule_business",
   CAPTURE_SCHEDULE_FAMILY: "capture_schedule_family",
   CAPTURE_SCHEDULE_REMINDER: "capture_schedule_reminder",
@@ -92,6 +93,14 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
   }
 
   if (TL_Menu_IsCaptureState_(state)) {
+    if (state === TL_MENU_STATES.CAPTURE_CONTACT_ENRICH) {
+      TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
+      const enrichCapture = TL_Menu_RunImmediateContactEnrichmentCapture_(bossWaId, inboxRow);
+      if (enrichCapture && enrichCapture.sent) return "";
+      return enrichCapture && enrichCapture.reply
+        ? enrichCapture.reply
+        : "לא הצלחתי להכין כרגע הצעת העשרה לאיש קשר. נסה לכתוב שם ברור וההערה שחשוב לשמור.";
+    }
     TL_Menu_AnnotateBossCapture_(inboxRow, state);
     TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
     const immediateCapture = TL_Menu_RunImmediateCapture_(inboxRow);
@@ -125,6 +134,7 @@ function TL_Menu_BuildMenuReply_() {
     "6. הגדרות",
     "7. עזרה / מה אפשר להגיד",
     "8. כלים ייעודיים",
+    "9. העשר איש קשר",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -174,6 +184,7 @@ function TL_Menu_HandleRootChoice_(waId, choice) {
   if (choice === "6") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.SETTINGS);
   if (choice === "7") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.HELP);
   if (choice === "8") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.VERTICALS);
+  if (choice === "9") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_CONTACT_ENRICH, "כתוב/אמור למי להוסיף הקשר ומה חשוב לזכור. לדוגמה: \"תוסיף לדוד הערה שנפגשתי איתו ולבן שלו יש חתונה בשבוע הבא\".");
   return TL_Menu_BuildMenuReply_();
 }
 
@@ -500,6 +511,255 @@ function TL_Menu_RunImmediateCapture_(inboxRow) {
   }
 }
 
+function TL_Menu_RunImmediateContactEnrichmentCapture_(bossWaId, inboxRow) {
+  try {
+    const rowNumber = inboxRow && inboxRow.row ? Number(inboxRow.row) : 0;
+    if (!rowNumber || typeof TL_AI_getInboxRow_ !== "function") return { sent: false, reply: "" };
+    const loc = TL_AI_getInboxRow_(rowNumber);
+    if (!loc || !loc.values) return { sent: false, reply: "" };
+
+    const captureText = String(TL_Capture_getInputText_(loc.values) || "").trim();
+    if (!captureText) {
+      return { sent: false, reply: "לא קיבלתי טקסט ברור להעשרת איש קשר. נסה לכתוב שם והקשר שחשוב לזכור." };
+    }
+
+    const extraction = typeof TL_AI_ExtractContactEnrichment_ === "function"
+      ? TL_AI_ExtractContactEnrichment_(captureText)
+      : {
+          contact_query: "",
+          note_type: "general",
+          note_text: captureText,
+          summary: captureText,
+          proposal: captureText
+        };
+
+    const resolved = TL_Menu_ResolveContactForEnrichment_(captureText, extraction);
+    if (!resolved.contact) {
+      const candidates = resolved.candidates || [];
+      if (candidates.length) {
+        return {
+          sent: false,
+          reply: [
+            "מצאתי כמה אנשי קשר אפשריים, אבל אני צריכה שתדייק לפני שאשמור:",
+            candidates.slice(0, 5).map(function(item, idx) {
+              return String(idx + 1) + ". " + TL_Menu_DescribeContactCandidate_(item);
+            }).join("\n"),
+            "שלח שוב עם שם מלא יותר, טלפון או אימייל."
+          ].join("\n")
+        };
+      }
+      return {
+        sent: false,
+        reply: "לא מצאתי איש קשר ברור לשייך אליו את ההעשרה. שלח שוב עם שם ברור, טלפון או אימייל."
+      };
+    }
+
+    TL_Menu_AnnotateBossCapture_(inboxRow, TL_MENU_STATES.CAPTURE_CONTACT_ENRICH, "contact_enrichment_candidate=" + resolved.contact.contactId);
+
+    const cfg = typeof TL_BossPolicy_getConfig_ === "function" ? TL_BossPolicy_getConfig_({ persistState: false }) : { bossPhone: bossWaId, now: new Date(), sendFn: TLW_sendText_ };
+    const item = TL_Menu_BuildContactEnrichmentItem_(captureText, extraction, resolved.contact);
+    const childRow = TL_Menu_BuildContactEnrichmentProposalRow_(loc.values, rowNumber, item, cfg, cfg.now || new Date());
+    const childResult = TL_Capture_upsertChildRow_(childRow);
+    if (!childResult || !childResult.rowNumber) {
+      return { sent: false, reply: "לא הצלחתי ליצור כרגע כרטיס אישור להעשרת איש קשר." };
+    }
+
+    const packetItem = TL_Capture_buildPacketItem_(childRow, childResult.rowNumber);
+    const stored = TL_Menu_StoreDecisionPacket_(bossWaId, "capture", [packetItem]);
+    const phoneNumberId = String(TL_Orchestrator_value_(loc.values, "phone_number_id") || "").trim();
+    const packetText = TL_Capture_buildPacketText_(item.summary, [packetItem], cfg, cfg.now || new Date());
+
+    if (stored && phoneNumberId && cfg.sendFn) {
+      cfg.sendFn(phoneNumberId, bossWaId, packetText, {
+        kind: "contact_enrichment",
+        items: [packetItem]
+      });
+      return { sent: true, rowNumber: childResult.rowNumber };
+    }
+
+    return { sent: false, reply: packetText };
+  } catch (err) {
+    try {
+      TLW_logInfo_("contact_enrichment_capture_error", {
+        error: String(err && err.message ? err.message : err)
+      });
+    } catch (e) {}
+    return {
+      sent: false,
+      reply: "היתה תקלה בהכנת העשרת איש הקשר. נסה שוב בעוד רגע."
+    };
+  }
+}
+
+function TL_Menu_BuildContactEnrichmentItem_(captureText, extraction, contact) {
+  const noteText = String((extraction && extraction.note_text) || captureText || "").trim();
+  const noteType = String((extraction && extraction.note_type) || "general").trim().toLowerCase() || "general";
+  const contactName = String(contact && contact.name || "").trim();
+  const contactPhone = String(contact && (contact.phone1 || contact.phone2 || "") || "").trim();
+  const summary = String((extraction && extraction.summary) || "").trim() || (contactName ? (contactName + ": " + noteText) : noteText);
+  const proposal = String((extraction && extraction.proposal) || "").trim() || (
+    "להוסיף לאיש הקשר " + (contactName || contact.contactId) +
+    (contactPhone ? (" (" + contactPhone + ")") : "") +
+    " את ההקשר: " + noteText
+  );
+  return {
+    kind: "contact_enrichment",
+    title: contactName || String((extraction && extraction.contact_query) || "").trim(),
+    summary: TL_Menu_BuildContactEnrichmentSummary_(contact, noteText),
+    proposal: proposal,
+    task_due: "",
+    task_priority: "low",
+    approval_required: true,
+    notes: [
+      "contact_enrichment_note_type=" + noteType,
+      "contact_enrichment_note_text=" + noteText.replace(/\n+/g, " ").replace(/[;]+/g, ","),
+      "contact_enrichment_contact_id=" + String(contact && contact.contactId || ""),
+      "contact_enrichment_contact_name=" + contactName.replace(/\n+/g, " ").replace(/[;]+/g, ",")
+    ].join(";")
+  };
+}
+
+function TL_Menu_BuildContactEnrichmentSummary_(contact, noteText) {
+  const contactName = String(contact && contact.name || "").trim();
+  const phone = String(contact && (contact.phone1 || contact.phone2 || "") || "").trim();
+  const email = String(contact && contact.email || "").trim();
+  return [
+    contactName ? ("איש קשר: " + contactName) : "",
+    phone ? ("טלפון: " + phone) : "",
+    email ? ("אימייל: " + email) : "",
+    "הקשר לשמירה: " + String(noteText || "").trim()
+  ].filter(Boolean).join(" | ");
+}
+
+function TL_Menu_BuildContactEnrichmentProposalRow_(sourceValues, sourceRowNumber, item, cfg, now) {
+  const childRow = TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, 0, cfg || {}, now || new Date());
+  childRow.contact_id = TL_Menu_ExtractNoteValue_(item.notes, "contact_enrichment_contact_id");
+  childRow.ai_summary = String(item.summary || "").trim();
+  childRow.ai_proposal = String(item.proposal || "").trim();
+  childRow.text = String(item.proposal || item.summary || "").trim();
+  childRow.notes = String(childRow.notes || "") + ";" + String(item.notes || "");
+  childRow.execution_status = "proposal_ready";
+  childRow.task_status = "proposal_ready";
+  childRow.priority_level = "";
+  childRow.importance_level = "";
+  childRow.urgency_flag = "false";
+  childRow.needs_owner_now = "false";
+  childRow.suggested_action = "review_manually";
+  return childRow;
+}
+
+function TL_Menu_ResolveContactForEnrichment_(captureText, extraction) {
+  const contacts = TL_Menu_ReadContacts_();
+  const rawText = String(captureText || "").trim();
+  const query = String((extraction && extraction.contact_query) || "").trim();
+  const phoneMatch = rawText.match(/(\+?\d[\d\-\s().]{6,}\d)/);
+  const emailMatch = rawText.match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
+  const phone = phoneMatch ? TL_Contacts_normalizePhoneField_(phoneMatch[1]) : "";
+  const email = emailMatch ? String(emailMatch[1] || "").trim().toLowerCase() : "";
+
+  if (phone) {
+    const byPhone = contacts.filter(function(contact) {
+      return contact.phone1Norm === phone || contact.phone2Norm === phone;
+    });
+    if (byPhone.length === 1) return { contact: byPhone[0], candidates: byPhone };
+    if (byPhone.length > 1) return { contact: null, candidates: byPhone };
+  }
+
+  if (email) {
+    const byEmail = contacts.filter(function(contact) {
+      return contact.emailNorm === email;
+    });
+    if (byEmail.length === 1) return { contact: byEmail[0], candidates: byEmail };
+    if (byEmail.length > 1) return { contact: null, candidates: byEmail };
+  }
+
+  const candidates = TL_Menu_FindContactCandidatesByName_(query || rawText, contacts);
+  if (candidates.length === 1) return { contact: candidates[0], candidates: candidates };
+  return { contact: null, candidates: candidates };
+}
+
+function TL_Menu_ReadContacts_() {
+  const out = [];
+  try {
+    const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+    if (!sheetId) return out;
+    const ss = SpreadsheetApp.openById(sheetId);
+    const sh = ss.getSheetByName("CONTACTS");
+    if (!sh || sh.getLastRow() < 2) return out;
+    const values = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
+    const headers = values[0];
+    const rows = values.slice(1);
+    const idx = {};
+    headers.forEach(function(header, index) { idx[String(header || "")] = index; });
+    rows.forEach(function(row) {
+      const contactId = String(row[idx.contact_id] || "").trim();
+      const name = String(row[idx.name] || "").trim();
+      if (!contactId || !name) return;
+      out.push({
+        contactId: contactId,
+        name: name,
+        alias: String(row[idx.alias] || "").trim(),
+        phone1: String(row[idx.phone1] || "").trim(),
+        phone2: String(row[idx.phone2] || "").trim(),
+        email: String(row[idx.email] || "").trim(),
+        phone1Norm: TL_Contacts_normalizePhoneField_(row[idx.phone1_normalized] || row[idx.phone1] || ""),
+        phone2Norm: TL_Contacts_normalizePhoneField_(row[idx.phone2_normalized] || row[idx.phone2] || ""),
+        emailNorm: String(row[idx.email_normalized] || row[idx.email] || "").trim().toLowerCase()
+      });
+    });
+  } catch (err) {}
+  return out;
+}
+
+function TL_Menu_FindContactCandidatesByName_(query, contacts) {
+  const normalizedQuery = TL_Menu_NormalizeContactSearchText_(query);
+  if (!normalizedQuery) return [];
+  const queryTokens = normalizedQuery.split(" ").filter(Boolean);
+  return (contacts || []).map(function(contact) {
+    const haystack = TL_Menu_NormalizeContactSearchText_([
+      contact.name,
+      contact.alias,
+      contact.email
+    ].filter(Boolean).join(" "));
+    if (!haystack) return null;
+    let score = 0;
+    if (haystack === normalizedQuery) score += 100;
+    if (haystack.indexOf(normalizedQuery) !== -1) score += 60;
+    queryTokens.forEach(function(token) {
+      if (token && haystack.indexOf(token) !== -1) score += 15;
+    });
+    return score > 0 ? { contact: contact, score: score } : null;
+  }).filter(Boolean).sort(function(a, b) {
+    return b.score - a.score;
+  }).slice(0, 5).map(function(item) {
+    return item.contact;
+  });
+}
+
+function TL_Menu_NormalizeContactSearchText_(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/["'׳״.,;:()_\-\/\\]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function TL_Menu_DescribeContactCandidate_(contact) {
+  const bits = [String(contact && contact.name || "").trim()];
+  const phone = String(contact && (contact.phone1 || contact.phone2 || "") || "").trim();
+  const email = String(contact && contact.email || "").trim();
+  if (phone) bits.push(phone);
+  if (email) bits.push(email);
+  return bits.filter(Boolean).join(" | ");
+}
+
+function TL_Menu_ExtractNoteValue_(notes, key) {
+  const text = String(notes || "");
+  const escaped = String(key || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = text.match(new RegExp("(?:^|[;\\n])" + escaped + "=([^;\\n]+)", "i"));
+  return match ? String(match[1] || "").trim() : "";
+}
+
 function TL_Menu_StateToCaptureMarker_(state) {
   const value = String(state || "");
   const mapping = {};
@@ -515,6 +775,7 @@ function TL_Menu_StateToCaptureMarker_(state) {
   mapping[TL_MENU_STATES.CAPTURE_LOG_HABITS] = "menu_route=log_habits";
   mapping[TL_MENU_STATES.CAPTURE_LOG_JOURNAL] = "menu_route=log_journal";
   mapping[TL_MENU_STATES.CAPTURE_LOG_NOTE] = "menu_route=log_note";
+  mapping[TL_MENU_STATES.CAPTURE_CONTACT_ENRICH] = "menu_route=contact_enrich";
   mapping[TL_MENU_STATES.CAPTURE_SCHEDULE_BUSINESS] = "menu_route=schedule_business";
   mapping[TL_MENU_STATES.CAPTURE_SCHEDULE_FAMILY] = "menu_route=schedule_family";
   mapping[TL_MENU_STATES.CAPTURE_SCHEDULE_REMINDER] = "menu_route=schedule_reminder";
@@ -693,6 +954,7 @@ function TL_Menu_CaptureStateForIntent_(intentName, explicitState) {
   map.create_log_habits = TL_MENU_STATES.CAPTURE_LOG_HABITS;
   map.create_log_journal = TL_MENU_STATES.CAPTURE_LOG_JOURNAL;
   map.create_log_note = TL_MENU_STATES.CAPTURE_LOG_NOTE;
+  map.create_contact_enrichment = TL_MENU_STATES.CAPTURE_CONTACT_ENRICH;
   map.create_schedule_business = TL_MENU_STATES.CAPTURE_SCHEDULE_BUSINESS;
   map.create_schedule_family = TL_MENU_STATES.CAPTURE_SCHEDULE_FAMILY;
   map.create_schedule_reminder = TL_MENU_STATES.CAPTURE_SCHEDULE_REMINDER;

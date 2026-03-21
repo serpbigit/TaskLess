@@ -625,13 +625,13 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
     direction: "incoming",
     sender: sender,
     receiver: receiver,
-    execution_status: kind === "journal" ? "logged" : (kind === "reminder" ? "reminder_pending" : "approved"),
+    execution_status: kind === "journal" ? "logged" : (kind === "reminder" ? "reminder_pending" : (kind === "contact_enrichment" ? "enrichment_logged" : "approved")),
     notes: notesOut
   };
 
-  if (kind === "journal") {
+  if (kind === "journal" || kind === "contact_enrichment") {
     updates.record_class = "communication";
-    updates.task_status = "logged";
+    updates.task_status = kind === "contact_enrichment" ? "enrichment_logged" : "logged";
   } else {
     updates.record_class = "instruction";
     updates.task_status = kind === "reminder" ? "reminder_pending" : "pending";
@@ -649,6 +649,19 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
       if (String(notesOut || "").indexOf(dueNote) === -1) {
         notesOut = String(notesOut || "") ? (String(notesOut || "") + "\n" + dueNote) : dueNote;
       }
+      updates.notes = notesOut;
+    }
+  }
+
+  if (kind === "contact_enrichment") {
+    const appended = TL_ContactEnrichment_AppendFromInboxRow_(rowNumber, values);
+    if (!appended || appended.ok !== true) {
+      updates.execution_status = "enrichment_failed";
+      updates.task_status = "enrichment_failed";
+      notesOut = TL_Capture_appendNote_(values, "contact_enrichment_append_failed=true");
+      updates.notes = notesOut;
+    } else {
+      notesOut = TL_Capture_appendNote_(values, "contact_enrichment_logged_at=" + new Date().toISOString());
       updates.notes = notesOut;
     }
   }
@@ -2041,8 +2054,84 @@ function TL_Orchestrator_captureKindFromNotes_(notes) {
   const match = text.match(/(?:^|[;\n])boss_capture_kind=([^;\n]+)/i);
   if (!match) return "";
   const kind = String(match[1] || "").trim().toLowerCase();
-  if (kind === "reminder" || kind === "task" || kind === "journal") return kind;
+  if (kind === "reminder" || kind === "task" || kind === "journal" || kind === "contact_enrichment") return kind;
   return kind === "log" || kind === "note" ? "journal" : "";
+}
+
+function TL_ContactEnrichment_AppendFromInboxRow_(rowNumber, valuesOverride) {
+  try {
+    const loc = valuesOverride ? null : TL_AI_getInboxRow_(rowNumber);
+    const values = valuesOverride || (loc ? loc.values : null);
+    if (!values) return { ok: false, reason: "row_not_found" };
+
+    const notes = String(TL_Orchestrator_value_(values, "notes") || "").trim();
+    const contactId = String(TL_Orchestrator_value_(values, "contact_id") || TL_ContactEnrichment_getNoteValue_(notes, "contact_enrichment_contact_id") || "").trim();
+    if (!contactId) return { ok: false, reason: "missing_contact_id" };
+
+    const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+    if (!sheetId) return { ok: false, reason: "missing_sheet_id" };
+    const ss = SpreadsheetApp.openById(sheetId);
+    let sh = ss.getSheetByName("CONTACT_ENRICHMENTS");
+    if (!sh) {
+      sh = ss.insertSheet("CONTACT_ENRICHMENTS");
+      sh.getRange(1, 1, 1, TL_SCHEMA.CONTACT_ENRICHMENTS_HEADERS.length).setValues([TL_SCHEMA.CONTACT_ENRICHMENTS_HEADERS]);
+      sh.setFrozenRows(1);
+    }
+
+    const noteType = TL_ContactEnrichment_getNoteValue_(notes, "contact_enrichment_note_type") || "general";
+    const contactName = TL_ContactEnrichment_resolveContactName_(ss, contactId) || TL_ContactEnrichment_getNoteValue_(notes, "contact_enrichment_contact_name") || "";
+    const noteText = TL_ContactEnrichment_getNoteValue_(notes, "contact_enrichment_note_text") ||
+      String(TL_Orchestrator_value_(values, "ai_summary") || TL_Orchestrator_value_(values, "text") || "").trim();
+    const source = "boss_manual";
+    const linkedRecordId = String(TL_Orchestrator_value_(values, "record_id") || TL_Orchestrator_value_(values, "event_id") || "").trim();
+    const topicId = String(TL_Orchestrator_value_(values, "topic_id") || "").trim();
+    const row = [
+      new Date().toISOString(),
+      contactId,
+      contactName,
+      noteType,
+      noteText,
+      source,
+      linkedRecordId,
+      topicId,
+      "source_row=" + String(rowNumber || 0)
+    ];
+    const range = sh.getRange(sh.getLastRow() + 1, 1, 1, row.length);
+    range.setNumberFormat("@");
+    range.setValues([row]);
+    return { ok: true, rowNumber: sh.getLastRow(), contactId: contactId };
+  } catch (err) {
+    try {
+      TLW_logInfo_("contact_enrichment_append_error", {
+        rowNumber: rowNumber,
+        error: String(err && err.message ? err.message : err)
+      });
+    } catch (e) {}
+    return { ok: false, reason: String(err && err.message ? err.message : err) };
+  }
+}
+
+function TL_ContactEnrichment_getNoteValue_(notes, key) {
+  const text = String(notes || "");
+  const escaped = String(key || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = text.match(new RegExp("(?:^|[;\\n])" + escaped + "=([^;\\n]+)", "i"));
+  return match ? String(match[1] || "").trim() : "";
+}
+
+function TL_ContactEnrichment_resolveContactName_(ss, contactId) {
+  if (!ss || !contactId) return "";
+  const sh = ss.getSheetByName("CONTACTS");
+  if (!sh || sh.getLastRow() < 2) return "";
+  const values = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
+  const headers = values[0];
+  const idxContact = headers.indexOf("contact_id");
+  const idxName = headers.indexOf("name");
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][idxContact] || "").trim() === String(contactId || "").trim()) {
+      return String(values[i][idxName] || "").trim();
+    }
+  }
+  return "";
 }
 
 function TL_Orchestrator_captureTitleFromNotes_(notes) {

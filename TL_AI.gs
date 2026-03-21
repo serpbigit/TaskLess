@@ -179,6 +179,29 @@ function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
   ].join("\n");
 }
 
+function TL_AI_buildContactEnrichmentPrompt_(inputText, language, bossName) {
+  return [
+    "You are TaskLess.",
+    "Extract one manual contact enrichment request from a Boss message.",
+    "Return strict JSON only.",
+    "Language preference: " + String(language || "Hebrew"),
+    "The Boss's name is: " + String(bossName || "Reuven"),
+    "Required JSON shape:",
+    '{"contact_query":"...","note_type":"personal_context|family_event|business_context|followup_context|preference|relationship_signal|general","note_text":"...","summary":"...","proposal":"..."}',
+    "Rules:",
+    "contact_query should be the person name, phone, or email mentioned by the Boss.",
+    "note_text should contain only the durable fact/context worth saving for future drafts.",
+    "summary should be concise and mention the contact plus the saved context.",
+    "proposal should be phrased as an approval sentence for adding contact memory/enrichment.",
+    "If the Boss message does not clearly contain a contact enrichment request, return empty strings and note_type=general.",
+    "Examples:",
+    '{"contact_query":"David","note_type":"family_event","note_text":"I met David and his son has a wedding next week.","summary":"דוד: לבן שלו יש חתונה בשבוע הבא.","proposal":"להוסיף לדוד הערת קשר: לבן שלו יש חתונה בשבוע הבא."}',
+    '{"contact_query":"Sarah","note_type":"business_context","note_text":"Waiting on the quote sent last week.","summary":"שרה: ממתינה להצעת המחיר שנשלחה בשבוע שעבר.","proposal":"להוסיף לשרה הקשר עסקי: ממתינה להצעת המחיר שנשלחה בשבוע שעבר."}',
+    "Boss message:",
+    String(inputText || "")
+  ].join("\n");
+}
+
 function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
   return [
     "You are TaskLess's Boss intent router.",
@@ -186,7 +209,7 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Reuven"),
     "Supported intents:",
-    "show_menu, help, show_ai_cost, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, out_of_scope, unknown",
+    "show_menu, help, show_ai_cost, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, create_contact_enrichment, out_of_scope, unknown",
     "Strict JSON shape:",
     '{"intent":"...","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|menu|help|verticals|settings|reminders|tasks|none","capture_state":"TL_MENU_STATES value or empty string","confidence":0.0,"needs_clarification":"true|false","reply":"...","parameters":{"query":"...","capture_kind":"...","capture_mode":"...","time_hint":"...","target":"..."}}',
     "Routing rules:",
@@ -200,6 +223,7 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     '{"intent":"show_ai_cost","route":"summary","summary_kind":"ai_cost","capture_state":"","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את עלות ה-AI המצטברת.","parameters":{"query":"ai cost","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"create_task_with_due","route":"capture","summary_kind":"none","capture_state":"CAPTURE_TASK_WITH_DUE","confidence":0.97,"needs_clarification":"false","reply":"קיבלתי, אכין משימה עם תאריך יעד.","parameters":{"query":"send proposal by Thursday","capture_kind":"task","capture_mode":"with_due","time_hint":"Thursday","target":""}}',
     '{"intent":"create_log_journal","route":"capture","summary_kind":"none","capture_state":"CAPTURE_LOG_JOURNAL","confidence":0.96,"needs_clarification":"false","reply":"נרשם, אכין מזה פריט יומן.","parameters":{"query":"met with Dana","capture_kind":"journal","capture_mode":"journal","time_hint":"","target":""}}',
+    '{"intent":"create_contact_enrichment","route":"capture","summary_kind":"none","capture_state":"CAPTURE_CONTACT_ENRICH","confidence":0.96,"needs_clarification":"false","reply":"קיבלתי, אכין הצעת העשרה לאיש קשר.","parameters":{"query":"make note that I met David and his son has a wedding next week","capture_kind":"contact_enrichment","capture_mode":"contact_enrichment","time_hint":"","target":"David"}}',
     '{"intent":"out_of_scope","route":"none","summary_kind":"none","capture_state":"","confidence":0.99,"needs_clarification":"false","reply":"מחוץ לתחום","parameters":{"query":"weather","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     "Message:",
     String(inputText || "")
@@ -419,6 +443,25 @@ function TL_AI_RecognizeBossIntent_(inputText, options) {
   }
 
   return TL_AI_normalizeBossIntent_(parsed);
+}
+
+function TL_AI_ExtractContactEnrichment_(inputText) {
+  const cfg = TL_AI_getConfig_();
+  const prompt = TL_AI_buildContactEnrichmentPrompt_(String(inputText || ""), cfg.language, cfg.bossName);
+  const result = TL_AI_callPrompt_(prompt);
+  const raw = result.raw_json || {};
+  return {
+    ok: true,
+    status: result.status,
+    contact_query: String(raw.contact_query || "").trim(),
+    note_type: TL_AI_normalizeContactEnrichmentType_(raw.note_type),
+    note_text: String(raw.note_text || result.summary || "").trim(),
+    summary: String(raw.summary || result.summary || "").trim(),
+    proposal: String(raw.proposal || result.proposal || "").trim(),
+    raw_text: result.raw_text,
+    raw_json: raw,
+    response_body: result.response_body
+  };
 }
 
 function TL_AI_SmokeTest() {
@@ -877,7 +920,8 @@ function TL_AI_bossCaptureStateFromIntent_(intent) {
     create_log_note: "CAPTURE_LOG_NOTE",
     create_schedule_business: "CAPTURE_SCHEDULE_BUSINESS",
     create_schedule_family: "CAPTURE_SCHEDULE_FAMILY",
-    create_schedule_reminder: "CAPTURE_SCHEDULE_REMINDER"
+    create_schedule_reminder: "CAPTURE_SCHEDULE_REMINDER",
+    create_contact_enrichment: "CAPTURE_CONTACT_ENRICH"
   };
   return map[v] || "";
 }
@@ -891,7 +935,7 @@ function TL_AI_normalizeBossIntentName_(value) {
     "create_reminder_relative","create_reminder_datetime","create_reminder_recurring",
     "create_task_no_due","create_task_with_due","create_task_dependent","create_task_personal","create_task_business",
     "create_log_health","create_log_habits","create_log_journal","create_log_note",
-    "create_schedule_business","create_schedule_family","create_schedule_reminder",
+    "create_schedule_business","create_schedule_family","create_schedule_reminder","create_contact_enrichment",
     "out_of_scope",
     "unknown"
   ];
@@ -917,9 +961,23 @@ function TL_AI_normalizeBossCaptureState_(value) {
     "CAPTURE_REMINDER_RELATIVE","CAPTURE_REMINDER_DATETIME","CAPTURE_REMINDER_RECURRING",
     "CAPTURE_TASK_NO_DUE","CAPTURE_TASK_WITH_DUE","CAPTURE_TASK_DEPENDENT","CAPTURE_TASK_PERSONAL","CAPTURE_TASK_BUSINESS",
     "CAPTURE_LOG_HEALTH","CAPTURE_LOG_HABITS","CAPTURE_LOG_JOURNAL","CAPTURE_LOG_NOTE",
-    "CAPTURE_SCHEDULE_BUSINESS","CAPTURE_SCHEDULE_FAMILY","CAPTURE_SCHEDULE_REMINDER"
+    "CAPTURE_SCHEDULE_BUSINESS","CAPTURE_SCHEDULE_FAMILY","CAPTURE_SCHEDULE_REMINDER","CAPTURE_CONTACT_ENRICH"
   ];
   return allowed.indexOf(v) !== -1 ? v : "";
+}
+
+function TL_AI_normalizeContactEnrichmentType_(value) {
+  const v = String(value || "").trim().toLowerCase();
+  const allowed = [
+    "personal_context",
+    "family_event",
+    "business_context",
+    "followup_context",
+    "preference",
+    "relationship_signal",
+    "general"
+  ];
+  return allowed.indexOf(v) !== -1 ? v : "general";
 }
 
 function TL_AI_normalizeBossConfidence_(value) {
