@@ -70,8 +70,16 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
   const text = rawText.toLowerCase();
   if (!text) return TL_Menu_BuildMenuReply_();
 
-  const packetReply = TL_Menu_HandleDecisionPacketReply_(bossWaId, text);
-  if (packetReply) return packetReply;
+  const existingPacket = TL_Menu_GetDecisionPacket_(bossWaId);
+  const shouldTreatAsPacketReply = !!existingPacket && (
+    TL_Menu_IsNumericChoice_(text) ||
+    existingPacket.stage === "edit" ||
+    !text
+  );
+  if (shouldTreatAsPacketReply) {
+    const packetReply = TL_Menu_HandleDecisionPacketReply_(bossWaId, text);
+    if (packetReply) return packetReply;
+  }
 
   if (TL_MENU.COST_TRIGGERS.some(function(t) { return text === t; }) || TL_Menu_IsAiCostQuery_(rawText)) {
     TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
