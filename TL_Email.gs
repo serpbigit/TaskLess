@@ -5,7 +5,7 @@
 const TL_EMAIL = {
   VERSION: "v1",
   DEFAULT_QUERY: 'is:important newer_than:14d -category:promotions -category:social',
-  SCHEDULED_QUERY_FALLBACK: 'newer_than:7d -category:promotions -category:social',
+  SCHEDULED_QUERY_FALLBACK: 'is:important newer_than:14d -category:promotions -category:social',
   DEFAULT_PULL_LIMIT: 20,
   DEFAULT_MESSAGES_PER_THREAD: 20,
   DEFAULT_CHARS_PER_MESSAGE: 6000,

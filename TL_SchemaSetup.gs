@@ -70,7 +70,7 @@ const TL_SCHEMA = {
     ["BOSS_INCLUDE_FYI_IN_DIGEST","false","include FYI/non-action rows in digests when capacity remains"],
     ["DO_NOT_DISTURB_ENABLED","false","suppress proactive secretary pushes outside explicit pull mode"],
     ["EMAIL_PULL_ENABLED","true","enable scheduled Gmail pull worker"],
-    ["EMAIL_PULL_QUERY","newer_than:7d -category:promotions -category:social","query used by the scheduled Gmail pull worker"],
+    ["EMAIL_PULL_QUERY","is:important newer_than:14d -category:promotions -category:social","query used by the scheduled Gmail pull worker"],
     ["EMAIL_PULL_MAX_THREADS","20","maximum Gmail threads pulled per scheduled run"],
     ["EMAIL_TRIAGE_ENABLED","true","triage newly pulled email threads into revision queue"],
     ["EMAIL_TRIAGE_BATCH_SIZE","5","maximum pulled email rows to triage per scheduled run"],
