@@ -1707,12 +1707,22 @@ function TL_Menu_attachApprovalPacketHint_(waId, text, mode) {
     return base;
   }
   TL_Menu_StoreDecisionPacket_(waId, "decision", items);
+  const packet = TL_Menu_GetDecisionPacket_(waId);
+  if (packet) {
+    packet.stage = "one_by_one";
+    packet.cursor = 0;
+    TL_Menu_SetDecisionPacket_(waId, packet);
+  }
+  const livePacket = packet || TL_Menu_GetDecisionPacket_(waId);
+  const reviewIntro = items.length === 1
+    ? "פתחתי מיד את הפריט שמחכה לאישור."
+    : "פתחתי מיד את הפריט הראשון לסקירה.";
   return [
     base,
     "",
-    "לסקירת הטיוטות אחת-אחת שלח 3.",
-    "לאישור הכל שלח 1. לאישור חלקי שלח 2."
-  ].join("\n");
+    reviewIntro,
+    livePacket ? TL_Menu_BuildDecisionPacketOneByOneReply_(livePacket) : "לא הצלחתי לפתוח את הפריט לסקירה."
+  ].join("\n\n");
 }
 
 function TL_Menu_CollectApprovalPacketItems_(mode) {
