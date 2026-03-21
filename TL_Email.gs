@@ -5,16 +5,127 @@
 const TL_EMAIL = {
   VERSION: "v1",
   DEFAULT_QUERY: 'is:important newer_than:14d -category:promotions -category:social',
+  SCHEDULED_QUERY_FALLBACK: 'newer_than:7d -category:promotions -category:social',
   DEFAULT_PULL_LIMIT: 20,
   DEFAULT_MESSAGES_PER_THREAD: 20,
   DEFAULT_CHARS_PER_MESSAGE: 6000,
   DEFAULT_TOTAL_CHARS: 22000,
   DEFAULT_HISTORY_DEPTH: 5,
   DEFAULT_HISTORY_EXPANDED_DEPTH: 10,
+  DEFAULT_TRIAGE_BATCH_SIZE: 5,
+  TRIGGER_HANDLER: "TL_Email_RunScheduled",
   PROP_LAST_PULL_AT: "TL_EMAIL_LAST_PULL_AT",
   PROP_LAST_PULL_QUERY: "TL_EMAIL_LAST_PULL_QUERY",
   PROP_LAST_PULL_MAX_MSG_AT: "TL_EMAIL_LAST_PULL_MAX_MSG_AT"
 };
+
+function TL_Email_RunScheduled() {
+  return TL_Email_withLock_("scheduled", function() {
+    if (typeof TL_Automation_IsEnabled_ === "function" && !TL_Automation_IsEnabled_()) {
+      return { ok: true, skipped: true, reason: "automation_disabled" };
+    }
+    if (!TL_Email_isEnabled_()) {
+      return { ok: true, skipped: true, reason: "email_pull_disabled" };
+    }
+
+    const query = String(TLW_getSetting_("EMAIL_PULL_QUERY") || TL_EMAIL.SCHEDULED_QUERY_FALLBACK).trim() || TL_EMAIL.SCHEDULED_QUERY_FALLBACK;
+    const maxThreads = TL_Email_int_(TLW_getSetting_("EMAIL_PULL_MAX_THREADS"), TL_EMAIL.DEFAULT_PULL_LIMIT);
+    const triageBatchSize = TL_Email_int_(TLW_getSetting_("EMAIL_TRIAGE_BATCH_SIZE"), TL_EMAIL.DEFAULT_TRIAGE_BATCH_SIZE);
+    const pull = TL_Email_PullImportant_Run({
+      query: query,
+      maxThreads: maxThreads
+    });
+    const triage = TL_Email_isTriageEnabled_()
+      ? TL_Email_TriagePending({ batchSize: triageBatchSize, dryRun: false })
+      : { ok: true, skipped: true, reason: "email_triage_disabled" };
+
+    const result = {
+      ok: true,
+      query: query,
+      maxThreads: maxThreads,
+      triageBatchSize: triageBatchSize,
+      pull: pull,
+      triage: triage
+    };
+    if (typeof TLW_logInfo_ === "function") TLW_logInfo_("email_run_scheduled", result);
+    return result;
+  });
+}
+
+function TL_Email_InstallTrigger_1m() {
+  TL_Email_RemoveTriggers();
+  ScriptApp.newTrigger(TL_EMAIL.TRIGGER_HANDLER)
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+  return {
+    ok: true,
+    handler: TL_EMAIL.TRIGGER_HANDLER,
+    cadence: "every 1 minute"
+  };
+}
+
+function TL_Email_InstallTrigger_5m() {
+  TL_Email_RemoveTriggers();
+  ScriptApp.newTrigger(TL_EMAIL.TRIGGER_HANDLER)
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+  return {
+    ok: true,
+    handler: TL_EMAIL.TRIGGER_HANDLER,
+    cadence: "every 5 minutes"
+  };
+}
+
+function TL_Email_RemoveTriggers() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let removed = 0;
+  triggers.forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === TL_EMAIL.TRIGGER_HANDLER) {
+      ScriptApp.deleteTrigger(trigger);
+      removed++;
+    }
+  });
+  return { ok: true, removed: removed };
+}
+
+function TL_Email_Status() {
+  const triggers = ScriptApp.getProjectTriggers().filter(function(trigger) {
+    return trigger.getHandlerFunction() === TL_EMAIL.TRIGGER_HANDLER;
+  });
+  return {
+    ok: true,
+    handler: TL_EMAIL.TRIGGER_HANDLER,
+    trigger_count: triggers.length,
+    email_pull_enabled: TLW_getSetting_("EMAIL_PULL_ENABLED"),
+    email_pull_query: TLW_getSetting_("EMAIL_PULL_QUERY") || TL_EMAIL.SCHEDULED_QUERY_FALLBACK,
+    email_pull_max_threads: TLW_getSetting_("EMAIL_PULL_MAX_THREADS") || String(TL_EMAIL.DEFAULT_PULL_LIMIT),
+    email_triage_enabled: TLW_getSetting_("EMAIL_TRIAGE_ENABLED"),
+    email_triage_batch_size: TLW_getSetting_("EMAIL_TRIAGE_BATCH_SIZE") || String(TL_EMAIL.DEFAULT_TRIAGE_BATCH_SIZE),
+    checkpoint: TL_Email_getPullCheckpoint_()
+  };
+}
+
+function TL_Email_withLock_(label, fn) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function TL_Email_isEnabled_() {
+  const raw = String(TLW_getSetting_("EMAIL_PULL_ENABLED") || "true").trim().toLowerCase();
+  return !(raw === "false" || raw === "0" || raw === "no");
+}
+
+function TL_Email_isTriageEnabled_() {
+  const raw = String(TLW_getSetting_("EMAIL_TRIAGE_ENABLED") || "true").trim().toLowerCase();
+  return !(raw === "false" || raw === "0" || raw === "no");
+}
 
 function TL_Email_PullImportant_Run(opts) {
   const options = opts || {};
