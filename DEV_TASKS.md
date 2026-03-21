@@ -604,6 +604,12 @@ Explanation-rich approval flows are more trustworthy than raw confidence claims.
 ## Strategic multipliers (roadmap themes)
 - Multi-intent Boss capture:
   - one free-form voice/text message can decompose into multiple proposed child records (reminders, tasks, logs, scheduling, reply proposals) under one parent capture and one approval batch.
+  - add a distinct new-outbound-composition flow, separate from reply-to-incoming:
+    - parse Boss commands like `send an email to X` or `send a WhatsApp to Y`
+    - extract channel, recipient query, subject, and body/message
+    - resolve recipient against `CONTACTS` using name, alias, email, phone, and relationship hints like `wife`
+    - if one clear match exists, build one approval card for send
+    - if ambiguous, ask for clarification instead of guessing
 - Cross-channel unified context:
   - WhatsApp, email, calendar, reminders, and tasks should converge into one operational memory rather than acting like separate mini-tools.
 - Batch approval with exception handling:
