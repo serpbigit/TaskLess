@@ -73,12 +73,7 @@ function TL_OK_() {
 }
 
 function TL_Log_(type, data) {
-  const log = SpreadsheetApp.getActive().getSheetByName("AUDIT_LOG");
-  if (!log) return;
-
-  log.appendRow([
-    new Date().toISOString(),
-    type,
-    JSON.stringify(data)
-  ]);
+  if (typeof TL_Audit_append_ === "function") {
+    TL_Audit_append_("TL_WA_POC_Router", String(type || ""), data || {});
+  }
 }

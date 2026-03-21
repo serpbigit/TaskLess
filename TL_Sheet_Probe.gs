@@ -11,26 +11,13 @@ function TL_PROBE_run() {
   const ss = SpreadsheetApp.openById(sheetId);
   const nowIso = new Date().toISOString();
 
-  let audit = ss.getSheetByName("AUDIT_LOG");
-  if (!audit) audit = ss.insertSheet("AUDIT_LOG");
-  if (audit.getLastRow() === 0) {
-    audit.appendRow(["ts","actor","eventType","payloadJson","taskId","batchId","payloadJson2"]);
-    audit.setFrozenRows(1);
-  }
-
-  audit.appendRow([
-    nowIso,
-    "SYST",
-    "PROBE_OK",
-    JSON.stringify({
+  if (typeof TL_Audit_append_ === "function") {
+    TL_Audit_append_("SYST", "PROBE_OK", {
       spreadsheetId: ss.getId(),
       spreadsheetName: ss.getName(),
       activeUrl: ss.getUrl()
-    }),
-    "",
-    "",
-    ""
-  ]);
+    });
+  }
 
   let open = ss.getSheetByName("OPEN");
   if (!open) open = ss.insertSheet("OPEN");

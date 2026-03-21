@@ -39,6 +39,11 @@ const TL_SCHEMA = {
   AI_COST_TRACKER_HEADERS: [
     "Date","Model","Input_Tokens","Output_Tokens","Cost_ILS"
   ],
+  REMOVABLE_LEGACY_TABS: [
+    "PENDING",
+    "COMMANDS_INBOX",
+    "AUDIT_LOG"
+  ],
   ALLOWED_TABS: [
     "INBOX",
     "ARCHIVE",
@@ -121,6 +126,21 @@ function TL_PruneTabs() {
       ss.deleteSheet(sh);
     }
   });
+}
+
+function TL_PruneDeadLegacyTabs() {
+  const ss = TL_Schema_getSpreadsheet_();
+  const removed = [];
+  TL_SCHEMA.REMOVABLE_LEGACY_TABS.forEach(function(name) {
+    const sh = ss.getSheetByName(name);
+    if (!sh) return;
+    ss.deleteSheet(sh);
+    removed.push(name);
+  });
+  return {
+    ok: true,
+    removed: removed
+  };
 }
 
 function TL_Schema_getSpreadsheet_() {

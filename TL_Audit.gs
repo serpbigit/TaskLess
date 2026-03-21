@@ -1,16 +1,16 @@
 /**
- * TL_Audit - append-only audit log for bounded sheet POC
- * Tab: AUDIT_LOG
- * Columns: ts, actor, eventType, payloadJson
+ * TL_Audit - legacy audit shim.
+ * Writes to canonical LOG so old callers do not require a separate AUDIT_LOG tab.
  */
 
 function TL_Audit_append_(actor, eventType, payloadObj) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName("AUDIT_LOG");
-  if (!sh) sh = ss.insertSheet("AUDIT_LOG");
+  var ss = typeof TL_Schema_getSpreadsheet_ === "function"
+    ? TL_Schema_getSpreadsheet_()
+    : SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName("LOG");
+  if (!sh) sh = ss.insertSheet("LOG");
 
-  // ensure headers
-  var headers = ["ts","actor","eventType","payloadJson"];
+  var headers = ["timestamp","level","component","message","meta_json"];
   var rng = sh.getRange(1, 1, 1, headers.length);
   var cur = rng.getValues()[0];
   var needs = false;
@@ -24,7 +24,8 @@ function TL_Audit_append_(actor, eventType, payloadObj) {
 
   sh.appendRow([
     new Date().toISOString(),
-    String(actor || ""),
+    "INFO",
+    String(actor || "TL_Audit"),
     String(eventType || ""),
     JSON.stringify(payloadObj || {})
   ]);

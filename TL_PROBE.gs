@@ -5,18 +5,9 @@ function TL_PROBE_run() {
 
   const ss = SpreadsheetApp.openById(sheetId);
 
-  let audit = ss.getSheetByName("AUDIT_LOG");
-  if (!audit) audit = ss.insertSheet("AUDIT_LOG");
-
-  audit.appendRow([
-    new Date().toISOString(),
-    "SYST",
-    "PROBE_OK",
-    JSON.stringify({sheet: ss.getName()}),
-    "",
-    "",
-    ""
-  ]);
+  if (typeof TL_Audit_append_ === "function") {
+    TL_Audit_append_("SYST", "PROBE_OK", {sheet: ss.getName()});
+  }
 
   let open = ss.getSheetByName("OPEN");
   if (!open) open = ss.insertSheet("OPEN");

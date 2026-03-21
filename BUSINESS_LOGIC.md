@@ -13,7 +13,7 @@ TaskLess turns WhatsApp messages into **structured tasks**, asks for missing inf
 
 ### 2.2 Task
 A unit of work created from one or more user messages.
-- Has a lifecycle: OPEN → PENDING → (REVISION) → EXECUTED → ARCHIVE
+- Has a lifecycle recorded in the canonical ledger (`INBOX` / `ARCHIVE`) with explicit approval and execution state
 - Has an execution plan (proposal/action/result JSON fields)
 
 ### 2.3 Execution
@@ -26,11 +26,11 @@ A deterministic action run by GAS (send email, send WhatsApp, etc.), optionally 
 ### 3.1 Intake
 - Inbound message arrives (WhatsApp webhook or manual test insert)
 - System dedupes by message id / hash
-- System logs raw event to audit log
+- System logs raw event to the canonical `LOG` tab
 
 ### 3.2 Parse
 - Extract intent + entities into a draft object (title, kind, channel, targets)
-- Create/Upsert an OPEN task (by `refId`/`chunkId`)
+- Append/update the canonical `INBOX` ledger record (by stable ids and record versions)
 
 ### 3.3 Ask / Clarify
 - If required fields missing, system asks targeted questions
@@ -71,7 +71,7 @@ A deterministic action run by GAS (send email, send WhatsApp, etc.), optionally 
 ---
 
 ## 6) Audit & Safety
-- Every state change logs to AUDIT_LOG with ts, actor, eventType, payload
+- Every state change logs to `LOG` with timestamp, component, message, and metadata
 - STOP / opt-out should immediately prevent further sends to that user/target
 
 ---

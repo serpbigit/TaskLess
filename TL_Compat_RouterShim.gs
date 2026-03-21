@@ -25,24 +25,14 @@ function TL_Log_append_(actor, eventType, payloadObj, taskId, batchId) {
     return;
   }
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName("AUDIT_LOG");
-  if (!sh) sh = ss.insertSheet("AUDIT_LOG");
-
-  if (sh.getLastRow() === 0) {
-    sh.appendRow(["ts","actor","eventType","payloadJson","taskId","batchId","payloadJson2"]);
-    sh.setFrozenRows(1);
+  if (typeof TLW_logInfo_ === "function") {
+    TLW_logInfo_(String(eventType || "compat_log"), {
+      actor: String(actor || "SYST"),
+      payload: payloadObj || {},
+      taskId: String(taskId || ""),
+      batchId: String(batchId || "")
+    });
   }
-
-  sh.appendRow([
-    new Date().toISOString(),
-    String(actor || "SYST"),
-    String(eventType || ""),
-    JSON.stringify(payloadObj || {}),
-    String(taskId || ""),
-    String(batchId || ""),
-    ""
-  ]);
 }
 
 function TL_Menu_text_(ctx) {

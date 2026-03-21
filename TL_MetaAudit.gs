@@ -10,7 +10,7 @@
  * - TL_META_GRAPH_VERSION     : optional, default "v20.0"
  *
  * Logs:
- * - AUDIT_LOG via TL_Audit_append_
+ * - LOG via TL_Audit_append_
  *
  * Output:
  * - JSON summary of all requested businesses and their dependencies
@@ -256,7 +256,6 @@ function TL_MetaAudit_runAndLog() {
   Logger.log(out);
   return out;
 }
-
 
 
 

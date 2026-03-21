@@ -3,7 +3,7 @@
  *
  * Purpose:
  * - Prove the script can open the target spreadsheet
- * - Prove it can append to AUDIT_LOG
+ * - Prove it can append to LOG
  * - Prove it can append to OPEN
  * - Give deterministic timestamps and sample payloads
  *
@@ -12,7 +12,7 @@
  */
 
 const TL_DIAG = {
-  AUDIT_SHEET: "AUDIT_LOG",
+  AUDIT_SHEET: "LOG",
   OPEN_SHEET: "OPEN",
   OPEN_HEADERS: [
     "createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel",
@@ -58,18 +58,16 @@ function TL_DIAG_appendAudit_(ss, eventType, payloadObj) {
   if (!sh) sh = ss.insertSheet(TL_DIAG.AUDIT_SHEET);
 
   if (sh.getLastRow() === 0) {
-    sh.appendRow(["ts","actor","eventType","payloadJson","taskId","batchId","payloadJson2"]);
+    sh.appendRow(["timestamp","level","component","message","meta_json"]);
     sh.setFrozenRows(1);
   }
 
   sh.appendRow([
     new Date().toISOString(),
-    "SYST",
+    "INFO",
+    "TL_DIAG",
     String(eventType || ""),
     TL_DIAG_safeStringify_(payloadObj, 8000),
-    "",
-    "",
-    ""
   ]);
 }
 
