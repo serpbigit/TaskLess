@@ -216,6 +216,30 @@ function TL_Email_NormalizeThread_(thread, opts) {
   });
   const senderEmail = TL_Email_pickSender_(ownerInbound, messageSnapshots, ownerEmail);
   const eligible = ownerInbound.length > 0;
+  const nowIso = String(options.pulledAtIso || new Date().toISOString());
+  const payload = {
+    source: "gmail",
+    version: TL_EMAIL.VERSION,
+    threadId: threadId,
+    refId: refId,
+    permalink: "https://mail.google.com/mail/u/0/#inbox/" + threadId,
+    subject: subject,
+    latestMsgId: latestMsgId,
+    latestMsgDateIso: latestMsgDateIso,
+    ownerEmail: ownerEmail,
+    senderEmail: senderEmail,
+    participants: TL_Email_collectParticipants_(messageSnapshots),
+    ownerInboundCount: ownerInbound.length,
+    ownerMatchedMessages: ownerInbound,
+    flattenedText: flattened.text,
+    flattenedTruncated: flattened.truncated,
+    query: String(options.query || TL_EMAIL.DEFAULT_QUERY),
+    limits: {
+      maxMessagesPerThread: TL_Email_int_(options.maxMessagesPerThread, TL_EMAIL.DEFAULT_MESSAGES_PER_THREAD),
+      maxCharsPerMessage: TL_Email_int_(options.maxCharsPerMessage, TL_EMAIL.DEFAULT_CHARS_PER_MESSAGE),
+      maxTotalChars: TL_Email_int_(options.maxTotalChars, TL_EMAIL.DEFAULT_TOTAL_CHARS)
+    }
+  };
 
   return {
     eligible: eligible,
@@ -230,28 +254,23 @@ function TL_Email_NormalizeThread_(thread, opts) {
     participants: TL_Email_collectParticipants_(messageSnapshots),
     ownerInboundCount: ownerInbound.length,
     flattened: flattened,
-    payload: {
-      source: "gmail",
-      version: TL_EMAIL.VERSION,
-      threadId: threadId,
+    payload: payload,
+    rowObj: {
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      userE164: "",
       refId: refId,
-      permalink: "https://mail.google.com/mail/u/0/#inbox/" + threadId,
-      subject: subject,
-      latestMsgId: latestMsgId,
-      latestMsgDateIso: latestMsgDateIso,
-      ownerEmail: ownerEmail,
-      senderEmail: senderEmail,
-      participants: TL_Email_collectParticipants_(messageSnapshots),
-      ownerInboundCount: ownerInbound.length,
-      ownerMatchedMessages: ownerInbound,
-      flattenedText: flattened.text,
-      flattenedTruncated: flattened.truncated,
-      query: String(options.query || TL_EMAIL.DEFAULT_QUERY),
-      limits: {
-        maxMessagesPerThread: TL_Email_int_(options.maxMessagesPerThread, TL_EMAIL.DEFAULT_MESSAGES_PER_THREAD),
-        maxCharsPerMessage: TL_Email_int_(options.maxCharsPerMessage, TL_EMAIL.DEFAULT_CHARS_PER_MESSAGE),
-        maxTotalChars: TL_Email_int_(options.maxTotalChars, TL_EMAIL.DEFAULT_TOTAL_CHARS)
-      }
+      chunkId: latestMsgId,
+      title: subject,
+      kind: "email_thread",
+      channel: "email",
+      status: "OPEN",
+      askedAt: "",
+      answeredAt: "",
+      executedAt: "",
+      draftOrPromptJson: JSON.stringify(payload),
+      lastAction: "EMAIL_PULL",
+      lastActionAt: nowIso
     }
   };
 }
