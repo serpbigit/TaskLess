@@ -232,9 +232,9 @@ function TL_Menu_HandleScheduleChoice_(waId, choice) {
 function TL_Menu_HandleManageWorkChoice_(waId, choice) {
   if (choice === "1") return TL_Menu_BuildPendingSummary_();
   if (choice === "2") return TL_Menu_BuildUrgentSummary_();
-  if (choice === "3") return TL_Menu_BuildAwaitingApprovalSummary_();
+  if (choice === "3") return TL_Menu_BuildAwaitingApprovalSummary_(waId);
   if (choice === "4") return TL_Menu_BuildSuggestedNextSteps_();
-  if (choice === "5") return TL_Menu_BuildDraftRepliesSummary_();
+  if (choice === "5") return TL_Menu_BuildDraftRepliesSummary_(waId);
   if (choice === "6") return TL_Menu_BuildWaitingOnOthersSummary_();
   if (choice === "7") return TL_Menu_BuildFollowupsSummary_();
   if (choice === "8") return TL_Menu_BuildOpenTasksSummary_();
@@ -877,7 +877,7 @@ function TL_Menu_HandleBossIntent_(ev, inboxRow, intent) {
 
   if (normalized.route === "summary") {
     TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
-    return TL_Menu_HandleSummaryIntent_(normalized);
+    return TL_Menu_HandleSummaryIntent_(normalized, bossWaId);
   }
 
   if (normalized.route === "capture") {
@@ -904,16 +904,16 @@ function TL_Menu_HandleBossIntent_(ev, inboxRow, intent) {
   return null;
 }
 
-function TL_Menu_HandleSummaryIntent_(intent) {
+function TL_Menu_HandleSummaryIntent_(intent, waId) {
   const summaryKind = String(intent && intent.summary_kind || "").trim().toLowerCase();
   switch (summaryKind) {
     case "ai_cost": return TL_AI_BuildMonthToDateSpendReport_();
     case "pending": return TL_Menu_BuildPendingSummary_();
     case "urgent":
     case "attention": return TL_Menu_BuildUrgentSummary_();
-    case "approvals": return TL_Menu_BuildAwaitingApprovalSummary_();
+    case "approvals": return TL_Menu_BuildAwaitingApprovalSummary_(waId);
     case "next_steps": return TL_Menu_BuildSuggestedNextSteps_();
-    case "draft_replies": return TL_Menu_BuildDraftRepliesSummary_();
+    case "draft_replies": return TL_Menu_BuildDraftRepliesSummary_(waId);
     case "waiting_on_others": return TL_Menu_BuildWaitingOnOthersSummary_();
     case "followups": return TL_Menu_BuildFollowupsSummary_();
     case "open_tasks": return TL_Menu_BuildOpenTasksSummary_();
@@ -1013,6 +1013,8 @@ function TL_Menu_SetDecisionPacket_(waId, packet) {
         proposal: String(item.proposal || ""),
         sender: String(item.sender || ""),
         receiver: String(item.receiver || ""),
+        channel: String(item.channel || ""),
+        messageType: String(item.messageType || ""),
         contactId: String(item.contactId || ""),
         approvalStatus: String(item.approvalStatus || ""),
         executionStatus: String(item.executionStatus || ""),
@@ -1044,6 +1046,8 @@ function TL_Menu_StoreDecisionPacket_(waId, kind, items) {
       proposal: item.proposal,
       sender: item.sender,
       receiver: item.receiver,
+      channel: item.channel,
+      messageType: item.messageType,
       contactId: item.contactId,
       approvalStatus: item.approvalStatus,
       executionStatus: item.executionStatus,
@@ -1292,6 +1296,8 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
     const approvalStatus = String(values[TLW_colIndex_("approval_status") - 1] || "").trim().toLowerCase();
     const executionStatus = String(values[TLW_colIndex_("execution_status") - 1] || "").trim().toLowerCase();
     const taskStatus = String(values[TLW_colIndex_("task_status") - 1] || "").trim().toLowerCase();
+    const channel = String(values[TLW_colIndex_("channel") - 1] || "").trim().toLowerCase();
+    const messageType = String(values[TLW_colIndex_("message_type") - 1] || "").trim().toLowerCase();
     const updates = {
       approval_required: approvalRequired ? "true" : String(values[TLW_colIndex_("approval_required") - 1] || ""),
       approval_status: "approved"
@@ -1302,6 +1308,42 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
     }
     if (taskStatus === "pending" || taskStatus === "proposal_ready" || taskStatus === "awaiting_approval") {
       updates.task_status = "approved";
+    }
+
+    if (channel === "email" && messageType === "email_thread" && typeof TL_Email_inboxValuesToSnapshot_ === "function" && typeof TL_Email_appendInboxVersion_ === "function") {
+      const snapshot = TL_Email_inboxValuesToSnapshot_(values, rowNumber);
+      const payload = snapshot.payload || {};
+      const approval = payload.approvalSnapshot || {};
+      const merged = TL_Email_mergePayload_(payload, {
+        approvalStatus: "approved",
+        approvalSnapshot: {
+          to: String(approval.to || "").trim(),
+          subject: String(approval.subject || "").trim(),
+          body: String(approval.body || "").trim(),
+          cc: String(approval.cc || "").trim(),
+          bcc: String(approval.bcc || "").trim(),
+          replyTo: String(approval.replyTo || "").trim(),
+          threadId: String(approval.threadId || snapshot.threadId || "").trim(),
+          latestMsgId: String(approval.latestMsgId || snapshot.chunkId || "").trim(),
+          approvalStatus: "approved",
+          sendStatus: String(payload.sendStatus || approval.sendStatus || "pending").trim() || "pending",
+          summary: String(approval.summary || payload.subject || "").trim(),
+          triage: approval.triage || {},
+          historyDepth: Number(approval.historyDepth || 0),
+          historyUsed: approval.historyUsed || []
+        }
+      });
+      TL_Email_appendInboxVersion_(rowNumber, {
+        approval_required: "true",
+        approval_status: "approved",
+        execution_status: "approved",
+        raw_payload_ref: merged,
+        notes: TL_Email_appendNote_(String(values[TLW_colIndex_("notes") - 1] || ""), "boss_approved")
+      }, "boss_confirm");
+      if (typeof TL_Orchestrator_FinalizeCaptureApproval_ === "function") {
+        TL_Orchestrator_FinalizeCaptureApproval_(rowNumber);
+      }
+      return true;
     }
 
     if (typeof TL_Orchestrator_updateRowFields_ === "function") {
@@ -1340,8 +1382,63 @@ function TL_Menu_ReviseDecisionRow_(rowNumber, revisedText) {
       };
     }
     const values = sh.getRange(rowNumber, 1, 1, TL_INBOX.HEADERS.length).getValues()[0];
+    const channel = String(values[TL_colIndex_("channel") - 1] || "").trim().toLowerCase();
+    const messageType = String(values[TL_colIndex_("message_type") - 1] || "").trim().toLowerCase();
     const existingNotes = String(values[TL_colIndex_("notes") - 1] || "");
     const nextNotes = TL_Capture_appendNote_(values, "boss_revision_text=" + cleaned);
+    if (channel === "email" && messageType === "email_thread" && typeof TL_Email_inboxValuesToSnapshot_ === "function" && typeof TL_Email_appendInboxVersion_ === "function") {
+      const snapshot = TL_Email_inboxValuesToSnapshot_(values, rowNumber);
+      const payload = snapshot.payload || {};
+      const approval = payload.approvalSnapshot || {};
+      const proposal = payload.proposal || {};
+      const currentSummary = String(values[TL_colIndex_("ai_summary") - 1] || approval.summary || payload.subject || "").trim();
+      const merged = TL_Email_mergePayload_(payload, {
+        proposal: {
+          to: String(proposal.to || approval.to || snapshot.senderEmail || "").trim(),
+          subject: String(proposal.subject || approval.subject || snapshot.title || "").trim(),
+          body: cleaned,
+          cc: String(proposal.cc || approval.cc || "").trim(),
+          bcc: String(proposal.bcc || approval.bcc || "").trim(),
+          replyTo: String(proposal.replyTo || approval.replyTo || "").trim(),
+          threadId: String(proposal.threadId || approval.threadId || snapshot.threadId || "").trim(),
+          latestMsgId: String(proposal.latestMsgId || approval.latestMsgId || snapshot.chunkId || "").trim(),
+          summary: currentSummary,
+          approvalStatus: "draft",
+          sendStatus: "pending"
+        },
+        approvalStatus: "awaiting_approval",
+        sendStatus: "pending",
+        approvalSnapshot: {
+          to: String(approval.to || proposal.to || snapshot.senderEmail || "").trim(),
+          subject: String(approval.subject || proposal.subject || snapshot.title || "").trim(),
+          body: cleaned,
+          cc: String(approval.cc || proposal.cc || "").trim(),
+          bcc: String(approval.bcc || proposal.bcc || "").trim(),
+          replyTo: String(approval.replyTo || proposal.replyTo || "").trim(),
+          threadId: String(approval.threadId || proposal.threadId || snapshot.threadId || "").trim(),
+          latestMsgId: String(approval.latestMsgId || proposal.latestMsgId || snapshot.chunkId || "").trim(),
+          approvalStatus: "awaiting_approval",
+          sendStatus: "pending",
+          summary: currentSummary,
+          triage: approval.triage || {},
+          historyDepth: Number(approval.historyDepth || 0),
+          historyUsed: approval.historyUsed || []
+        }
+      });
+      TL_Email_appendInboxVersion_(rowNumber, {
+        ai_summary: currentSummary || cleaned,
+        ai_proposal: cleaned,
+        approval_required: "true",
+        approval_status: "awaiting_approval",
+        execution_status: "awaiting_approval",
+        raw_payload_ref: merged,
+        notes: nextNotes || existingNotes
+      }, "boss_revise");
+      return {
+        summary: currentSummary || cleaned,
+        proposal: cleaned
+      };
+    }
     const updates = {
       text: cleaned,
       ai_summary: cleaned,
@@ -1415,6 +1512,7 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const index = Number(packet.cursor || 0) + 1;
   const total = packet.items.length;
   const summary = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 220);
+  const proposalPreview = TL_Menu_Preview_(current.proposal || "", 420);
   const duePreview = String(current.duePreview || "").trim();
   const dueLabel = String(current.dueLabel || "").trim();
   const reminderMessage = TL_Menu_Preview_(current.reminderMessage || summary, 220);
@@ -1428,6 +1526,7 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     label ? label : "",
     "הבנתי כך:",
     isReminder ? ("הודעה: " + reminderMessage) : summary,
+    proposalPreview && proposalPreview !== summary ? ("טיוטה מוצעת:\n" + proposalPreview) : "",
     isReminder && dueLabel ? ("זמן הפעלת תזכורת: " + dueLabel) : (duePreview ? ("יעד: " + duePreview) : ""),
     "",
     "1. אשר",
@@ -1562,16 +1661,17 @@ function TL_Menu_BuildUrgentSummary_() {
   return TL_Menu_BuildSummaryBlock_("מה צריך תשומת לב", rows, "אין כרגע פריטים בולטים שצריכים תשומת לב.");
 }
 
-function TL_Menu_BuildAwaitingApprovalSummary_() {
+function TL_Menu_BuildAwaitingApprovalSummary_(waId) {
   if (typeof TL_Session_BuildSurface_ === "function") {
-    return TL_Session_BuildSurface_("approvals");
+    const text = TL_Session_BuildSurface_("approvals");
+    return TL_Menu_attachApprovalPacketHint_(waId, text, "approvals");
   }
   const rows = TL_Menu_FilterRecentRows_(function(item) {
     const values = item.values;
     const approvalStatus = TL_Orchestrator_value_(values, "approval_status").toLowerCase();
     return approvalStatus === "draft" || approvalStatus === "awaiting_approval";
   }, TL_MENU.MAX_PENDING_SUMMARY);
-  return TL_Menu_BuildSummaryBlock_("ממתין לאישורים", rows, "אין כרגע פריטים שממתינים לאישור.");
+  return TL_Menu_attachApprovalPacketHint_(waId, TL_Menu_BuildSummaryBlock_("ממתין לאישורים", rows, "אין כרגע פריטים שממתינים לאישור."), "approvals");
 }
 
 function TL_Menu_BuildSuggestedNextSteps_() {
@@ -1586,12 +1686,102 @@ function TL_Menu_BuildSuggestedNextSteps_() {
   return TL_Menu_BuildSummaryBlock_("צעדים הבאים", rows, "אין כרגע הצעות פעולה בולטות.");
 }
 
-function TL_Menu_BuildDraftRepliesSummary_() {
+function TL_Menu_BuildDraftRepliesSummary_(waId) {
   const rows = TL_Menu_FilterRecentRows_(function(item) {
     const values = item.values;
-    return TL_Orchestrator_value_(values, "record_class").toLowerCase() === "proposal";
+    const recordClass = TL_Orchestrator_value_(values, "record_class").toLowerCase();
+    const approvalStatus = TL_Orchestrator_value_(values, "approval_status").toLowerCase();
+    const aiProposal = String(TL_Orchestrator_value_(values, "ai_proposal") || "").trim();
+    return (recordClass === "proposal" || !!aiProposal) &&
+      (approvalStatus === "draft" || approvalStatus === "awaiting_approval" || recordClass === "proposal");
   }, TL_MENU.MAX_PENDING_SUMMARY);
-  return TL_Menu_BuildSummaryBlock_("טיוטות לתגובה", rows, "אין כרגע טיוטות תגובה פתוחות.");
+  return TL_Menu_attachApprovalPacketHint_(waId, TL_Menu_BuildSummaryBlock_("טיוטות לתגובה", rows, "אין כרגע טיוטות תגובה פתוחות."), "drafts");
+}
+
+function TL_Menu_attachApprovalPacketHint_(waId, text, mode) {
+  const base = String(text || "").trim();
+  if (!waId) return base;
+  const items = TL_Menu_CollectApprovalPacketItems_(mode);
+  if (!items.length) {
+    TL_Menu_ClearDecisionPacket_(waId);
+    return base;
+  }
+  TL_Menu_StoreDecisionPacket_(waId, "decision", items);
+  return [
+    base,
+    "",
+    "לסקירת הטיוטות אחת-אחת שלח 3.",
+    "לאישור הכל שלח 1. לאישור חלקי שלח 2."
+  ].join("\n");
+}
+
+function TL_Menu_CollectApprovalPacketItems_(mode) {
+  if (typeof TL_Orchestrator_readRecentRows_ !== "function") return [];
+  const latest = {};
+  const contactsIndex = typeof TL_Session_getContactsIndex_ === "function" ? TL_Session_getContactsIndex_() : null;
+  const rows = TL_Orchestrator_readRecentRows_(160);
+  (rows || []).forEach(function(item) {
+    if (!item || !item.values) return;
+    const values = item.values;
+    const key = String(
+      TL_Orchestrator_value_(values, "record_id") ||
+      TL_Orchestrator_value_(values, "event_id") ||
+      ("row_" + item.rowNumber)
+    ).trim();
+    const current = latest[key];
+    const currentVersion = current ? Number(TL_Orchestrator_value_(current.values, "record_version") || 0) : -1;
+    const nextVersion = Number(TL_Orchestrator_value_(values, "record_version") || 0);
+    if (!current || nextVersion > currentVersion || (nextVersion === currentVersion && Number(item.rowNumber || 0) > Number(current.rowNumber || 0))) {
+      latest[key] = item;
+    }
+  });
+  const items = [];
+  Object.keys(latest).forEach(function(key) {
+    const item = latest[key];
+    const values = item.values;
+    const approvalStatus = String(TL_Orchestrator_value_(values, "approval_status") || "").toLowerCase();
+    if (approvalStatus !== "draft" && approvalStatus !== "awaiting_approval") return;
+    const channel = String(TL_Orchestrator_value_(values, "channel") || "").toLowerCase();
+    const sender = String(TL_Orchestrator_value_(values, "sender") || "").trim();
+    const contactId = String(TL_Orchestrator_value_(values, "contact_id") || "").trim();
+    const senderProfile = typeof TL_Session_classifyEmailSender_ === "function" && channel === "email"
+      ? TL_Session_classifyEmailSender_(sender, contactId, { contactsIndex: contactsIndex })
+      : null;
+    if (mode !== "drafts" && senderProfile && !senderProfile.isKnownContact && (senderProfile.kind === "no_reply" || senderProfile.kind === "system")) {
+      const priority = String(TL_Orchestrator_value_(values, "priority_level") || "").toLowerCase();
+      const importance = String(TL_Orchestrator_value_(values, "importance_level") || "").toLowerCase();
+      const suggested = String(TL_Orchestrator_value_(values, "suggested_action") || "").toLowerCase();
+      if (priority !== "high" && importance !== "high" && suggested !== "reply_now" && suggested !== "follow_up") return;
+    }
+    if (mode === "drafts" && !String(TL_Orchestrator_value_(values, "ai_proposal") || "").trim()) return;
+    const classified = typeof TL_BossPolicy_classifyItem_ === "function" ? TL_BossPolicy_classifyItem_(item, {}) : null;
+    items.push({
+      key: key,
+      rowNumber: item.rowNumber,
+      recordId: String(TL_Orchestrator_value_(values, "record_id") || "").trim(),
+      rootId: String(TL_Orchestrator_value_(values, "root_id") || "").trim(),
+      recordClass: String(TL_Orchestrator_value_(values, "record_class") || "").trim(),
+      summary: String(TL_Orchestrator_value_(values, "ai_summary") || TL_Orchestrator_value_(values, "thread_subject") || TL_Orchestrator_value_(values, "text") || "").trim(),
+      proposal: String(TL_Orchestrator_value_(values, "ai_proposal") || "").trim(),
+      sender: sender,
+      receiver: String(TL_Orchestrator_value_(values, "receiver") || "").trim(),
+      channel: channel,
+      messageType: String(TL_Orchestrator_value_(values, "message_type") || "").trim(),
+      contactId: contactId,
+      approvalStatus: approvalStatus,
+      executionStatus: String(TL_Orchestrator_value_(values, "execution_status") || "").trim(),
+      taskStatus: String(TL_Orchestrator_value_(values, "task_status") || "").trim(),
+      isUrgent: classified ? !!classified.isUrgent : false,
+      isHigh: classified ? !!classified.isHigh : false
+    });
+  });
+  items.sort(function(a, b) {
+    const aRank = (a.contactId ? 2 : 0) + (a.channel === "email" ? 1 : 0) - (/noreply|no-reply|no_reply|donotreply|postmaster|mailer-daemon/i.test(String(a.sender || "")) ? 2 : 0);
+    const bRank = (b.contactId ? 2 : 0) + (b.channel === "email" ? 1 : 0) - (/noreply|no-reply|no_reply|donotreply|postmaster|mailer-daemon/i.test(String(b.sender || "")) ? 2 : 0);
+    if (bRank !== aRank) return bRank - aRank;
+    return Number(b.rowNumber || 0) - Number(a.rowNumber || 0);
+  });
+  return items.slice(0, TL_MENU.MAX_PENDING_SUMMARY);
 }
 
 function TL_Menu_BuildWaitingOnOthersSummary_() {

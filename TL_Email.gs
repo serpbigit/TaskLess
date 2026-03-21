@@ -13,6 +13,7 @@ const TL_EMAIL = {
   DEFAULT_HISTORY_DEPTH: 5,
   DEFAULT_HISTORY_EXPANDED_DEPTH: 10,
   DEFAULT_TRIAGE_BATCH_SIZE: 5,
+  DEFAULT_SEND_BATCH_SIZE: 5,
   TRIGGER_HANDLER: "TL_Email_RunScheduled",
   PROP_LAST_PULL_AT: "TL_EMAIL_LAST_PULL_AT",
   PROP_LAST_PULL_QUERY: "TL_EMAIL_LAST_PULL_QUERY",
@@ -35,6 +36,7 @@ function TL_Email_RunScheduled() {
     const query = String(TLW_getSetting_("EMAIL_PULL_QUERY") || TL_EMAIL.SCHEDULED_QUERY_FALLBACK).trim() || TL_EMAIL.SCHEDULED_QUERY_FALLBACK;
     const maxThreads = TL_Email_int_(TLW_getSetting_("EMAIL_PULL_MAX_THREADS"), TL_EMAIL.DEFAULT_PULL_LIMIT);
     const triageBatchSize = TL_Email_int_(TLW_getSetting_("EMAIL_TRIAGE_BATCH_SIZE"), TL_EMAIL.DEFAULT_TRIAGE_BATCH_SIZE);
+    const sendBatchSize = TL_Email_int_(TLW_getSetting_("EMAIL_SEND_BATCH_SIZE"), TL_EMAIL.DEFAULT_SEND_BATCH_SIZE);
     const pull = TL_Email_PullImportant_Run({
       query: query,
       maxThreads: maxThreads
@@ -42,14 +44,17 @@ function TL_Email_RunScheduled() {
     const triage = TL_Email_isTriageEnabled_()
       ? TL_Email_TriagePending({ batchSize: triageBatchSize, dryRun: false })
       : { ok: true, skipped: true, reason: "email_triage_disabled" };
+    const sendApproved = TL_Email_SendApproved({ batchSize: sendBatchSize, dryRun: false });
 
     const result = {
       ok: true,
       query: query,
       maxThreads: maxThreads,
       triageBatchSize: triageBatchSize,
+      sendBatchSize: sendBatchSize,
       pull: pull,
-      triage: triage
+      triage: triage,
+      sendApproved: sendApproved
     };
     if (typeof TLW_logInfo_ === "function") TLW_logInfo_("email_run_scheduled", result);
     TL_Email_logExecution_("TL_Email_RunScheduled", result);
@@ -363,6 +368,96 @@ function TL_Email_buildInboxRecord_(payload, nowIso) {
   };
 }
 
+function TL_Email_inboxValuesToObject_(values) {
+  const out = {};
+  TL_WEBHOOK.INBOX_HEADERS.forEach(function(header, index) {
+    out[header] = values[index];
+  });
+  return out;
+}
+
+function TL_Email_nextEventId_(prefix) {
+  return "EMAIL_EVT_" + String(prefix || "state") + "_" + Utilities.getUuid().slice(0, 8);
+}
+
+function TL_Email_appendInboxVersion_(rowNumber, updates, reason, options) {
+  const opts = options || {};
+  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+  const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+  if (!sh || !rowNumber) throw new Error("TL_Email_appendInboxVersion_: invalid row");
+  const currentValues = sh.getRange(rowNumber, 1, 1, TL_WEBHOOK.INBOX_HEADERS.length).getValues()[0];
+  const current = TL_Email_inboxValuesToObject_(currentValues);
+  const next = {};
+  TL_WEBHOOK.INBOX_HEADERS.forEach(function(header) {
+    next[header] = current[header];
+  });
+  Object.keys(updates || {}).forEach(function(key) {
+    if (TL_WEBHOOK.INBOX_HEADERS.indexOf(key) === -1) return;
+    next[key] = updates[key];
+  });
+  const nowIso = String(opts.timestamp || next.timestamp || new Date().toISOString()).trim() || new Date().toISOString();
+  next.timestamp = nowIso;
+  next.parent_event_id = String(current.event_id || "").trim();
+  next.event_id = String(opts.eventId || TL_Email_nextEventId_(current.thread_id || current.message_id || current.record_id)).trim();
+  next.record_version = Number(current.record_version || 1) + 1;
+  if (updates && Object.prototype.hasOwnProperty.call(updates, "raw_payload_ref") && typeof next.raw_payload_ref !== "string") {
+    next.raw_payload_ref = TL_Email_jsonStringify_(next.raw_payload_ref);
+  }
+  const baseNotes = Object.prototype.hasOwnProperty.call(updates || {}, "notes")
+    ? String(updates.notes || "")
+    : String(current.notes || "");
+  next.notes = TL_Email_appendVersionNote_(baseNotes, reason);
+  const appended = TLW_appendInboxRow_(next, String(next.raw_payload_ref || ""));
+  return {
+    ok: true,
+    row: appended && appended.row,
+    recordId: String(next.record_id || "").trim(),
+    recordVersion: Number(next.record_version || 0)
+  };
+}
+
+function TL_Email_appendVersionNote_(existing, reason) {
+  return TL_Email_appendNote_(existing, "record_version_bump=" + String(reason || "state_change"));
+}
+
+function TL_Email_listLatestInboxEmailRows_(scanRows) {
+  if (typeof TL_Orchestrator_readRecentRows_ !== "function") return [];
+  const latest = {};
+  const rows = TL_Orchestrator_readRecentRows_(Number(scanRows || 120));
+  (rows || []).forEach(function(item) {
+    if (!item || !item.values) return;
+    const values = item.values;
+    if (String(TL_Orchestrator_value_(values, "channel") || "").toLowerCase() !== "email") return;
+    if (String(TL_Orchestrator_value_(values, "record_class") || "").toLowerCase() !== "communication") return;
+    if (String(TL_Orchestrator_value_(values, "message_type") || "").toLowerCase() !== "email_thread") return;
+    const key = String(
+      TL_Orchestrator_value_(values, "record_id") ||
+      TL_Orchestrator_value_(values, "thread_id") ||
+      TL_Orchestrator_value_(values, "message_id") ||
+      ("email_row_" + item.rowNumber)
+    ).trim();
+    const current = latest[key];
+    if (!current || TL_Email_isNewerInboxRow_(item, current)) latest[key] = item;
+  });
+  return Object.keys(latest).map(function(key) { return latest[key]; }).sort(function(a, b) {
+    const ad = new Date(TL_Orchestrator_value_(a.values, "timestamp") || 0);
+    const bd = new Date(TL_Orchestrator_value_(b.values, "timestamp") || 0);
+    return bd.getTime() - ad.getTime();
+  });
+}
+
+function TL_Email_isNewerInboxRow_(candidate, current) {
+  const cValues = candidate && candidate.values ? candidate.values : [];
+  const kValues = current && current.values ? current.values : [];
+  const cVersion = Number(TL_Orchestrator_value_(cValues, "record_version") || 0);
+  const kVersion = Number(TL_Orchestrator_value_(kValues, "record_version") || 0);
+  if (cVersion !== kVersion) return cVersion > kVersion;
+  const cAt = new Date(TL_Orchestrator_value_(cValues, "timestamp") || 0);
+  const kAt = new Date(TL_Orchestrator_value_(kValues, "timestamp") || 0);
+  if (cAt.getTime() !== kAt.getTime()) return cAt.getTime() > kAt.getTime();
+  return Number(candidate.rowNumber || 0) > Number(current.rowNumber || 0);
+}
+
 function TL_Email_upsertInboxThread_(snapshot) {
   const row = snapshot && (snapshot.inboxObj || snapshot.row || snapshot.rowObj);
   const recordId = String(snapshot && snapshot.refId || row && row.record_id || "").trim();
@@ -386,33 +481,27 @@ function TL_Email_upsertInboxThread_(snapshot) {
   if (!hasNewThreadState) {
     return { ok: true, recordId: recordId, row: rowNumber, created: false, updated: false, skipped: true };
   }
-
-  const next = current.slice();
-  headers.forEach(function(header, idx) {
-    if (header === "record_version") return;
-    if (header === "approval_required" || header === "approval_status" || header === "execution_status" ||
-        header === "ai_summary" || header === "ai_proposal" || header === "priority_level" ||
-        header === "importance_level" || header === "urgency_flag" || header === "needs_owner_now" ||
-        header === "suggested_action") {
-      return;
-    }
+  const updates = {};
+  headers.forEach(function(header) {
+    if (header === "record_version" || header === "event_id" || header === "parent_event_id") return;
     if (row[header] === undefined) return;
-    next[idx] = row[header];
+    updates[header] = row[header];
   });
-  sh.getRange(rowNumber, 1, 1, headers.length).setValues([next]);
-  TL_Orchestrator_updateRowFields_(rowNumber, {
-    ai_summary: "",
-    ai_proposal: "",
-    approval_required: "",
-    approval_status: "",
-    execution_status: "email_pulled",
-    priority_level: "",
-    importance_level: "",
-    urgency_flag: "",
-    needs_owner_now: "",
-    suggested_action: ""
-  }, "email_pull_refresh");
-  return { ok: true, recordId: recordId, row: rowNumber, created: false, updated: true };
+  updates.ai_summary = "";
+  updates.ai_proposal = "";
+  updates.approval_required = "";
+  updates.approval_status = "";
+  updates.execution_status = "email_pulled";
+  updates.priority_level = "";
+  updates.importance_level = "";
+  updates.urgency_flag = "";
+  updates.needs_owner_now = "";
+  updates.suggested_action = "";
+  updates.notes = TL_Email_appendNote_(String(current.notes || ""), "email_pulled");
+  const appended = TL_Email_appendInboxVersion_(rowNumber, updates, "email_pull_refresh", {
+    timestamp: String(row.timestamp || row.latest_message_at || new Date().toISOString())
+  });
+  return { ok: true, recordId: recordId, row: appended && appended.row, created: false, updated: true };
 }
 
 function TL_Email_resolveContactByEmail_(email) {
@@ -510,12 +599,9 @@ function TL_Email_TriagePending(opts) {
   const options = opts || {};
   const dryRun = options.dryRun === true || String(options.dryRun || "").toLowerCase() === "true";
   const batchSize = TL_Email_int_(options.batchSize, 5);
-  const rows = TL_Orchestrator_readRecentRows_(Math.max(batchSize * 8, 80)).filter(function(item) {
+  const rows = TL_Email_listLatestInboxEmailRows_(Math.max(batchSize * 8, 80)).filter(function(item) {
     const values = item.values;
-    return String(TL_Orchestrator_value_(values, "channel") || "").toLowerCase() === "email" &&
-      String(TL_Orchestrator_value_(values, "record_class") || "").toLowerCase() === "communication" &&
-      String(TL_Orchestrator_value_(values, "message_type") || "").toLowerCase() === "email_thread" &&
-      String(TL_Orchestrator_value_(values, "execution_status") || "").toLowerCase() === "email_pulled";
+    return String(TL_Orchestrator_value_(values, "execution_status") || "").toLowerCase() === "email_pulled";
   }).sort(function(a, b) {
     const ad = new Date(TL_Orchestrator_value_(a.values, "latest_message_at") || TL_Orchestrator_value_(a.values, "timestamp") || 0);
     const bd = new Date(TL_Orchestrator_value_(b.values, "latest_message_at") || TL_Orchestrator_value_(b.values, "timestamp") || 0);
@@ -550,19 +636,20 @@ function TL_Email_TriagePending(opts) {
         bossCard: bossCard
       });
     } else {
-      TL_Orchestrator_updateRowFields_(item.rowNumber, {
+      const nextNotes = TL_Email_appendNote_(TL_Orchestrator_value_(item.values, "notes"), "email_triaged");
+      TL_Email_appendInboxVersion_(item.rowNumber, {
         ai_summary: String(triage.summary || "").trim(),
         ai_proposal: String(proposal.body || triage.proposal || "").trim(),
         approval_required: "true",
         approval_status: "awaiting_approval",
         execution_status: "awaiting_approval",
-        raw_payload_ref: JSON.stringify(merged),
+        raw_payload_ref: merged,
         priority_level: String(triage.priority_level || "").trim(),
         importance_level: String(triage.importance_level || "").trim(),
         urgency_flag: String(triage.urgency_flag || "").trim(),
         needs_owner_now: String(triage.needs_owner_now || "").trim(),
         suggested_action: String(triage.suggested_action || "").trim(),
-        notes: TL_Email_appendNote_(TL_Orchestrator_value_(item.values, "notes"), "email_triaged")
+        notes: nextNotes
       }, "email_triage");
       result.queued++;
       result.updatedRows++;
@@ -679,21 +766,21 @@ function TL_Email_SendApproved(opts) {
   const options = opts || {};
   const dryRun = options.dryRun === true || String(options.dryRun || "").toLowerCase() === "true";
   const batchSize = TL_Email_int_(options.batchSize, 5);
-  const rows = TL_Email_scanRows_([TL_Email_tabRevision_()], function(item) {
-    const payload = TL_Email_getPayload_(item.data);
+  const rows = TL_Email_listLatestInboxEmailRows_(Math.max(batchSize * 8, 80)).filter(function(item) {
+    const snapshot = TL_Email_inboxValuesToSnapshot_(item.values, item.rowNumber);
+    const payload = snapshot.payload || {};
     const approval = payload.approvalSnapshot || {};
-    return String(item.data.channel || "").toLowerCase() === "email" &&
-      String(item.data.status || "").toUpperCase() === "REVISION" &&
-      String(payload.approvalStatus || approval.approvalStatus || "").toLowerCase() === "approved" &&
+    return String(TL_Orchestrator_value_(item.values, "approval_status") || "").toLowerCase() === "approved" &&
+      String(TL_Orchestrator_value_(item.values, "execution_status") || "").toLowerCase() === "approved" &&
       String(payload.sendStatus || approval.sendStatus || "").toLowerCase() !== "sent";
-  }, batchSize);
+  });
 
   const result = { ok: true, scanned: 0, sent: 0, failed: 0, skipped: 0, dryRun: dryRun };
 
-  for (let i = rows.length - 1; i >= 0 && result.scanned < batchSize; i--) {
+  for (let i = 0; i < rows.length && result.scanned < batchSize; i++) {
     const item = rows[i];
     result.scanned++;
-    const snapshot = TL_Email_rowToSnapshot_(item.data);
+    const snapshot = TL_Email_inboxValuesToSnapshot_(item.values, item.rowNumber);
     const payload = snapshot.payload || {};
     const approval = payload.approvalSnapshot || {};
     const to = TL_Email_normEmail_(approval.to || payload.to || "");
@@ -727,11 +814,13 @@ function TL_Email_SendApproved(opts) {
           lastAction: "EMAIL_SEND_FAILED",
           lastActionAt: new Date().toISOString()
         });
-        TL_Email_updateRow_(TL_Email_tabRevision_(), item.rowNumber, TL_Email_rowWithUpdates_(item.data, {
-          draftOrPromptJson: JSON.stringify(failedPayload),
-          lastAction: "EMAIL_SEND_FAILED",
-          lastActionAt: new Date().toISOString()
-        }));
+        TL_Email_appendInboxVersion_(item.rowNumber, {
+          approval_required: "true",
+          approval_status: "approved",
+          execution_status: "send_failed",
+          raw_payload_ref: failedPayload,
+          notes: TL_Email_appendNote_(TL_Orchestrator_value_(item.values, "notes"), "email_send_failed")
+        }, "email_send_failed");
         result.failed++;
         continue;
       }
@@ -754,17 +843,17 @@ function TL_Email_SendApproved(opts) {
       lastAction: "EMAIL_SEND",
       lastActionAt: sentAtIso
     });
-    const nextRow = TL_Email_rowWithUpdates_(item.data, {
-      status: "ARCHIVE",
-      draftOrPromptJson: JSON.stringify(sentPayload),
-      executedAt: sentAtIso,
-      lastAction: "EMAIL_SEND",
-      lastActionAt: sentAtIso
-    });
-    TL_Email_moveRow_(TL_Email_tabRevision_(), item.rowNumber, TL_Email_tabArchive_(), nextRow);
+    TL_Email_appendInboxVersion_(item.rowNumber, {
+      approval_required: "true",
+      approval_status: "approved",
+      execution_status: dryRun ? "dry_run_sent" : "sent",
+      raw_payload_ref: sentPayload,
+      notes: TL_Email_appendNote_(TL_Orchestrator_value_(item.values, "notes"), "email_sent")
+    }, dryRun ? "email_send_dry_run" : "email_send");
     result.sent++;
   }
 
+  TL_Email_logExecution_("TL_Email_SendApproved", result);
   return result;
 }
 

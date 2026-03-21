@@ -1,8 +1,8 @@
 /**
  * TL_Session
  *
- * Session-layer helpers that turn prepared evidence from WhatsApp INBOX rows
- * and email sidecar rows into grouped cleanup/planning views.
+ * Session-layer helpers that turn prepared evidence from INBOX rows into
+ * grouped cleanup/planning views.
  */
 
 const TL_SESSION = {
@@ -60,15 +60,13 @@ function TL_Session_collectPreparedItems_(options) {
   const context = {
     contactsIndex: TL_Session_getContactsIndex_()
   };
-  return []
-    .concat(TL_Session_collectInboxPreparedItems_(options, context))
-    .concat(TL_Session_collectEmailPreparedItems_(options, context));
+  return TL_Session_collectInboxPreparedItems_(options, context);
 }
 
 function TL_Session_collectInboxPreparedItems_(options, context) {
   if (typeof TL_Orchestrator_readRecentRows_ !== "function") return [];
   const scanRows = Number((options && options.inboxScanRows) || TL_SESSION.DEFAULT_INBOX_SCAN_ROWS);
-  const rows = TL_Orchestrator_readRecentRows_(scanRows);
+  const rows = TL_Session_latestInboxRows_(TL_Orchestrator_readRecentRows_(scanRows));
   const out = [];
   for (let i = rows.length - 1; i >= 0; i--) {
     const item = TL_Session_inboxRowToItem_(rows[i], context);
@@ -78,15 +76,7 @@ function TL_Session_collectInboxPreparedItems_(options, context) {
 }
 
 function TL_Session_collectEmailPreparedItems_(options, context) {
-  if (typeof TL_Email_scanRows_ !== "function") return [];
-  const scanRows = Number((options && options.emailScanRows) || TL_SESSION.DEFAULT_EMAIL_SCAN_ROWS);
-  const rows = TL_Email_scanRows_([TL_Email_tabOpen_(), TL_Email_tabRevision_()], null, scanRows);
-  const out = [];
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const item = TL_Session_emailRowToItem_(rows[i], context);
-    if (item) out.push(item);
-  }
-  return out;
+  return [];
 }
 
 function TL_Session_inboxRowToItem_(row, context) {
@@ -94,6 +84,7 @@ function TL_Session_inboxRowToItem_(row, context) {
   const values = row.values;
   const recordClass = TL_Orchestrator_value_(values, "record_class").toLowerCase();
   const direction = TL_Orchestrator_value_(values, "direction").toLowerCase();
+  const channel = String(TL_Orchestrator_value_(values, "channel") || "whatsapp").toLowerCase();
   const text = TL_Orchestrator_value_(values, "text");
   const summary = TL_Orchestrator_value_(values, "ai_summary") || text || TL_Orchestrator_value_(values, "ai_proposal");
   const notes = TL_Orchestrator_value_(values, "notes");
@@ -104,15 +95,17 @@ function TL_Session_inboxRowToItem_(row, context) {
   const actorPhone = direction === "incoming"
     ? TL_Orchestrator_value_(values, "sender")
     : (TL_Orchestrator_value_(values, "receiver") || TL_Orchestrator_value_(values, "sender"));
+  const senderProfile = TL_Session_classifySender_(values, context);
   const entity = TL_Session_resolveEntityKey_({
     contactId: TL_Orchestrator_value_(values, "contact_id"),
-    phone: actorPhone,
-    label: actorPhone
+    phone: channel === "email" ? "" : actorPhone,
+    email: channel === "email" ? senderProfile.address : "",
+    label: senderProfile.label || actorPhone
   }, context);
   const evidence = TL_Session_buildInboxEvidence_(values);
   const item = {
     source: "inbox",
-    channel: String(TL_Orchestrator_value_(values, "channel") || "whatsapp").toLowerCase(),
+    channel: channel,
     rowNumber: Number(row.rowNumber || 0),
     sourceId: String(TL_Orchestrator_value_(values, "record_id") || TL_Orchestrator_value_(values, "message_id") || ("inbox_row_" + row.rowNumber)),
     recordClass: recordClass,
@@ -133,7 +126,11 @@ function TL_Session_inboxRowToItem_(row, context) {
     priorityLevel: TL_Orchestrator_value_(values, "priority_level").toLowerCase(),
     importanceLevel: TL_Orchestrator_value_(values, "importance_level").toLowerCase(),
     lastAt: TL_Session_parseDate_(values[0]),
-    evidence: evidence
+    evidence: evidence,
+    senderKind: senderProfile.kind,
+    senderAddress: senderProfile.address,
+    isKnownContact: senderProfile.isKnownContact === true,
+    senderLabel: senderProfile.label
   };
   item.score = TL_Session_scoreItem_(item);
   return item;
@@ -185,6 +182,7 @@ function TL_Session_emailRowToItem_(row, context) {
 
 function TL_Session_buildInboxEvidence_(values) {
   const out = [];
+  const channel = String(TL_Orchestrator_value_(values, "channel") || "").toLowerCase();
   const approvalStatus = TL_Orchestrator_value_(values, "approval_status").toLowerCase();
   const taskStatus = TL_Orchestrator_value_(values, "task_status").toLowerCase();
   const executionStatus = TL_Orchestrator_value_(values, "execution_status").toLowerCase();
@@ -195,13 +193,20 @@ function TL_Session_buildInboxEvidence_(values) {
   const notes = TL_Orchestrator_value_(values, "notes").toLowerCase();
   const ts = TL_Session_parseDate_(values[0]);
   const ageHours = ts ? Math.floor((Date.now() - ts.getTime()) / 3600000) : 0;
+  const aiProposal = TL_Orchestrator_value_(values, "ai_proposal");
+  const rawPayload = channel === "email" && typeof TL_Email_parseInboxPayload_ === "function"
+    ? TL_Email_parseInboxPayload_(TL_Orchestrator_value_(values, "raw_payload_ref"))
+    : {};
+  const triage = rawPayload && rawPayload.triage ? rawPayload.triage : {};
 
   if (approvalStatus === "draft" || approvalStatus === "awaiting_approval") out.push("ממתין לאישור");
+  if (channel === "email" && aiProposal) out.push("טיוטת תשובה מוכנה");
   if (due) out.push("יש יעד: " + TL_Menu_Preview_(due, 24));
   if (taskStatus === "reminder_pending" || executionStatus === "reminder_pending") out.push("תזכורת פתוחה");
   if (suggested === "follow_up") out.push("אותת כמעקב");
   if (suggested === "reply_now") out.push("אותת כמועמד לתגובה");
   if (urgencyFlag || needsOwnerNow) out.push("סומן קודם כצריך תשומת לב");
+  if (channel === "email" && Number(triage.historyDepth || 0) > 0) out.push("יש היסטוריה קודמת עם השולח");
   if (notes.indexOf("boss_capture_kind=task") !== -1) out.push("פריט מבוסס בקשת בוס");
   if (notes.indexOf("boss_capture_kind=reminder") !== -1) out.push("פריט מבוסס תזכורת");
   if (ageHours >= 48) out.push("פתוח כבר " + ageHours + " שעות");
@@ -232,6 +237,9 @@ function TL_Session_scoreItem_(item) {
   if (item.dueText) score += 2;
   if (item.urgencyFlag === "true" || item.needsOwnerNow === "true") score += 1;
   if (item.priorityLevel === "high" || item.importanceLevel === "high") score += 1;
+  if (item.isKnownContact) score += 2;
+  if (item.channel === "email" && item.senderKind === "human_email") score += 1;
+  if (item.channel === "email" && (item.senderKind === "system" || item.senderKind === "no_reply")) score -= 3;
   return score;
 }
 
@@ -277,9 +285,12 @@ function TL_Session_selectSurfaceGroups_(surface, groups, options) {
   const selected = (groups || []).filter(function(group) {
     const top = group.topItem || {};
     if (surface === TL_SESSION.SURFACES.APPROVALS) {
-      return group.items.some(function(item) {
+      const hasApproval = group.items.some(function(item) {
         return item.approvalStatus === "draft" || item.approvalStatus === "awaiting_approval";
       });
+      if (!hasApproval) return false;
+      if (TL_Session_shouldSuppressApprovalGroup_(group)) return false;
+      return true;
     }
     if (surface === TL_SESSION.SURFACES.NEXT_STEPS) {
       return group.items.some(function(item) {
@@ -294,6 +305,10 @@ function TL_Session_selectSurfaceGroups_(surface, groups, options) {
   });
 
   selected.sort(function(a, b) {
+    if (surface === TL_SESSION.SURFACES.APPROVALS) {
+      const senderRankDiff = TL_Session_groupApprovalRank_(b) - TL_Session_groupApprovalRank_(a);
+      if (senderRankDiff !== 0) return senderRankDiff;
+    }
     const scoreDiff = Number(b.score || 0) - Number(a.score || 0);
     if (scoreDiff !== 0) return scoreDiff;
     const at = a.latestAt instanceof Date ? a.latestAt.getTime() : 0;
@@ -318,7 +333,9 @@ function TL_Session_renderSurface_(surface, groups) {
 
 function TL_Session_formatGroupLine_(surface, group) {
   const channels = group.channels.length ? group.channels.join("+") : "unknown";
-  const evidence = (group.evidence || []).slice(0, 3).join("; ");
+  const evidence = (surface === TL_SESSION.SURFACES.APPROVALS
+    ? TL_Session_compactApprovalEvidence_(group)
+    : (group.evidence || []).slice(0, 3)).join("; ");
   const next = TL_Session_actionLabel_(group.topItem && group.topItem.suggestedAction);
   const parts = [
     "- " + String(group.label || "פריט"),
@@ -454,4 +471,117 @@ function TL_Session_uniqueStrings_(items) {
     if (value && out.indexOf(value) === -1) out.push(value);
   });
   return out;
+}
+
+function TL_Session_latestInboxRows_(rows) {
+  const latest = {};
+  (rows || []).forEach(function(item) {
+    if (!item || !item.values) return;
+    const values = item.values;
+    const key = String(
+      TL_Orchestrator_value_(values, "record_id") ||
+      TL_Orchestrator_value_(values, "message_id") ||
+      TL_Orchestrator_value_(values, "event_id") ||
+      ("row_" + item.rowNumber)
+    ).trim();
+    if (!key) return;
+    const current = latest[key];
+    if (!current || TL_Session_isNewerInboxItem_(item, current)) {
+      latest[key] = item;
+    }
+  });
+  return Object.keys(latest).map(function(key) { return latest[key]; }).sort(function(a, b) {
+    const av = TL_Session_parseDate_(TL_Orchestrator_value_(a.values, "timestamp")) || new Date(0);
+    const bv = TL_Session_parseDate_(TL_Orchestrator_value_(b.values, "timestamp")) || new Date(0);
+    return bv.getTime() - av.getTime();
+  });
+}
+
+function TL_Session_isNewerInboxItem_(candidate, current) {
+  const cValues = candidate && candidate.values ? candidate.values : [];
+  const kValues = current && current.values ? current.values : [];
+  const cVersion = Number(TL_Orchestrator_value_(cValues, "record_version") || 0);
+  const kVersion = Number(TL_Orchestrator_value_(kValues, "record_version") || 0);
+  if (cVersion !== kVersion) return cVersion > kVersion;
+  const cAt = TL_Session_parseDate_(TL_Orchestrator_value_(cValues, "timestamp")) || new Date(0);
+  const kAt = TL_Session_parseDate_(TL_Orchestrator_value_(kValues, "timestamp")) || new Date(0);
+  if (cAt.getTime() !== kAt.getTime()) return cAt.getTime() > kAt.getTime();
+  return Number(candidate.rowNumber || 0) > Number(current.rowNumber || 0);
+}
+
+function TL_Session_classifySender_(values, context) {
+  const channel = String(TL_Orchestrator_value_(values, "channel") || "whatsapp").toLowerCase();
+  const contactId = String(TL_Orchestrator_value_(values, "contact_id") || "").trim();
+  if (channel !== "email") {
+    const phone = TLW_normalizePhone_(TL_Orchestrator_value_(values, "sender") || "");
+    const index = context && context.contactsIndex ? context.contactsIndex : TL_Session_getContactsIndex_();
+    const contact = (contactId && index.byContactId[contactId]) || (phone && index.byPhone[phone]) || null;
+    return {
+      kind: "whatsapp",
+      address: phone,
+      label: contact && contact.name ? contact.name : (TL_Orchestrator_value_(values, "sender") || phone),
+      isKnownContact: !!contact
+    };
+  }
+  return TL_Session_classifyEmailSender_(TL_Orchestrator_value_(values, "sender"), contactId, context);
+}
+
+function TL_Session_classifyEmailSender_(senderValue, contactId, context) {
+  const raw = String(senderValue || "").trim();
+  const email = TL_Session_extractEmailAddress_(raw);
+  const index = context && context.contactsIndex ? context.contactsIndex : TL_Session_getContactsIndex_();
+  const contact = (contactId && index.byContactId[contactId]) || (email && index.byEmail[email]) || null;
+  const local = email.split("@")[0] || "";
+  const normalizedLocal = local.toLowerCase();
+  const isNoReply = /(^|[._-])(noreply|no-reply|no_reply|donotreply|do-not-reply|do_not_reply)([._-]|$)/.test(normalizedLocal) ||
+    normalizedLocal === "postmaster" || normalizedLocal === "mailer-daemon";
+  const isSystem = !contact && !isNoReply && (
+    normalizedLocal.indexOf("notification") !== -1 ||
+    normalizedLocal.indexOf("notifications") !== -1 ||
+    normalizedLocal.indexOf("updates") !== -1 ||
+    normalizedLocal.indexOf("support") !== -1 ||
+    normalizedLocal.indexOf("admin") !== -1
+  );
+  return {
+    kind: contact ? "known_contact" : (isNoReply ? "no_reply" : (isSystem ? "system" : "human_email")),
+    address: email,
+    label: contact && contact.name ? contact.name : (raw || email),
+    isKnownContact: !!contact
+  };
+}
+
+function TL_Session_extractEmailAddress_(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  const match = raw.match(/[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}/i);
+  return match ? String(match[0] || "").trim().toLowerCase() : raw;
+}
+
+function TL_Session_shouldSuppressApprovalGroup_(group) {
+  const top = group && group.topItem ? group.topItem : {};
+  if (top.channel !== "email") return false;
+  if (top.isKnownContact) return false;
+  if (top.senderKind !== "no_reply" && top.senderKind !== "system") return false;
+  return !(top.isUrgent || top.isHigh || top.priorityLevel === "high" || top.importanceLevel === "high");
+}
+
+function TL_Session_groupApprovalRank_(group) {
+  const top = group && group.topItem ? group.topItem : {};
+  if (top.channel !== "email") return 4;
+  if (top.isKnownContact) return 5;
+  if (top.senderKind === "human_email") return 4;
+  if (top.senderKind === "system") return 1;
+  if (top.senderKind === "no_reply") return 0;
+  return 3;
+}
+
+function TL_Session_compactApprovalEvidence_(group) {
+  const evidence = TL_Session_uniqueStrings_(group && group.evidence ? group.evidence : []);
+  const preferred = [];
+  evidence.forEach(function(reason) {
+    if (preferred.length >= 2) return;
+    if (reason === "סומן כהדורש תשומת לב" && evidence.indexOf("ממתין לאישור") !== -1) return;
+    preferred.push(reason);
+  });
+  return preferred.length ? preferred : evidence.slice(0, 2);
 }
