@@ -689,7 +689,11 @@ function TL_Email_TriageSnapshot_(snapshot, opts) {
   const draftContext = typeof TL_DraftContext_BuildForEmailSnapshot_ === "function"
     ? TL_DraftContext_BuildForEmailSnapshot_(snapshot)
     : null;
-  const prompt = TL_Email_buildTriagePrompt_(payload.flattenedText || snapshot.title || "", cfg.language, cfg.bossName, history, payload, draftContext && draftContext.promptBrief);
+  const inputText = payload.flattenedText || snapshot.title || "";
+  const replyLanguage = typeof TL_AI_resolveReplyLanguage_ === "function"
+    ? TL_AI_resolveReplyLanguage_(inputText, cfg.language, cfg.replyLanguagePolicy)
+    : cfg.language;
+  const prompt = TL_Email_buildTriagePrompt_(inputText, cfg.language, cfg.bossName, history, payload, draftContext && draftContext.promptBrief, replyLanguage);
   const result = TL_AI_callPrompt_(prompt);
 
   return {
@@ -918,19 +922,27 @@ function TL_Email_replySubject_(subject) {
 
 function TL_Email_replyBody_(snapshot, triage, opts) {
   const payload = snapshot.payload || {};
-  const core = String((triage && triage.proposal) || (triage && triage.summary) || payload.flattenedText || "").trim();
-  return [
-    "Hi,",
-    "",
-    core || "Thanks. I will review and get back to you shortly.",
-    "",
-    "Best,",
-    "TaskLess"
-  ].join("\n");
+  const explicitProposal = String((triage && triage.proposal) || "").trim();
+  if (explicitProposal) return explicitProposal;
+  const core = String((triage && triage.summary) || payload.flattenedText || "").trim();
+  const bossLanguage = String(TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "Hebrew").trim();
+  const replyLanguagePolicy = String(TLW_getSetting_("REPLY_LANGUAGE_POLICY") || "match_incoming").trim().toLowerCase();
+  const replyLanguage = typeof TL_AI_resolveReplyLanguage_ === "function"
+    ? TL_AI_resolveReplyLanguage_(payload.flattenedText || snapshot.title || "", bossLanguage, replyLanguagePolicy)
+    : bossLanguage;
+  if (String(replyLanguage).toLowerCase() === "hebrew") {
+    return core || "תודה, קיבלתי. אבדוק ואחזור אליך בהקדם.";
+  }
+  return core || "Thanks, received. I will review and get back to you shortly.";
 }
 
 function TL_Email_heuristicTriage_(inputText, payload, history) {
   const text = String(inputText || "").trim();
+  const bossLanguage = String(TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "Hebrew").trim();
+  const replyLanguagePolicy = String(TLW_getSetting_("REPLY_LANGUAGE_POLICY") || "match_incoming").trim().toLowerCase();
+  const replyLanguage = typeof TL_AI_resolveReplyLanguage_ === "function"
+    ? TL_AI_resolveReplyLanguage_(text, bossLanguage, replyLanguagePolicy)
+    : bossLanguage;
   const urgency = /(urgent|asap|now|today|immediately|deadline|before|tonight)/i.test(text) ? "true" : "false";
   const importance = /(invoice|payment|contract|meeting|quote|customer|client|legal|deadline|issue|problem|risk)/i.test(text) ? "high" : "medium";
   const priority = urgency === "true" ? "high" : importance === "high" ? "medium" : "low";
@@ -951,13 +963,15 @@ function TL_Email_heuristicTriage_(inputText, payload, history) {
     needs_owner_now: urgency,
     suggested_action: action,
     summary: text.slice(0, 220) || "Email triage pending.",
-    proposal: urgency === "true" ? "Reply promptly and acknowledge the request." : "Draft a concise reply for Boss review.",
+    proposal: urgency === "true"
+      ? (String(replyLanguage).toLowerCase() === "hebrew" ? "השב בהקדם ואשר שקיבלת את הבקשה." : "Reply promptly and acknowledge the request.")
+      : (String(replyLanguage).toLowerCase() === "hebrew" ? "נסח תשובה קצרה לאישור הבוס." : "Draft a concise reply for Boss review."),
     historyDepth: history.depth,
     historyUsed: history.items
   };
 }
 
-function TL_Email_buildTriagePrompt_(inputText, language, bossName, history, payload, draftContextBrief) {
+function TL_Email_buildTriagePrompt_(inputText, language, bossName, history, payload, draftContextBrief, replyLanguage) {
   const historyText = (history && history.items && history.items.length)
     ? history.items.map(function(item, idx) {
         return "[" + (idx + 1) + "] " + item.subject + "\n" + item.flattenedText;
@@ -966,7 +980,8 @@ function TL_Email_buildTriagePrompt_(inputText, language, bossName, history, pay
   return [
     "You are TaskLess, the email-side secretary assistant.",
     "Return strict JSON only.",
-    "Language: " + String(language || "Hebrew"),
+    "Boss UI language: " + String(language || "Hebrew"),
+    "Draft reply language: " + String(replyLanguage || language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Return exactly one JSON object with these keys only:",
     '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","significance_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","summary":"string","proposal":"string"}',
@@ -976,8 +991,8 @@ function TL_Email_buildTriagePrompt_(inputText, language, bossName, history, pay
     "urgency_flag: true only when timing matters now or very soon.",
     "significance_flag: true when broader history/context materially changes how the Boss should view this thread.",
     "needs_owner_now: true only when the Boss personally should decide or act soon.",
-    "summary: 1-2 factual sentences about the email thread.",
-    "proposal: exact next-step wording on the Boss's behalf. If a reply should be sent, write the actual reply text. If no reply should be sent, explain the recommended action clearly.",
+    "summary: 1-2 factual sentences about the email thread in the Boss UI language.",
+    "proposal: exact next-step wording on the Boss's behalf in the Draft reply language. If a reply should be sent, write the actual reply text. If no reply should be sent, explain the recommended action clearly.",
     "Validation rules:",
     "Always output all keys.",
     "Use only the allowed enum values.",

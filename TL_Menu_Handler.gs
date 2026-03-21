@@ -1814,8 +1814,8 @@ function TL_Menu_attachApprovalPacketHint_(waId, text, mode) {
   }
   const livePacket = packet || TL_Menu_GetDecisionPacket_(waId);
   const reviewIntro = items.length === 1
-    ? "פתחתי מיד את הפריט שמחכה לאישור."
-    : "פתחתי מיד את הפריט הראשון לסקירה.";
+    ? "פותח עכשיו את הפריט היחיד שממתין להחלטה."
+    : ("פותח עכשיו פריט 1 מתוך " + items.length + ".");
   const digest = TL_Menu_BuildApprovalDigest_(items, mode, base);
   return [
     digest,
@@ -1950,14 +1950,13 @@ function TL_Menu_BuildApprovalDigest_(items, mode, fallbackText) {
   const urgentCount = list.filter(function(item) { return !!item.isUrgent || !!item.isHigh; }).length;
   const sendableCount = list.filter(function(item) { return item.actionKind === "send_email" || item.actionKind === "approve_reminder"; }).length;
   const closableCount = list.filter(function(item) { return item.actionKind === "close_no_send"; }).length;
-  const title = mode === "drafts" ? "טיוטות לתגובה" : "ממתין לאישורך";
+  const title = mode === "drafts" ? "טיוטות לבדיקה" : "ממתין להחלטתך";
   return [
     title,
-    "סה\"כ פריטים פתוחים: " + total,
-    "דורשים אישור עכשיו: " + total,
-    sendableCount ? ("מוכנים לביצוע/שליחה: " + sendableCount) : "",
-    closableCount ? ("מיועדים לסגירה ללא שליחה: " + closableCount) : "",
-    "דחופים או חשובים: " + urgentCount,
+    "פתוחים עכשיו: " + total,
+    "דורשים החלטה: " + total + (urgentCount ? (" | דחוף/חשוב: " + urgentCount) : ""),
+    sendableCount ? ("מוכנים לשליחה/ביצוע: " + sendableCount) : "",
+    closableCount ? ("מוכנים לסגירה: " + closableCount) : "",
     "ערוצים: email " + emailCount + (whatsappCount ? (" | whatsapp " + whatsappCount) : "")
   ].filter(Boolean).join("\n");
 }

@@ -18,6 +18,7 @@ function TL_AI_getConfig_() {
   const endpoint = String(TLW_getSetting_("API END POINT") || "").trim();
   const token = String(TLW_getSetting_("API TOKEN") || "").trim();
   const language = String(TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "Hebrew").trim();
+  const replyLanguagePolicy = String(TLW_getSetting_("REPLY_LANGUAGE_POLICY") || "match_incoming").trim().toLowerCase();
   const bossName = String(TLW_getSetting_("BOSS_NAME") || "Boss").trim();
 
   if (!endpoint) throw new Error("Missing SETTINGS value: API END POINT");
@@ -30,9 +31,27 @@ function TL_AI_getConfig_() {
     endpoint: endpoint,
     token: token,
     language: language,
+    replyLanguagePolicy: replyLanguagePolicy === "boss_language" ? "boss_language" : "match_incoming",
     bossName: bossName,
     modelName: TL_AI_COST.MODEL_NAME
   };
+}
+
+function TL_AI_detectMessageLanguage_(inputText, fallbackLanguage) {
+  const text = String(inputText || "");
+  const fallback = String(fallbackLanguage || "Hebrew").trim() || "Hebrew";
+  const hebrewCount = (text.match(/[\u0590-\u05FF]/g) || []).length;
+  const latinCount = (text.match(/[A-Za-z]/g) || []).length;
+  if (hebrewCount >= 3 && hebrewCount >= latinCount) return "Hebrew";
+  if (latinCount >= 6 && latinCount > hebrewCount) return "English";
+  return fallback;
+}
+
+function TL_AI_resolveReplyLanguage_(inputText, bossLanguage, replyLanguagePolicy) {
+  const policy = String(replyLanguagePolicy || "match_incoming").trim().toLowerCase();
+  const bossUiLanguage = String(bossLanguage || "Hebrew").trim() || "Hebrew";
+  if (policy === "boss_language") return bossUiLanguage;
+  return TL_AI_detectMessageLanguage_(inputText, bossUiLanguage);
 }
 
 function TL_AI_EnsureCostTrackerSheet() {
@@ -123,28 +142,31 @@ function TL_AI_BuildMonthToDateSpendReport_() {
   ].join("\n");
 }
 
-function TL_AI_buildPrompt_(inputText, language, bossName, draftContextBrief) {
+function TL_AI_buildPrompt_(inputText, language, bossName, draftContextBrief, replyLanguage) {
   return [
     "You are TaskLess, a business communication assistant.",
     "Return strict JSON only.",
-    "Language: " + String(language || "Hebrew"),
+    "Boss UI language: " + String(language || "Hebrew"),
+    "Draft reply language: " + String(replyLanguage || language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Required JSON shape:",
     '{"summary":"...","proposal":"..."}',
     "Example JSON response:",
     '{"summary":"לקוח מבקש לקבוע פגישה מחר בבוקר.","proposal":"שלום, אפשר לקבוע מחר בבוקר. אשמח אם תאשר שעה שנוחה לך."}',
-    "The proposal should be a concise draft reply written on the Boss's behalf.",
+    "summary must be written in the Boss UI language.",
+    "proposal must be written in the Draft reply language and should be a concise exact draft reply written on the Boss's behalf.",
     draftContextBrief ? draftContextBrief : "Draft context brief: none",
     "User message:",
     String(inputText || "")
   ].join("\n");
 }
 
-function TL_AI_buildTriagePrompt_(inputText, language, bossName, draftContextBrief) {
+function TL_AI_buildTriagePrompt_(inputText, language, bossName, draftContextBrief, replyLanguage) {
   return [
     "You are Amanda, the TaskLess AI assistant for business communication triage.",
     "Analyze the incoming message and return strict JSON only.",
-    "Language preference: " + String(language || "Hebrew"),
+    "Boss UI language: " + String(language || "Hebrew"),
+    "Draft reply language: " + String(replyLanguage || language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Return exactly one JSON object with these keys only:",
     '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","summary":"string","proposal":"string"}',
@@ -162,8 +184,8 @@ function TL_AI_buildTriagePrompt_(inputText, language, bossName, draftContextBri
     "wait = no reply now; monitor or wait for another party.",
     "ignore = no response/action needed.",
     "review_manually = needs human judgment before choosing next action.",
-    "summary: 1-2 factual sentences, no fluff, no invented facts.",
-    "proposal: exact next-step wording on the Boss's behalf. If a reply is appropriate, write the actual draft reply text. If no reply should be sent, explain the recommended action plainly.",
+    "summary: 1-2 factual sentences in the Boss UI language, no fluff, no invented facts.",
+    "proposal: exact next-step wording on the Boss's behalf in the Draft reply language. If a reply is appropriate, write the actual draft reply text. If no reply should be sent, explain the recommended action plainly.",
     "Validation rules:",
     "Always output all keys.",
     "Use only the allowed enum values.",
@@ -512,10 +534,14 @@ function TL_AI_ExtractContactEnrichment_(inputText) {
 
 function TL_AI_SmokeTest() {
   const cfg = TL_AI_getConfig_();
+  const inputText = "לקוח כתב: האם אפשר לקבוע פגישה מחר ב-10:00?";
+  const replyLanguage = TL_AI_resolveReplyLanguage_(inputText, cfg.language, cfg.replyLanguagePolicy);
   const prompt = TL_AI_buildPrompt_(
-    "לקוח כתב: האם אפשר לקבוע פגישה מחר ב-10:00?",
+    inputText,
     cfg.language,
-    cfg.bossName
+    cfg.bossName,
+    "",
+    replyLanguage
   );
   const result = TL_AI_callPrompt_(prompt);
   TLW_logInfo_("ai_smoke_test", {
@@ -535,7 +561,9 @@ function TL_AI_CapabilitiesTest() {
 
 function TL_AI_TestPrompt(promptText) {
   const cfg = TL_AI_getConfig_();
-  const prompt = TL_AI_buildPrompt_(String(promptText || ""), cfg.language, cfg.bossName);
+  const inputText = String(promptText || "");
+  const replyLanguage = TL_AI_resolveReplyLanguage_(inputText, cfg.language, cfg.replyLanguagePolicy);
+  const prompt = TL_AI_buildPrompt_(inputText, cfg.language, cfg.bossName, "", replyLanguage);
   const result = TL_AI_callPrompt_(prompt);
   TLW_logInfo_("ai_test_prompt", {
     status: result.status,
@@ -560,7 +588,8 @@ function TL_AI_TestLatestIncoming() {
   const draftContext = typeof TL_DraftContext_BuildForInboxRowValues_ === "function"
     ? TL_DraftContext_BuildForInboxRowValues_(rowData)
     : null;
-  const prompt = TL_AI_buildPrompt_(inputText, cfg.language, cfg.bossName, draftContext && draftContext.promptBrief);
+  const replyLanguage = TL_AI_resolveReplyLanguage_(inputText, cfg.language, cfg.replyLanguagePolicy);
+  const prompt = TL_AI_buildPrompt_(inputText, cfg.language, cfg.bossName, draftContext && draftContext.promptBrief, replyLanguage);
   const result = TL_AI_callPrompt_(prompt);
 
   loc.sh.getRange(loc.row, TLW_colIndex_("ai_summary")).setValue(result.summary);
@@ -603,7 +632,8 @@ function TL_AI_TriageInboxRow_(rowNumber) {
   const draftContext = typeof TL_DraftContext_BuildForInboxRowValues_ === "function"
     ? TL_DraftContext_BuildForInboxRowValues_(rowData)
     : null;
-  const prompt = TL_AI_buildTriagePrompt_(inputText, cfg.language, cfg.bossName, draftContext && draftContext.promptBrief);
+  const replyLanguage = TL_AI_resolveReplyLanguage_(inputText, cfg.language, cfg.replyLanguagePolicy);
+  const prompt = TL_AI_buildTriagePrompt_(inputText, cfg.language, cfg.bossName, draftContext && draftContext.promptBrief, replyLanguage);
   const result = TL_AI_callPrompt_(prompt);
 
   const triage = {
