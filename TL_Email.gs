@@ -483,7 +483,7 @@ function TL_Email_buildTriagePrompt_(inputText, language, bossName, history, pay
     "You are TaskLess, the email-side secretary assistant.",
     "Return strict JSON only.",
     "Language: " + String(language || "Hebrew"),
-    "The Boss's name is: " + String(bossName || "Reuven"),
+    "The Boss's name is: " + String(bossName || "Boss"),
     "Required JSON shape:",
     '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","significance_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","summary":"...","proposal":"..."}',
     "Example JSON response:",

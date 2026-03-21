@@ -122,9 +122,9 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
 }
 
 function TL_Menu_BuildMenuReply_() {
-  const bossName = String(TLW_getSetting_("BOSS_NAME") || "ראובן").trim();
+  const bossName = String(TLW_getSetting_("BOSS_NAME") || "").trim();
   return [
-    "שלום " + bossName + ",",
+    bossName ? ("שלום " + bossName + ",") : "שלום,",
     "מה תרצה לעשות?",
     "1. תזכיר לי",
     "2. משימה חדשה",

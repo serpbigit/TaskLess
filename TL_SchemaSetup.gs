@@ -58,7 +58,7 @@ const TL_SCHEMA = {
     ["AI_DEFAULT_LANGUAGE","Hebrew","default language for AI drafts/summaries"],
     ["API END POINT","",""],
     ["API TOKEN","",""],
-    ["BOSS_NAME","Reuven","display/use name for the Boss in menus and AI drafting context"],
+    ["BOSS_NAME","","display/use name for the Boss in menus and AI drafting context; leave blank for generic Boss fallback"],
     ["BOSS_PHONE","","msisdn for Boss channel (wa_id will be inferred)"],
     ["URGENT_PUSH_ENABLED","false","allow urgent secretary push interruptions outside normal pull/digest flow"],
     ["BOSS_INTERRUPT_LEVEL","urgent_only","manual_only|urgent_only|high_and_urgent|all_action_items"],

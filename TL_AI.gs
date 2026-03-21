@@ -18,7 +18,7 @@ function TL_AI_getConfig_() {
   const endpoint = String(TLW_getSetting_("API END POINT") || "").trim();
   const token = String(TLW_getSetting_("API TOKEN") || "").trim();
   const language = String(TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "Hebrew").trim();
-  const bossName = String(TLW_getSetting_("BOSS_NAME") || "Reuven").trim();
+  const bossName = String(TLW_getSetting_("BOSS_NAME") || "Boss").trim();
 
   if (!endpoint) throw new Error("Missing SETTINGS value: API END POINT");
   if (!token) throw new Error("Missing SETTINGS value: API TOKEN");
@@ -128,7 +128,7 @@ function TL_AI_buildPrompt_(inputText, language, bossName) {
     "You are TaskLess, a business communication assistant.",
     "Return strict JSON only.",
     "Language: " + String(language || "Hebrew"),
-    "The Boss's name is: " + String(bossName || "Reuven"),
+    "The Boss's name is: " + String(bossName || "Boss"),
     "Required JSON shape:",
     '{"summary":"...","proposal":"..."}',
     "Example JSON response:",
@@ -144,7 +144,7 @@ function TL_AI_buildTriagePrompt_(inputText, language, bossName) {
     "You are Amanda, the TaskLess AI assistant for business communication triage.",
     "Analyze the incoming message and return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
-    "The Boss's name is: " + String(bossName || "Reuven"),
+    "The Boss's name is: " + String(bossName || "Boss"),
     "Required JSON shape:",
     '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","summary":"...","proposal":"..."}',
     "Example JSON response:",
@@ -162,7 +162,7 @@ function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
     "Split one Boss capture into multiple proposed child records.",
     "Return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
-    "The Boss's name is: " + String(bossName || "Reuven"),
+    "The Boss's name is: " + String(bossName || "Boss"),
     "Required JSON shape:",
     '{"summary":"...","items":[{"kind":"reminder|task|journal","title":"...","summary":"...","proposal":"...","task_due":"...","task_priority":"low|medium|high","approval_required":"true","notes":"..."}]}',
     "Example JSON response:",
@@ -185,7 +185,7 @@ function TL_AI_buildContactEnrichmentPrompt_(inputText, language, bossName) {
     "Extract one manual contact enrichment request from a Boss message.",
     "Return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
-    "The Boss's name is: " + String(bossName || "Reuven"),
+    "The Boss's name is: " + String(bossName || "Boss"),
     "Required JSON shape:",
     '{"contact_query":"...","note_type":"personal_context|family_event|business_context|followup_context|preference|relationship_signal|general","note_text":"...","summary":"...","proposal":"..."}',
     "Rules:",
@@ -207,7 +207,7 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "You are TaskLess's Boss intent router.",
     "Classify one Boss message into a single intent and return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
-    "The Boss's name is: " + String(bossName || "Reuven"),
+    "The Boss's name is: " + String(bossName || "Boss"),
     "Supported intents:",
     "show_menu, help, show_ai_cost, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, create_contact_enrichment, out_of_scope, unknown",
     "Strict JSON shape:",
