@@ -58,7 +58,12 @@ function doPost(e) {
     // Boss menu quick-path: only messages with text from BOSS_PHONE
     const menuReply = TLW_tryBossMenu_(events);
     if (menuReply && menuReply.toSend) {
+      if (TLW_claimReplySend_("menu_text", menuReply.messageId)) {
+        TLW_logInfo_("menu_reply_deduped", { to: menuReply.toWaId, msg_id: menuReply.messageId || "", phone_id: menuReply.toPhoneId || "" });
+        return TLW_json_({ ok:true, menu:true, deduped:true });
+      }
       const sent = TLW_sendText_(menuReply.toPhoneId, menuReply.toWaId, menuReply.text);
+      if (!(sent && sent.ok)) TLW_releaseReplySend_("menu_text", menuReply.messageId);
       TLW_logInfo_("menu_reply", { to: menuReply.toWaId, phone_id: menuReply.toPhoneId, ok: sent.ok, status: sent.status, body: sent.body });
       return TLW_json_({ ok:true, menu:true });
     }
@@ -348,7 +353,7 @@ function TLW_tryBossMenu_(events) {
     msg_id: msg.message_id || "",
     text: String(msg.text || "").trim()
   });
-  return { toSend: true, toPhoneId, toWaId: msg.from, text: finalReplyText };
+  return { toSend: true, toPhoneId, toWaId: msg.from, text: finalReplyText, messageId: String(msg.message_id || "").trim() };
 }
 
 function TLW_tryBossMenuFromInboxRow_(enriched, appendedRow, options) {
@@ -444,11 +449,21 @@ function TLW_tryBossMenuFromInboxRow_(enriched, appendedRow, options) {
       TLW_getSetting_("BUSINESS_PHONE_ID") ||
       TLW_getSetting_("BUSINESS_PHONEID") ||
       TLW_getSetting_("BUSINESS_PHONE");
+    const voiceMessageId = String(enriched.message_id || "").trim();
+    if (TLW_claimReplySend_("menu_voice", voiceMessageId)) {
+      TLW_logInfo_("menu_voice_reply_deduped", {
+        row: appendedRow.row,
+        to: sender,
+        msg_id: voiceMessageId
+      });
+      return { sent: false, deduped: true, text: finalReplyText };
+    }
     const sent = TLW_sendText_(toPhoneId, sender, finalReplyText);
+    if (!(sent && sent.ok)) TLW_releaseReplySend_("menu_voice", voiceMessageId);
     TLW_logInfo_("menu_voice_reply_ready", {
       row: appendedRow.row,
       to: sender,
-      msg_id: String(enriched.message_id || ""),
+      msg_id: voiceMessageId,
       ok: !!(sent && sent.ok),
       status: sent && sent.status ? sent.status : "",
       text: inputText
@@ -894,6 +909,39 @@ function TLW_findRowByRecordId_(recordId) {
     return { sh, row: cell.getRow() };
   } catch (e) {}
   return null;
+}
+
+function TLW_replySendKey_(scope, messageId) {
+  const safeScope = String(scope || "").trim();
+  const safeMessageId = String(messageId || "").trim();
+  if (!safeScope || !safeMessageId) return "";
+  return "TL_REPLY_SENT_" + safeScope + "_" + safeMessageId;
+}
+
+function TLW_claimReplySend_(scope, messageId) {
+  const key = TLW_replySendKey_(scope, messageId);
+  if (!key) return false;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(5000);
+  try {
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty(key)) return true;
+    props.setProperty(key, String(Date.now()));
+    return false;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function TLW_releaseReplySend_(scope, messageId) {
+  const key = TLW_replySendKey_(scope, messageId);
+  if (!key) return false;
+  try {
+    PropertiesService.getScriptProperties().deleteProperty(key);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function TLW_json_(obj) {
