@@ -237,12 +237,13 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Supported intents:",
     "show_menu, help, show_ai_cost, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, create_contact_enrichment, out_of_scope, unknown",
     "Return exactly one JSON object with this shape:",
-    '{"intent":"supported_intent_name","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|menu|help|verticals|settings|reminders|tasks|ai_cost|none","capture_state":"TL_MENU_STATES value or empty string","confidence":0.0,"needs_clarification":"true|false","reply":"string","parameters":{"query":"string","capture_kind":"string","capture_mode":"string","time_hint":"string","target":"string"}}',
+    '{"intent":"supported_intent_name","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|menu|help|verticals|settings|reminders|tasks|ai_cost|none","capture_state":"TL_MENU_STATES value or empty string","menu_target":"main|reminders|notes|schedule|tasks|manage_work|settings|verticals|help|none|","confidence":0.0,"needs_clarification":"true|false","reply":"string","parameters":{"query":"string","capture_kind":"string","capture_mode":"string","time_hint":"string","target":"string"}}',
     "Field definitions:",
     "intent: choose exactly one supported intent name.",
     "route: menu for explicit menu/help navigation, summary for status/list views, capture for create/log/remind/enrich flows, none for out_of_scope or unknown.",
     "summary_kind: required when route=summary, otherwise usually none.",
     "capture_state: required when route=capture and should match the best TL_MENU_STATES target; otherwise empty string.",
+    "menu_target: use when route=menu to indicate which submenu should open; otherwise empty string.",
     "confidence: decimal between 0 and 1.",
     "needs_clarification: true only when the request is genuinely ambiguous and should not be assumed.",
     "reply: one short Hebrew sentence that tells the Boss what TaskLess is about to do.",
@@ -259,14 +260,17 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Do not invent unsupported intents or summary kinds.",
     "Do not wrap the JSON in markdown fences.",
     "Examples:",
-    '{"intent":"list_approvals","route":"summary","summary_kind":"approvals","capture_state":"","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את מה שממתין לאישור.","parameters":{"query":"approvals","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
-    '{"intent":"list_pending","route":"summary","summary_kind":"pending","capture_state":"","confidence":0.97,"needs_clarification":"false","reply":"מראה לך מה פתוח כרגע.","parameters":{"query":"clean my plate","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
-    '{"intent":"list_attention","route":"summary","summary_kind":"attention","capture_state":"","confidence":0.97,"needs_clarification":"false","reply":"מראה לך מה צריך תשומת לב.","parameters":{"query":"what needs attention","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
-    '{"intent":"show_ai_cost","route":"summary","summary_kind":"ai_cost","capture_state":"","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את עלות ה-AI המצטברת.","parameters":{"query":"ai cost","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
-    '{"intent":"create_task_with_due","route":"capture","summary_kind":"none","capture_state":"CAPTURE_TASK_WITH_DUE","confidence":0.97,"needs_clarification":"false","reply":"קיבלתי, אכין משימה עם תאריך יעד.","parameters":{"query":"send proposal by Thursday","capture_kind":"task","capture_mode":"with_due","time_hint":"Thursday","target":""}}',
-    '{"intent":"create_log_journal","route":"capture","summary_kind":"none","capture_state":"CAPTURE_LOG_JOURNAL","confidence":0.96,"needs_clarification":"false","reply":"נרשם, אכין מזה פריט יומן.","parameters":{"query":"met with Dana","capture_kind":"journal","capture_mode":"journal","time_hint":"","target":""}}',
-    '{"intent":"create_contact_enrichment","route":"capture","summary_kind":"none","capture_state":"CAPTURE_CONTACT_ENRICH","confidence":0.96,"needs_clarification":"false","reply":"קיבלתי, אכין הצעת העשרה לאיש קשר.","parameters":{"query":"make note that I met David and his son has a wedding next week","capture_kind":"contact_enrichment","capture_mode":"contact_enrichment","time_hint":"","target":"David"}}',
-    '{"intent":"out_of_scope","route":"none","summary_kind":"none","capture_state":"","confidence":0.99,"needs_clarification":"false","reply":"מחוץ לתחום","parameters":{"query":"weather","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"show_menu","route":"menu","summary_kind":"menu","capture_state":"","menu_target":"main","confidence":0.98,"needs_clarification":"false","reply":"פותח את התפריט הראשי.","parameters":{"query":"menu","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"list_reminders","route":"menu","summary_kind":"reminders","capture_state":"","menu_target":"reminders","confidence":0.97,"needs_clarification":"false","reply":"פותח את אפשרויות התזכורות.","parameters":{"query":"reminders","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"list_tasks","route":"menu","summary_kind":"tasks","capture_state":"","menu_target":"tasks","confidence":0.97,"needs_clarification":"false","reply":"פותח את אפשרויות המשימות.","parameters":{"query":"tasks","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"list_approvals","route":"summary","summary_kind":"approvals","capture_state":"","menu_target":"manage_work","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את מה שממתין לאישור.","parameters":{"query":"approvals","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"list_pending","route":"summary","summary_kind":"pending","capture_state":"","menu_target":"manage_work","confidence":0.97,"needs_clarification":"false","reply":"מראה לך מה פתוח כרגע.","parameters":{"query":"clean my plate","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"list_attention","route":"summary","summary_kind":"attention","capture_state":"","menu_target":"manage_work","confidence":0.97,"needs_clarification":"false","reply":"מראה לך מה צריך תשומת לב.","parameters":{"query":"what needs attention","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"show_ai_cost","route":"summary","summary_kind":"ai_cost","capture_state":"","menu_target":"","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את עלות ה-AI המצטברת.","parameters":{"query":"ai cost","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"create_task_with_due","route":"capture","summary_kind":"none","capture_state":"CAPTURE_TASK_WITH_DUE","menu_target":"tasks","confidence":0.97,"needs_clarification":"false","reply":"קיבלתי, אכין משימה עם תאריך יעד.","parameters":{"query":"send proposal by Thursday","capture_kind":"task","capture_mode":"with_due","time_hint":"Thursday","target":""}}',
+    '{"intent":"create_log_journal","route":"capture","summary_kind":"none","capture_state":"CAPTURE_LOG_JOURNAL","menu_target":"notes","confidence":0.96,"needs_clarification":"false","reply":"נרשם, אכין מזה פריט יומן.","parameters":{"query":"met with Dana","capture_kind":"journal","capture_mode":"journal","time_hint":"","target":""}}',
+    '{"intent":"create_contact_enrichment","route":"capture","summary_kind":"none","capture_state":"CAPTURE_CONTACT_ENRICH","menu_target":"notes","confidence":0.96,"needs_clarification":"false","reply":"קיבלתי, אכין הצעת העשרה לאיש קשר.","parameters":{"query":"make note that I met David and his son has a wedding next week","capture_kind":"contact_enrichment","capture_mode":"contact_enrichment","time_hint":"","target":"David"}}',
+    '{"intent":"out_of_scope","route":"none","summary_kind":"none","capture_state":"","menu_target":"","confidence":0.99,"needs_clarification":"false","reply":"מחוץ לתחום","parameters":{"query":"weather","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     "Message:",
     String(inputText || "")
   ].join("\n");
@@ -898,6 +902,7 @@ function TL_AI_normalizeBossIntent_(item) {
   const route = TL_AI_normalizeBossIntentRoute_(safe.route || TL_AI_bossRouteFromIntent_(intent));
   const summaryKind = TL_AI_normalizeBossSummaryKind_(safe.summary_kind || TL_AI_bossSummaryKindFromIntent_(intent));
   const captureState = TL_AI_normalizeBossCaptureState_(safe.capture_state || TL_AI_bossCaptureStateFromIntent_(intent));
+  const menuTarget = TL_AI_normalizeBossMenuTarget_(safe.menu_target || TL_AI_bossMenuTargetFromIntent_(intent, summaryKind));
   const confidence = TL_AI_normalizeBossConfidence_(safe.confidence);
   const needsClarification = TL_AI_normalizeBooleanString_(safe.needs_clarification);
   return {
@@ -905,6 +910,7 @@ function TL_AI_normalizeBossIntent_(item) {
     route: route,
     summary_kind: summaryKind,
     capture_state: captureState,
+    menu_target: menuTarget,
     confidence: confidence,
     needs_clarification: needsClarification,
     reply: String(safe.reply || "").trim(),
@@ -975,6 +981,18 @@ function TL_AI_bossCaptureStateFromIntent_(intent) {
   return map[v] || "";
 }
 
+function TL_AI_bossMenuTargetFromIntent_(intent, summaryKind) {
+  const v = String(intent || "").trim().toLowerCase();
+  const summary = String(summaryKind || "").trim().toLowerCase();
+  if (v === "show_menu" || v === "help") return "main";
+  if (v === "show_settings") return "settings";
+  if (v === "show_verticals") return "verticals";
+  if (summary === "reminders") return "reminders";
+  if (summary === "tasks" || summary === "open_tasks" || summary === "blocked_tasks") return "tasks";
+  if (summary === "approvals" || summary === "pending" || summary === "attention" || summary === "next_steps" || summary === "draft_replies" || summary === "waiting_on_others" || summary === "followups") return "manage_work";
+  return "";
+}
+
 function TL_AI_normalizeBossIntentName_(value) {
   const v = String(value || "").trim().toLowerCase();
   const allowed = [
@@ -1002,6 +1020,12 @@ function TL_AI_normalizeBossSummaryKind_(value) {
   if (v === "urgent") return "attention";
   const allowed = ["pending","attention","approvals","next_steps","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","ai_cost","none"];
   return allowed.indexOf(v) !== -1 ? v : "none";
+}
+
+function TL_AI_normalizeBossMenuTarget_(value) {
+  const v = String(value || "").trim().toLowerCase();
+  const allowed = ["main","reminders","notes","schedule","tasks","manage_work","settings","verticals","help","none",""];
+  return allowed.indexOf(v) !== -1 ? v : "";
 }
 
 function TL_AI_normalizeBossCaptureState_(value) {

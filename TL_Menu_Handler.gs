@@ -878,6 +878,8 @@ function TL_Menu_HandleBossIntent_(ev, inboxRow, intent) {
   }
 
   if (normalized.route === "menu" || normalized.intent === "show_menu" || normalized.intent === "help") {
+    const menuReply = TL_Menu_OpenMenuTarget_(bossWaId, normalized);
+    if (menuReply) return menuReply;
     TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
     if (normalized.intent === "help") return TL_Menu_BuildHelpMenu_();
     return TL_Menu_BuildMenuReply_();
@@ -909,6 +911,48 @@ function TL_Menu_HandleBossIntent_(ev, inboxRow, intent) {
     return TL_Menu_BuildVerticalsMenu_();
   }
 
+  return null;
+}
+
+function TL_Menu_OpenMenuTarget_(waId, intent) {
+  const target = String(intent && intent.menu_target || "").trim().toLowerCase();
+  if (!target || target === "none") return null;
+  if (target === "main") {
+    TL_Menu_SetState_(waId, TL_MENU_STATES.ROOT);
+    return TL_Menu_BuildMenuReply_();
+  }
+  if (target === "help") {
+    TL_Menu_SetState_(waId, TL_MENU_STATES.HELP);
+    return TL_Menu_BuildHelpMenu_();
+  }
+  if (target === "verticals") {
+    TL_Menu_SetState_(waId, TL_MENU_STATES.VERTICALS);
+    return TL_Menu_BuildVerticalsMenu_();
+  }
+  if (target === "settings") {
+    TL_Menu_SetState_(waId, TL_MENU_STATES.SETTINGS);
+    return TL_Menu_BuildSettingsMenu_();
+  }
+  if (target === "reminders") {
+    TL_Menu_SetState_(waId, TL_MENU_STATES.REMINDERS);
+    return TL_Menu_BuildRemindersMenu_();
+  }
+  if (target === "tasks") {
+    TL_Menu_SetState_(waId, TL_MENU_STATES.TASK_NEW);
+    return TL_Menu_BuildTaskMenu_();
+  }
+  if (target === "schedule") {
+    TL_Menu_SetState_(waId, TL_MENU_STATES.SCHEDULE);
+    return TL_Menu_BuildScheduleMenu_();
+  }
+  if (target === "notes") {
+    TL_Menu_SetState_(waId, TL_MENU_STATES.LOG);
+    return TL_Menu_BuildLogMenu_();
+  }
+  if (target === "manage_work") {
+    TL_Menu_SetState_(waId, TL_MENU_STATES.MANAGE_WORK);
+    return TL_Menu_BuildManageWorkMenu_();
+  }
   return null;
 }
 
