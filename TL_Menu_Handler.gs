@@ -1521,6 +1521,10 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const total = packet.items.length;
   const summary = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 220);
   const proposalPreview = TL_Menu_Preview_(current.proposal || "", 420);
+  const rawSnippet = TL_Menu_Preview_(String(current.rawSnippet || "").trim(), 220);
+  const senderLabel = String(current.senderLabel || current.sender || "").trim();
+  const channelLabel = String(current.channelLabel || current.channel || "").trim();
+  const subjectLabel = TL_Menu_Preview_(String(current.subject || "").trim(), 160);
   const duePreview = String(current.duePreview || "").trim();
   const dueLabel = String(current.dueLabel || "").trim();
   const reminderMessage = TL_Menu_Preview_(current.reminderMessage || summary, 220);
@@ -1532,6 +1536,11 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const lines = [
     "סקירה אחד-אחד " + index + "/" + total,
     label ? label : "",
+    senderLabel ? ("מאת: " + senderLabel) : "",
+    channelLabel ? ("ערוץ: " + channelLabel) : "",
+    subjectLabel ? ("נושא: " + subjectLabel) : "",
+    rawSnippet ? ("קטע מההודעה:\n" + rawSnippet) : "",
+    "",
     "הבנתי כך:",
     isReminder ? ("הודעה: " + reminderMessage) : summary,
     proposalPreview && proposalPreview !== summary ? ("טיוטה מוצעת:\n" + proposalPreview) : "",
@@ -1761,6 +1770,10 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
     if (approvalStatus !== "draft" && approvalStatus !== "awaiting_approval") return;
     const channel = String(TL_Orchestrator_value_(values, "channel") || "").toLowerCase();
     const sender = String(TL_Orchestrator_value_(values, "sender") || "").trim();
+    const receiver = String(TL_Orchestrator_value_(values, "receiver") || "").trim();
+    const messageType = String(TL_Orchestrator_value_(values, "message_type") || "").trim();
+    const threadSubject = String(TL_Orchestrator_value_(values, "thread_subject") || "").trim();
+    const textValue = String(TL_Orchestrator_value_(values, "text") || "").trim();
     const contactId = String(TL_Orchestrator_value_(values, "contact_id") || "").trim();
     const senderProfile = typeof TL_Session_classifyEmailSender_ === "function" && channel === "email"
       ? TL_Session_classifyEmailSender_(sender, contactId, { contactsIndex: contactsIndex })
@@ -1779,12 +1792,16 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
       recordId: String(TL_Orchestrator_value_(values, "record_id") || "").trim(),
       rootId: String(TL_Orchestrator_value_(values, "root_id") || "").trim(),
       recordClass: String(TL_Orchestrator_value_(values, "record_class") || "").trim(),
-      summary: String(TL_Orchestrator_value_(values, "ai_summary") || TL_Orchestrator_value_(values, "thread_subject") || TL_Orchestrator_value_(values, "text") || "").trim(),
+      summary: String(TL_Orchestrator_value_(values, "ai_summary") || threadSubject || textValue || "").trim(),
       proposal: String(TL_Orchestrator_value_(values, "ai_proposal") || "").trim(),
       sender: sender,
-      receiver: String(TL_Orchestrator_value_(values, "receiver") || "").trim(),
+      senderLabel: TL_Menu_BuildPacketSenderLabel_(senderProfile, sender, receiver, contactId),
+      receiver: receiver,
       channel: channel,
-      messageType: String(TL_Orchestrator_value_(values, "message_type") || "").trim(),
+      channelLabel: TL_Menu_BuildPacketChannelLabel_(channel, messageType),
+      messageType: messageType,
+      subject: threadSubject,
+      rawSnippet: TL_Menu_BuildPacketSnippet_(channel, messageType, textValue),
       contactId: contactId,
       approvalStatus: approvalStatus,
       executionStatus: String(TL_Orchestrator_value_(values, "execution_status") || "").trim(),
@@ -1800,6 +1817,42 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
     return Number(b.rowNumber || 0) - Number(a.rowNumber || 0);
   });
   return items.slice(0, TL_MENU.MAX_PENDING_SUMMARY);
+}
+
+function TL_Menu_BuildPacketSenderLabel_(senderProfile, sender, receiver, contactId) {
+  if (senderProfile && senderProfile.displayName) {
+    return String(senderProfile.displayName).trim();
+  }
+  if (contactId && sender) return String(sender).trim();
+  if (sender && receiver) return String(sender).trim();
+  return String(sender || receiver || "").trim();
+}
+
+function TL_Menu_BuildPacketChannelLabel_(channel, messageType) {
+  const normalizedChannel = String(channel || "").trim().toLowerCase();
+  const normalizedType = String(messageType || "").trim().toLowerCase();
+  if (normalizedChannel === "email") return normalizedType === "email_thread" ? "email" : "email";
+  if (normalizedChannel === "whatsapp") return normalizedType ? ("whatsapp / " + normalizedType) : "whatsapp";
+  return String(channel || "").trim();
+}
+
+function TL_Menu_BuildPacketSnippet_(channel, messageType, textValue) {
+  const text = String(textValue || "").trim();
+  if (!text) return "";
+  if (String(channel || "").toLowerCase() === "email" && String(messageType || "").toLowerCase() === "email_thread") {
+    const cleaned = text
+      .replace(/^---\s*$/gm, "")
+      .replace(/^DATE:.*$/gm, "")
+      .replace(/^FROM:.*$/gm, "")
+      .replace(/^TO:.*$/gm, "")
+      .replace(/^CC:.*$/gm, "")
+      .replace(/^BCC:.*$/gm, "")
+      .replace(/^SUBJECT:.*$/gm, "")
+      .replace(/\n{2,}/g, "\n")
+      .trim();
+    return cleaned;
+  }
+  return text;
 }
 
 function TL_Menu_BuildWaitingOnOthersSummary_() {
