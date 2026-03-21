@@ -106,7 +106,10 @@ function TL_Onboarding_GetTemplateConfig() {
 
 function TL_Onboarding_normalizeSpreadsheetId_(value) {
   const raw = String(value || "").trim();
-  if (!raw) return "";
+  if (!raw) {
+    const active = SpreadsheetApp.getActiveSpreadsheet();
+    return active ? String(active.getId() || "").trim() : "";
+  }
   const match = raw.match(/\/d\/([a-zA-Z0-9-_]+)/);
   if (match && match[1]) return match[1];
   return raw;
