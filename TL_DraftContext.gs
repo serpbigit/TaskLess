@@ -144,31 +144,37 @@ function TL_DraftContext_fetchEnrichments_(contact, options) {
 function TL_DraftContext_fetchEmails_(contact, options) {
   const out = [];
   const email = TL_Contacts_normalizeEmail_(contact && contact.email || "");
-  if (!email || typeof TL_Email_scanRows_ !== "function") return out;
+  if (!email || typeof TL_Orchestrator_readRecentRows_ !== "function") return out;
   const excludeRefId = String(options && options.excludeEmailRefId || "").trim();
-  const rows = TL_Email_scanRows_(
-    [TL_Email_tabOpen_(), TL_Email_tabRevision_(), TL_Email_tabArchive_()],
-    function(item) {
-      const snapshot = TL_Email_rowToSnapshot_(item.data);
-      const payload = snapshot && snapshot.payload ? snapshot.payload : {};
-      const senderEmail = TL_Contacts_normalizeEmail_(payload.senderEmail || snapshot.senderEmail || "");
-      return senderEmail === email && (!excludeRefId || String(snapshot.refId || "") !== excludeRefId);
-    },
-    Number((options && options.emailScanRows) || TL_DRAFT_CONTEXT.EMAIL_SCAN_ROWS)
-  );
+  const rows = TL_Orchestrator_readRecentRows_(Number((options && options.emailScanRows) || TL_DRAFT_CONTEXT.EMAIL_SCAN_ROWS)).filter(function(item) {
+    const values = item.values;
+    if (String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase() !== "email") return false;
+    if (String(TL_Orchestrator_value_(values, "record_class") || "").trim().toLowerCase() !== "communication") return false;
+    if (String(TL_Orchestrator_value_(values, "message_type") || "").trim().toLowerCase() !== "email_thread") return false;
+    const senderEmail = TL_Contacts_normalizeEmail_(TL_Orchestrator_value_(values, "sender") || "");
+    const receiverEmail = TL_Contacts_normalizeEmail_(TL_Orchestrator_value_(values, "receiver") || "");
+    const recordId = String(TL_Orchestrator_value_(values, "record_id") || "").trim();
+    return (senderEmail === email || receiverEmail === email) && (!excludeRefId || recordId !== excludeRefId);
+  });
   rows.sort(function(a, b) {
-    const ad = TL_DraftContext_safeDate_(a.data.updatedAt || a.data.createdAt || "");
-    const bd = TL_DraftContext_safeDate_(b.data.updatedAt || b.data.createdAt || "");
+    const ad = TL_DraftContext_safeDate_(TL_Orchestrator_value_(a.values, "latest_message_at") || TL_Orchestrator_value_(a.values, "timestamp"));
+    const bd = TL_DraftContext_safeDate_(TL_Orchestrator_value_(b.values, "latest_message_at") || TL_Orchestrator_value_(b.values, "timestamp"));
     return bd.getTime() - ad.getTime();
   });
   rows.slice(0, Number((options && options.emailLimit) || TL_DRAFT_CONTEXT.EMAIL_LIMIT)).forEach(function(item) {
-    const snapshot = TL_Email_rowToSnapshot_(item.data);
-    const payload = snapshot.payload || {};
+    const values = item.values;
+    const payload = TL_Email_parseInboxPayload_(TL_Orchestrator_value_(values, "raw_payload_ref"));
     out.push({
-      at: TL_DraftContext_safeDate_(payload.latestMsgDateIso || item.data.updatedAt || item.data.createdAt).toISOString(),
-      subject: String(payload.subject || item.data.title || "").trim(),
-      summary: TL_DraftContext_preview_(String((payload.triage && payload.triage.summary) || payload.flattenedText || "").trim(), 180),
-      status: String(item.data.status || "").trim()
+      at: TL_DraftContext_safeDate_(TL_Orchestrator_value_(values, "latest_message_at") || TL_Orchestrator_value_(values, "timestamp")).toISOString(),
+      subject: String(TL_Orchestrator_value_(values, "thread_subject") || payload.subject || "").trim(),
+      summary: TL_DraftContext_preview_(String(
+        (payload.triage && payload.triage.summary) ||
+        TL_Orchestrator_value_(values, "ai_summary") ||
+        payload.flattenedText ||
+        TL_Orchestrator_value_(values, "text") ||
+        ""
+      ).trim(), 180),
+      status: String(TL_Orchestrator_value_(values, "execution_status") || TL_Orchestrator_value_(values, "approval_status") || "").trim()
     });
   });
   return out;

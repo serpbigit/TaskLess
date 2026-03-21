@@ -549,7 +549,12 @@ function TLW_enrichEvent_(ev, ts) {
     importance_level: "",
     urgency_flag: "",
     needs_owner_now: "",
-    suggested_action: ""
+    suggested_action: "",
+    thread_id: "",
+    thread_subject: "",
+    latest_message_at: "",
+    external_url: "",
+    participants_json: ""
   };
 }
 
@@ -613,7 +618,12 @@ function TLW_appendInboxRow_(obj, rawJson) {
     String(obj.importance_level||""),
     String(obj.urgency_flag||""),
     String(obj.needs_owner_now||""),
-    String(obj.suggested_action||"")
+    String(obj.suggested_action||""),
+    String(obj.thread_id||""),
+    String(obj.thread_subject||""),
+    String(obj.latest_message_at||""),
+    String(obj.external_url||""),
+    String(obj.participants_json||"")
   ];
 
   sh.appendRow(row);
@@ -864,6 +874,26 @@ function TLW_safeStringify_(obj, maxLen) {
   try { s = JSON.stringify(obj); } catch(e){ s = String(obj); }
   if (s.length > lim) return s.slice(0, lim) + "...";
   return s;
+}
+
+function TLW_findRowByRecordId_(recordId) {
+  try {
+    const key = String(recordId || "").trim();
+    if (!key) return null;
+    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
+    const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+    if (!sh) return null;
+
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return null;
+
+    const col = TLW_colIndex_("record_id");
+    const finder = sh.getRange(2, col, lastRow - 1, 1).createTextFinder(key).matchEntireCell(true).findAll();
+    if (!finder || !finder.length) return null;
+    const cell = finder[finder.length - 1];
+    return { sh, row: cell.getRow() };
+  } catch (e) {}
+  return null;
 }
 
 function TLW_json_(obj) {

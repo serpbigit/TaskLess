@@ -17,7 +17,8 @@ const TL_INBOX = {
     "topic_id","topic_tagged_at",
     "biz_stage","biz_stage_ts","payment_status","delivery_due",
     "media_id","media_mime_type","media_sha256","media_caption","media_filename","media_is_voice",
-    "priority_level","importance_level","urgency_flag","needs_owner_now","suggested_action"
+    "priority_level","importance_level","urgency_flag","needs_owner_now","suggested_action",
+    "thread_id","thread_subject","latest_message_at","external_url","participants_json"
   ]
 };
 
