@@ -1322,6 +1322,43 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
       const snapshot = TL_Email_inboxValuesToSnapshot_(values, rowNumber);
       const payload = snapshot.payload || {};
       const approval = payload.approvalSnapshot || {};
+      const triage = approval.triage || payload.triage || {};
+      const suggestedAction = String(triage.suggested_action || values[TLW_colIndex_("suggested_action") - 1] || "").trim().toLowerCase();
+      if (suggestedAction === "ignore" || suggestedAction === "wait") {
+        const closedAtIso = new Date().toISOString();
+        const closedPayload = TL_Email_mergePayload_(payload, {
+          approvalStatus: "approved",
+          sendStatus: "skipped",
+          executedAt: closedAtIso,
+          lastAction: "EMAIL_REVIEW_CLOSED",
+          lastActionAt: closedAtIso,
+          approvalSnapshot: {
+            to: String(approval.to || "").trim(),
+            subject: String(approval.subject || "").trim(),
+            body: String(approval.body || "").trim(),
+            cc: String(approval.cc || "").trim(),
+            bcc: String(approval.bcc || "").trim(),
+            replyTo: String(approval.replyTo || "").trim(),
+            threadId: String(approval.threadId || snapshot.threadId || "").trim(),
+            latestMsgId: String(approval.latestMsgId || snapshot.chunkId || "").trim(),
+            approvalStatus: "approved",
+            sendStatus: "skipped",
+            summary: String(approval.summary || payload.subject || "").trim(),
+            triage: triage,
+            historyDepth: Number(approval.historyDepth || 0),
+            historyUsed: approval.historyUsed || []
+          }
+        });
+        TL_Email_appendInboxVersion_(rowNumber, {
+          approval_required: "false",
+          approval_status: "approved",
+          execution_status: "closed_no_send",
+          task_status: "closed",
+          raw_payload_ref: closedPayload,
+          notes: TL_Email_appendNote_(String(values[TLW_colIndex_("notes") - 1] || ""), "boss_closed_no_send")
+        }, "boss_close_no_send");
+        return true;
+      }
       const merged = TL_Email_mergePayload_(payload, {
         approvalStatus: "approved",
         approvalSnapshot: {
@@ -1519,8 +1556,9 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   if (!current) return "אין עוד פריטים בחבילה.";
   const index = Number(packet.cursor || 0) + 1;
   const total = packet.items.length;
+  const actionSpec = TL_Menu_GetDecisionPacketActionSpec_(current);
   const summary = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 220);
-  const proposalPreview = TL_Menu_Preview_(current.proposal || "", 420);
+  const proposalBody = TL_Menu_BuildDecisionPacketProposalBody_(current, actionSpec);
   const rawSnippet = TL_Menu_Preview_(String(current.rawSnippet || "").trim(), 220);
   const senderLabel = String(current.senderLabel || current.sender || "").trim();
   const channelLabel = String(current.channelLabel || current.channel || "").trim();
@@ -1543,11 +1581,11 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     "",
     "הבנתי כך:",
     isReminder ? ("הודעה: " + reminderMessage) : summary,
-    proposalPreview && proposalPreview !== summary ? ("טיוטה מוצעת:\n" + proposalPreview) : "",
+    proposalBody ? (actionSpec.proposalHeading + "\n" + proposalBody) : "",
     isReminder && dueLabel ? ("זמן הפעלת תזכורת: " + dueLabel) : (duePreview ? ("יעד: " + duePreview) : ""),
     "",
-    "1. אשר",
-    "2. ערוך",
+    "1. " + actionSpec.primaryLabel,
+    "2. " + actionSpec.editLabel,
     "3. דלג",
     "4. עצור",
     "5. חזרה לתפריט ראשי",
@@ -1734,8 +1772,9 @@ function TL_Menu_attachApprovalPacketHint_(waId, text, mode) {
   const reviewIntro = items.length === 1
     ? "פתחתי מיד את הפריט שמחכה לאישור."
     : "פתחתי מיד את הפריט הראשון לסקירה.";
+  const digest = TL_Menu_BuildApprovalDigest_(items, mode, base);
   return [
-    base,
+    digest,
     "",
     reviewIntro,
     livePacket ? TL_Menu_BuildDecisionPacketOneByOneReply_(livePacket) : "לא הצלחתי לפתוח את הפריט לסקירה."
@@ -1786,7 +1825,7 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
     }
     if (mode === "drafts" && !String(TL_Orchestrator_value_(values, "ai_proposal") || "").trim()) return;
     const classified = typeof TL_BossPolicy_classifyItem_ === "function" ? TL_BossPolicy_classifyItem_(item, {}) : null;
-    items.push({
+    const packetItem = {
       key: key,
       rowNumber: item.rowNumber,
       recordId: String(TL_Orchestrator_value_(values, "record_id") || "").trim(),
@@ -1802,13 +1841,16 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
       messageType: messageType,
       subject: threadSubject,
       rawSnippet: TL_Menu_BuildPacketSnippet_(channel, messageType, textValue),
+      suggestedAction: String(TL_Orchestrator_value_(values, "suggested_action") || "").trim(),
       contactId: contactId,
       approvalStatus: approvalStatus,
       executionStatus: String(TL_Orchestrator_value_(values, "execution_status") || "").trim(),
       taskStatus: String(TL_Orchestrator_value_(values, "task_status") || "").trim(),
       isUrgent: classified ? !!classified.isUrgent : false,
       isHigh: classified ? !!classified.isHigh : false
-    });
+    };
+    packetItem.actionKind = TL_Menu_GetDecisionPacketActionSpec_(packetItem).actionKind;
+    items.push(packetItem);
   });
   items.sort(function(a, b) {
     const aRank = (a.contactId ? 2 : 0) + (a.channel === "email" ? 1 : 0) - (/noreply|no-reply|no_reply|donotreply|postmaster|mailer-daemon/i.test(String(a.sender || "")) ? 2 : 0);
@@ -1853,6 +1895,72 @@ function TL_Menu_BuildPacketSnippet_(channel, messageType, textValue) {
     return cleaned;
   }
   return text;
+}
+
+function TL_Menu_BuildApprovalDigest_(items, mode, fallbackText) {
+  const list = Array.isArray(items) ? items : [];
+  const total = list.length;
+  if (!total) return String(fallbackText || "").trim();
+  const emailCount = list.filter(function(item) { return item.channel === "email"; }).length;
+  const whatsappCount = list.filter(function(item) { return item.channel === "whatsapp"; }).length;
+  const urgentCount = list.filter(function(item) { return !!item.isUrgent || !!item.isHigh; }).length;
+  const sendableCount = list.filter(function(item) { return item.actionKind === "send_email" || item.actionKind === "approve_reminder"; }).length;
+  const closableCount = list.filter(function(item) { return item.actionKind === "close_no_send"; }).length;
+  const title = mode === "drafts" ? "טיוטות לתגובה" : "ממתין לאישורך";
+  return [
+    title,
+    "סה\"כ פריטים פתוחים: " + total,
+    "דורשים אישור עכשיו: " + total,
+    sendableCount ? ("מוכנים לביצוע/שליחה: " + sendableCount) : "",
+    closableCount ? ("מיועדים לסגירה ללא שליחה: " + closableCount) : "",
+    "דחופים או חשובים: " + urgentCount,
+    "ערוצים: email " + emailCount + (whatsappCount ? (" | whatsapp " + whatsappCount) : "")
+  ].filter(Boolean).join("\n");
+}
+
+function TL_Menu_GetDecisionPacketActionSpec_(item) {
+  const channel = String(item && item.channel || "").trim().toLowerCase();
+  const captureKind = String(item && item.captureKind || "").trim().toLowerCase();
+  const suggested = String(item && item.suggestedAction || "").trim().toLowerCase();
+  if (captureKind === "reminder") {
+    return {
+      actionKind: "approve_reminder",
+      primaryLabel: "אשר את התזכורת",
+      editLabel: "ערוך את התזכורת",
+      proposalHeading: "פרטי התזכורת לאישור:"
+    };
+  }
+  if (channel === "email") {
+    if (suggested === "ignore" || suggested === "wait") {
+      return {
+        actionKind: "close_no_send",
+        primaryLabel: "סגור בלי לשלוח",
+        editLabel: "ערוך את ההחלטה/הנוסח",
+        proposalHeading: "הפעולה המוצעת:"
+      };
+    }
+    return {
+      actionKind: "send_email",
+      primaryLabel: "אשר את הטיוטה לשליחה",
+      editLabel: "ערוך את הטיוטה",
+      proposalHeading: "הטיוטה המלאה לאישור:"
+    };
+  }
+  return {
+    actionKind: "generic_approve",
+    primaryLabel: "אשר את הפעולה",
+    editLabel: "ערוך את הפעולה",
+    proposalHeading: "הפעולה המוצעת:"
+  };
+}
+
+function TL_Menu_BuildDecisionPacketProposalBody_(item, actionSpec) {
+  const proposal = String(item && item.proposal || "").trim();
+  if (proposal) return proposal;
+  if (actionSpec && actionSpec.actionKind === "close_no_send") {
+    return "הפריט ייסגר ללא שליחת תגובה.";
+  }
+  return "";
 }
 
 function TL_Menu_BuildWaitingOnOthersSummary_() {
