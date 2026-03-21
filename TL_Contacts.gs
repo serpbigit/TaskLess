@@ -12,7 +12,9 @@ const TL_CONTACTS = {
 };
 
 function TL_Contacts_SyncGoogleContacts_DryRun() {
-  return TL_Contacts_SyncGoogleContacts({ dryRun: true });
+  const result = TL_Contacts_SyncGoogleContacts({ dryRun: true });
+  TL_Contacts_logRunnerResult_("TL_Contacts_SyncGoogleContacts_DryRun", result);
+  return result;
 }
 
 function TL_Contacts_SyncGoogleContacts(options) {
@@ -108,6 +110,7 @@ function TL_Contacts_SyncGoogleContacts(options) {
 
   TL_Contacts_logSyncResult_(result);
   result.sample = result.sample.slice(0, 10);
+  TL_Contacts_logRunnerResult_("TL_Contacts_SyncGoogleContacts", result);
   return result;
 }
 
@@ -268,6 +271,7 @@ function TL_Contacts_ProfileStats() {
     else result.neither++;
   }
 
+  TL_Contacts_logRunnerResult_("TL_Contacts_ProfileStats", result);
   return result;
 }
 
@@ -492,5 +496,13 @@ function TL_Contacts_reindexRow_(existing, rowObj, rowNumber) {
 function TL_Contacts_logSyncResult_(result) {
   if (typeof TLW_logInfo_ === "function") {
     TLW_logInfo_("contacts_sync_google", result);
+  }
+}
+
+function TL_Contacts_logRunnerResult_(label, result) {
+  try {
+    Logger.log("%s %s", String(label || "TL_Contacts"), JSON.stringify(result || {}, null, 2));
+  } catch (err) {
+    // Logging should never block the admin runner.
   }
 }
