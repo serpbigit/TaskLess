@@ -1,6 +1,6 @@
 # TaskLess
 
-TaskLess (a.k.a. BossAI) is a WhatsApp-first, human-in-the-loop automation system that turns everyday communication into an operational control layer. Voice or text flows through AI for analysis, planning, Boss confirmation, and execution.
+TaskLess (a.k.a. BossAI) is a WhatsApp-first, human-in-the-loop AI chief of staff for solopreneurs. It continuously prepares operational work in the background, then helps the Boss act on it during cleanup, planning, and execution sessions.
 
 ## Key Documents
 - PRODUCT.md — product vision and long-term direction

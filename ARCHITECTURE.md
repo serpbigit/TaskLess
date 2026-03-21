@@ -5,7 +5,7 @@ TaskLess is a layered event processing system that connects WhatsApp Cloud API m
 ## System Layers
 1. **Communication layer:** WhatsApp Business runs in Coexistence mode on the user’s business phone number. Messages stay in sync between the mobile device and the WhatsApp Cloud API, which emits webhooks for new messages and status changes.
 2. **Webhook ingestion and routing layer:** Webhook events from the Cloud API are received and routed to the correct client environment. Early on, a single Apps Script endpoint handles routing; later, an edge service (e.g., Cloudflare Workers or similar) may forward events to the right client endpoint.
-3. **Client automation environment:** Each client has a Google Sheet (operational ledger and dashboard) and a bound Google Apps Script deployment (execution engine). Incoming webhooks are normalized and recorded; the engine may invoke AI to analyze content and generate proposals or structured actions for Boss approval.
+3. **Client automation environment:** Each client has a Google Sheet (operational ledger and dashboard) and a bound Google Apps Script deployment (execution engine). Incoming webhooks are normalized and recorded; the engine prepares lightweight metadata continuously and generates deeper proposals or structured action plans during user-triggered sessions.
 4. **Deterministic orchestration layer:** Inside the client Apps Script project, a thin orchestrator module should coordinate eligible work instead of embedding all flow decisions inline inside webhook handlers. This module is the planned `TL_Orchestrator.gs` layer.
 
 ## Planned Orchestrator
@@ -19,8 +19,9 @@ Its job is not to replace worker logic or AI reasoning. Its job is to act as a d
 
 Expected orchestration responsibilities:
 - pending late-status repair
-- pending AI triage or transcription follow-up
-- quiet-window thread synthesis
+- pending lightweight AI preparation or transcription follow-up
+- session assembly for cleanup/planning/review requests
+- quiet-window thread synthesis where it improves later session quality
 - Boss approval wait state
 - approved outbound send
 - retry/defer handling for recoverable failures
@@ -30,7 +31,7 @@ This keeps webhook ingestion narrow and makes the rest of the system easier to r
 ## Execution Model (v1)
 TaskLess v1 should use three execution shapes:
 - direct webhook execution for immediate ingest and normalization
-- orchestrator sweep execution for bounded batch routing
+- orchestrator sweep execution for bounded background preparation and session assembly
 - separate worker entrypoints for specialist processing that may run manually, from tests, or from the orchestrator
 
 ### Direct webhook execution
@@ -49,8 +50,8 @@ The webhook path should not grow into the full workflow engine.
 
 The orchestrator should:
 - scan for pending late-status repair
-- scan for rows eligible for AI follow-up after ingest
-- scan for threads that passed a quiet-window threshold
+- scan for rows eligible for lightweight AI follow-up after ingest
+- scan for threads/items that should be prepared for later cleanup/planning sessions
 - scan for rows waiting on approval or newly approved for outbound execution
 - dispatch only small bounded batches per sweep
 - log decisions and avoid duplicate processing
@@ -62,8 +63,8 @@ Specialist work should live in dedicated worker functions that can be called by 
 
 Initial worker entrypoints should include:
 - `TL_Repair_Run()` for late-status repair and related ledger cleanup
-- `TL_AI_RunPending()` for triage/transcription follow-up on eligible rows
-- `TL_Synthesis_Run()` for quiet-window thread synthesis
+- `TL_AI_RunPending()` for lightweight preparation/transcription follow-up on eligible rows
+- `TL_Synthesis_Run()` for thread/session synthesis work
 - `TL_Approval_Run()` for approval-state transitions and approval-card preparation
 - `TL_Send_RunApproved()` for Boss-approved outbound sends and receipts
 
@@ -74,7 +75,7 @@ Existing specialized functions such as `TL_AI_TriageInboxRow_()` and `TL_AI_Tran
 - Orchestrator trigger: recurring time-driven sweep, starting at every 5 minutes
 - Manual debug/test entrypoints: explicit functions callable from Apps Script or harness code
 
-This model is preferred over creating one installable trigger per task. The orchestrator should wake up periodically, inspect ledger state, and dispatch bounded work instead of relying on large numbers of task-specific triggers.
+This model is preferred over creating one installable trigger per task. The orchestrator should wake up periodically, inspect ledger state, and dispatch bounded preparation work instead of relying on large numbers of task-specific triggers or proactive attention logic.
 
 ## Outbound Messaging
 When the Boss approves a proposal, the automation engine sends messages via the WhatsApp Cloud API using the client’s `phone_number_id`. A routing database will map each `phone_number_id` to the correct client endpoint as the system scales to multiple clients.

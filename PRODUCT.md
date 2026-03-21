@@ -1,69 +1,173 @@
 # TaskLess Product Vision
 
-TaskLess reduces the manual operational burden on a business owner. The alternative expression “BossAI — You Boss, AI does the rest” carries the same relationship: the human remains the authority and decision maker, while the AI handles operational work.
+TaskLess is a WhatsApp-first AI chief of staff for solopreneurs. It continuously prepares work in the background, then helps the user act on it during cleanup, planning, and execution sessions.
 
-The philosophy: add one more WhatsApp account and gain a smart AI secretary plus dedicated background workers. These workers archive, watch due dates, track commitments, organize communication, prepare replies, and coordinate follow-ups. The AI behaves like digital office staff, not a simple chatbot.
+Core principle:
 
-## Value Proposition
-- One conversation instead of five apps.
-- The Boss stays in flow while the secretary handles system switching.
-- Natural requests become structured operations: reminders, tasks, logs, scheduling, approvals, and follow-ups.
-- The Boss should not need to decide which app or backend a request belongs to.
+**The system thinks all the time, but speaks only when spoken to.**
 
-## Wow Moments
-- I can keep giving instructions without losing focus to app switching.
-- One voice message can become multiple structured actions.
-- I stay in one conversational thread while the system handles reminders, tasks, logs, scheduling, and communication in the background.
-- The secretary understands the work intent first, then routes it to the right operational system.
+This defines the product more accurately than a notification engine or urgency manager. The human remains the authority. The AI prepares, explains, proposes, and executes only after approval.
 
-## Boss–AI Relationship
-- The Boss gives instructions, reviews proposals, and confirms actions.
-- The AI observes communication, organizes context, proposes actions, and executes approved operations.
-- The Boss stays the boss; AI is an accountable assistant.
+## Canonical Value Proposition
+- One conversational control surface instead of scattered operational work across multiple apps.
+- Silent background preparation that reduces mental load before the user opens a work session.
+- Session-based help for inbox cleanup, prioritization, follow-up handling, reply drafting, and plan execution.
+- Natural requests become structured plans, proposals, reminders, tasks, and follow-ups without forcing the user to think in backend tools.
+
+## Product Definition
+TaskLess is not primarily a no-code builder, workflow builder, notification engine, or autonomous attention manager.
+
+TaskLess is:
+- a background preparation engine
+- a cleanup / planning / execution assistant
+- a session-based AI chief of staff
+- an intent-to-plan system with approval-first execution
+
+The wedge is daily operational leverage for solopreneurs, not one-time setup.
+
+## Operating Model
+TaskLess should run in two distinct modes:
+
+### 1. Continuous lightweight preparation
+The system continuously:
+- ingests WhatsApp messages and later other channels such as email and calendar
+- normalizes and stores raw operational items
+- generates lightweight summaries and metadata
+- tags simple signals such as follow-up, unanswered, deadline mentioned, or commitment linkage
+- builds reusable context for later decision sessions
+
+This layer should stay lightweight, cheap, and quiet. It should not do full global prioritization on every incoming item.
+
+### 2. User-triggered batch reasoning
+When the user asks things like:
+- "clean up"
+- "what matters?"
+- "plan my day"
+- "what should I do next?"
+- or enters a structured menu flow
+
+Then TaskLess should:
+- gather relevant prepared items
+- reason across them in one batch
+- group related items
+- prioritize contextually
+- generate explanation-rich recommendations
+- draft replies, tasks, reminders, and multi-step execution plans
+
+Core rule:
+
+**Prepare locally. Decide globally.**
+
+## Trust Model
+Users trust:
+- prepare
+- propose
+- explain
+- approve
+- execute
+
+Users do not reliably trust:
+- autonomous claims of urgency
+- aggressive interruption
+- unsupervised external write actions
+
+TaskLess should not present "urgent" as a hard fact by default. It should use soft explanation language such as:
+- may need attention
+- likely follow-up
+- deadline signal detected
+- no reply for 2 days
+- linked to your stated commitment
+
+Explanation builds trust more effectively than raw confidence scores.
+
+## Execution Model
+TaskLess uses this default execution contract:
+
+**Prepare -> Present -> Approve -> Execute**
+
+Reversible read-only or interface actions may happen immediately:
+- opening menus
+- showing summaries
+- displaying cleanup or planning views
+- navigating to prepared work
+
+Irreversible or state-changing external actions require approval:
+- sending messages or emails
+- scheduling events
+- creating or changing reminders and tasks
+- executing multi-step plans
+
+No autonomous external send actions should be the default product behavior.
+
+## Boss-AI Relationship
+- The Boss asks, reviews, edits, and approves.
+- The AI continuously prepares context and proposals in the background.
+- The AI surfaces work when requested, not by aggressively chasing attention.
+- The Boss remains the decision-maker; the AI is an accountable chief of staff.
+
+## Multi-Step Intent Handling
+One of the main product "wow" moments is converting high-level intent into a structured plan.
+
+Examples:
+- "reply to David, schedule a meeting, and remind me next week"
+- "prepare me for this meeting"
+- "handle my morning"
+- "follow up with these clients"
+
+TaskLess should:
+1. convert the request into a structured multi-step plan
+2. present the plan as a batch by default
+3. allow optional expansion into per-step review or editing
+4. wait for approval
+5. execute approved actions
+6. log the full flow cleanly
+
+Plan objects and approval packets should therefore remain first-class product concepts.
+
+## Interaction Model
+- Free-form voice and text remain the preferred natural interface.
+- Menus and buttons remain important as structured entry points for cleanup, planning, review, and execution sessions.
+- Surfacing should be user-triggered, not interruption-driven.
+- Session prompts such as "what matters now" or "clean up" should become central product entry points.
+
+## Daily-Use Product Shape
+TaskLess should feel more like:
+- help me run my day
+- help me clean up my inbox
+- help me decide what matters now
+- help me follow up and execute
+
+It should feel less like:
+- help me build a custom workflow system
+- help me tune notification timing
+- help me optimize interruptions
+
+Future workflow-building layers may exist, but they are secondary and should not drive the MVP.
 
 ## Dual WhatsApp Model
 **Old world (before TaskLess):** one business phone with one WhatsApp Business account talking directly to everyone.
 
 **New world (after TaskLess setup):**
-- The original business SIM/phone remains. Its WhatsApp Business number becomes the AI Secretary channel and is connected to the WhatsApp Cloud API in Coexistence mode. The user keeps the phone, can answer calls, and can still read or occasionally reply in the app. This number is the AI Secretary-facing business identity.
-- The user adds a second low-cost SIM whose WhatsApp account is the Boss instruction channel. Through this Boss account, the user instructs the AI, asks it to write to clients, manages communication, and reviews or confirms actions. In Israel this can start with inexpensive local SIMs; other regions can use local providers.
+- The original business SIM/phone remains. Its WhatsApp Business number becomes the AI Secretary channel and is connected to the WhatsApp Cloud API in Coexistence mode. The user keeps the phone, can answer calls, and can still read or occasionally reply in the app.
+- The user adds a second low-cost SIM whose WhatsApp account becomes the Boss instruction channel. Through this Boss account, the user triggers cleanup/planning/execution sessions, requests actions, and approves proposals.
 
-**Why two identities are needed:** this is mainly a technical requirement of the current WhatsApp Coexistence setup, not a product philosophy by itself. In practice, the business number remains the coexistence business account and AI Secretary identity, while a separate low-cost WhatsApp number acts as the Boss instruction channel. A coexist account cannot reliably message itself for approval loops, and trying to collapse both roles into one identity risks recursive or ambiguous automation behavior. A separate Boss channel keeps human-in-the-loop flows practical and deterministic.
-
-The Boss may still use the business WhatsApp manually for personal or family threads, but the strategic model is to delegate more communication to the AI Secretary for organization and safety. Over time this setup can also help personal and family coordination.
-
-## Human-in-the-Loop
-The AI drafts, organizes, suggests, and decomposes work, but the Boss remains final approver for important actions. This trust model is core to TaskLess.
-
-Reversible interface actions can happen immediately:
-- opening menus
-- showing summaries
-- helping the Boss navigate the system
-
-Irreversible or state-changing actions require confirmation:
-- sending messages or emails
-- scheduling events
-- creating reminders, tasks, or persistent logs
-
-This boundary is core to trust and safety.
-
-## Natural Boss Flow
-- The preferred experience is conversational, not app-driven.
-- The Boss should be able to use text or voice naturally, without first deciding whether something is a reminder, task, log, schedule item, or follow-up.
-- Menu flows exist for discoverability, onboarding, and explicit navigation, but the long-term product shape is natural operational conversation.
-- Voice is a first-class control surface, not just an accessibility layer or transcription convenience.
+Why two identities are needed:
+- this is mainly a technical consequence of current WhatsApp Coexistence constraints
+- a coexist account cannot reliably message itself for approval loops
+- a separate Boss channel keeps approval and control flows deterministic
 
 ## Long-Term Direction
-- **Epoch 1 — Personal POC:** One Boss WhatsApp account plus one AI Secretary business WhatsApp account validate the loop, approvals, and operational flow for the founder’s own pair.
-- **Epoch 2 — Client Platform:** Each client gets their own Google Sheet, bound Apps Script deployment, and shared-library automations. A setup flow in the client sheet deploys their Apps Script and registers routing details in an external database so the platform can forward incoming events for that phone number.
+- **Epoch 1 — Personal POC:** prove the Boss + AI Secretary pair for the founder's own daily operating flow
+- **Epoch 2 — Client Platform:** give each client their own Google Sheet, bound Apps Script deployment, and onboarding/routing setup
 
-## Broader Goal
-The goal is not just message capture; it is to turn communication into an operational control system. Over time the same Boss–AI model should cover WhatsApp, Gmail, scheduling, reminders, and structured tasks.
+The product expands by deepening daily-use operational leverage first, then widening channels and platform support.
 
 ## Product Boundaries
-- TaskLess is not meant to be a general chatbot.
-- It is a scoped executive and operational secretary.
-- Out-of-scope requests should be redirected back into supported workflows rather than answered as general AI chat.
+- TaskLess is not a general chatbot.
+- TaskLess is not an urgency pusher.
+- TaskLess is not primarily an interruption manager.
+- TaskLess is not primarily a workflow builder.
+- Out-of-scope requests should be redirected into supported operational workflows rather than answered as generic chat.
 
 ## Scope of Truth
-PRODUCT.md is the stable high-level product truth. It should change slowly and guide OPERATIONAL.md, FEATURES.md, ARCHITECTURE.md, and DEV_TASKS.md.
+PRODUCT.md is the stable high-level product truth. It should guide OPERATIONAL.md, ARCHITECTURE.md, DEV_TASKS.md, and future feature specs.

@@ -46,28 +46,33 @@ This pipeline is now **fully operational**.
 
 # 1. Canonical Value Proposition
 
-TaskLess (BossAI) is a command layer for business communication.
+TaskLess (BossAI) is a WhatsApp-first AI chief of staff for solopreneurs.
 
 Brand concept:
 
 BossAI.online — You are the Boss. AI does the rest.
 
-TaskLess allows business owners to continue using their familiar messaging tools (especially WhatsApp Business) while AI organizes communication and tasks behind the scenes.
+TaskLess allows business owners to continue using familiar communication tools while AI continuously prepares operational work in the background and helps them act on it during cleanup, planning, and execution sessions.
 
-The system runs on top of the user's personal Google Workspace (Gmail + Google Sheets) and functions as a lightweight CRM and communication control system.
+Canonical operating principle:
+
+TaskLess **thinks all the time, but speaks only when spoken to**.
+
+The system runs on top of the user's personal Google Workspace (Gmail + Google Sheets) and functions as an operational preparation and execution layer.
 
 TaskLess:
 
 • receives inbound messages  
-• analyzes intent using AI  
-• proposes response drafts  
-• extracts tasks and commitments  
-• requires Boss approval before sending  
+• stores and normalizes operational items  
+• prepares lightweight summaries and metadata in the background  
+• reasons globally in user-triggered batch sessions  
+• proposes replies, tasks, reminders, and multi-step plans  
+• requires Boss approval before external execution  
 • logs all communication events  
 
 Goal:
 
-Transform chaotic messaging into a structured communication workflow without replacing WhatsApp.
+Transform chaotic daily communication into prepared operational work without replacing WhatsApp.
 
 Expected impact:
 
@@ -75,7 +80,7 @@ Expected impact:
 
 Core concept:
 
-You remain the Boss. AI prepares the work.
+You remain the Boss. AI prepares the work, explains why it matters, and waits for approval before acting.
 
 ---
 
@@ -101,12 +106,12 @@ The Boss always has final authority.
 
 The AI system responsible for:
 
-• analyzing inbound messages  
-• generating reply drafts  
-• extracting tasks  
-• organizing communication context  
+• continuously preparing lightweight summaries and metadata  
+• organizing communication context across items  
+• generating session-based recommendations and plans  
+• drafting replies, tasks, reminders, and follow-ups during user-triggered review sessions  
 
-The Assistant prepares work but does not execute without Boss approval.
+The Assistant prepares work continuously, but deep reasoning and external execution happen only after the user intentionally triggers a session and approves the result.
 
 ---
 
@@ -132,76 +137,72 @@ Boss can still override.
 
 ---
 
-# 3. Communication Flow
+# 3. Processing Model
 
-Inbound Flow
+TaskLess should run in two layers:
 
-Client  
-↓  
-WhatsApp Business (Coexist)  
-↓  
-WABA Webhook  
-↓  
-TaskLess Assistant
+### Continuous lightweight preparation
 
-Assistant analyzes:
+The system should continuously:
 
-• sender  
-• message content  
-• conversation context
+• ingest WhatsApp and later email/calendar inputs  
+• normalize/store raw items  
+• produce lightweight summaries and metadata  
+• tag simple signals such as unanswered, follow-up likely, deadline mentioned, or commitment-linked  
+• stay cheap, quiet, and always-on  
 
-Assistant produces:
+This layer should not perform full prioritization on every message.
 
-• intent classification  
-• suggested reply  
-• possible tasks
+### User-triggered batch reasoning
 
----
+When the user says things like:
 
-Boss Interaction
+• clean up  
+• what matters?  
+• plan my day  
+• what should I do next?  
+• or enters a menu-driven review flow  
 
-Boss receives a control card:
+Then the system should:
 
-Suggested reply  
-Approve  
-Edit  
-Revise with AI  
-Ignore
+• gather prepared items  
+• reason across them in one batch  
+• cluster related work  
+• prioritize contextually  
+• generate explanation-rich recommendations  
+• build structured plans and approval packets  
 
----
+Core rule:
 
-Outbound Flow
+Prepare locally. Decide globally.
 
-Assistant  
-↓  
-AI Safety Guard  
-↓  
-Boss Approval  
-↓  
-WhatsApp Cloud API  
-↓  
-Client
+# 4. Trust And Execution Model
 
----
+Execution contract:
 
-# 4. Learning Loop
+Prepare → Present → Approve → Execute
 
-TaskLess learns from Boss revisions.
+Trusted behaviors:
 
-When Boss edits an AI draft the system records:
+• prepare  
+• propose  
+• explain  
+• approve  
+• execute  
 
-• client message  
-• AI draft  
-• Boss revision  
-• final message
+De-emphasized / not core:
 
-Stored in Google Sheets.
+• proactive interruption logic  
+• urgency-driven push behavior  
+• per-message deep reasoning as the default  
+• notification timing complexity  
 
-Over time the Assistant learns:
+TaskLess should not claim urgency as fact by default. It should explain why something is surfaced using soft language such as:
 
-• tone preferences  
-• phrasing style  
-• communication patterns
+• no reply for 2 days  
+• deadline signal detected  
+• likely follow-up  
+• linked to your commitment  
 
 ---
 
@@ -333,7 +334,7 @@ Future parsing will normalize these events into a unified message model.
 
 # 9. Next Development Phase
 
-With communication capture operational, development will focus on backend operations.
+With communication capture operational, development should focus on the daily-use preparation-and-session loop rather than proactive attention management.
 
 ---
 
@@ -355,31 +356,46 @@ TaskLess will ingest:
 Communication Processing
 
 • normalize message events  
-• build unified conversation records  
-• contact resolution
+• build unified conversation/item records  
+• contact resolution  
+• preserve prepared metadata for later sessions
+
+Background Preparation
+
+• generate lightweight per-item summaries  
+• attach metadata and soft attention signals  
+• avoid expensive per-message global reasoning
 
 Orchestration
 
 • add `TL_Orchestrator.gs` as the thin deterministic manager inside Apps Script  
-• inspect ledger state and decide eligible next work  
+• inspect ledger state and decide eligible background prep or user-triggered session work  
 • dispatch bounded workers instead of growing webhook inline logic indefinitely  
-• coordinate repair, synthesis, approval wait, and approved-send transitions
+• coordinate repair, preparation, session planning, approval wait, and approved-send transitions
 
-Task Extraction
+Session Reasoning
 
-• detect tasks from messages  
-• create task records automatically
+• gather prepared items when the Boss asks for cleanup/planning/review  
+• reason across multiple items in one batch  
+• group related threads and commitments  
+• build explanation-rich plans and recommendation packets
+
+Plan Generation
+
+• convert high-level Boss requests into structured multi-step plans  
+• present plans as a batch by default  
+• allow optional per-step review/edit before execution
 
 Scheduling
 
-• detect appointment intent  
-• create calendar events
+• detect appointment intent inside session/planning flows  
+• create calendar events only after approval
 
 Assistant Layer
 
-• summarize conversations  
-• propose responses  
-• suggest follow-up actions
+• prepare lightweight summaries continuously  
+• propose responses and follow-up actions during sessions  
+• explain why items are shown instead of asserting urgency
 
 ---
 
@@ -434,14 +450,16 @@ No silent execution paths.
 
 # 13. Strategic Direction
 
-TaskLess converts messaging into a command-driven communication system.
+TaskLess converts daily communication into a prepared operational workbench for solopreneurs.
 
 Principles:
 
 • Boss remains in control  
-• AI prepares work  
-• Safety Guard prevents mistakes  
-• communication becomes structured
+• AI prepares work continuously in the background  
+• the system surfaces work on user trigger, not by default interruption  
+• deep reasoning happens in cleanup/planning/review sessions  
+• approval remains mandatory before external execution  
+• communication becomes structured operational context
 
 TaskLess sits above communication tools rather than replacing them.
 
@@ -455,11 +473,13 @@ Inbound messages may appear as echo events.
 
 Webhook logging is essential for debugging.
 
-AI draft + Boss approval prevents messaging mistakes.
+Wrong urgency calls damage trust faster than missed automation opportunities.
 
-Safety Guard significantly reduces reputational risk.
+Silent background preparation is more valuable than background interruption.
 
-Logging and learning loops are critical for improvement.
+Batch reasoning during intentional work sessions is a better default than deep per-message reasoning.
+
+Explanation-rich approval flows are more trustworthy than raw confidence claims.
 
 ---
 
@@ -483,39 +503,32 @@ Logging and learning loops are critical for improvement.
 - Deployed web app media ingestion verified by simulated POSTs to the live `doPost()` endpoint: image, document, voice, and video each returned `{"ok":true,"appended":1,"skipped":0,"updated":0}`.
 - Voice transcription path is now wired end-to-end: incoming WhatsApp voice note -> media fetch from Meta -> Gemini transcription -> transcript written back to `text` and summary written to `ai_summary`.
 - Webhook auto-transcription is now enabled for incoming voice notes when `ai_voice_transcription=TRUE`; failures are logged but do not break the webhook.
-- Amanda triage is now wired for incoming WhatsApp rows: after normalization (and after voice transcription when applicable), the system writes `priority_level`, `importance_level`, `urgency_flag`, `needs_owner_now`, `suggested_action`, `ai_summary`, and `ai_proposal`.
-- Live tests currently use the Boss phone configured in `SETTINGS` (`BOSS_PHONE`) as the sender while the system is under active development. Later test phases should introduce additional actors (clients, family, vendors, internal staff) so contact behavior and urgency rules are exercised against more realistic mixed traffic.
+- Amanda lightweight preparation is now wired for incoming WhatsApp rows: after normalization (and after voice transcription when applicable), the system writes `priority_level`, `importance_level`, `urgency_flag`, `needs_owner_now`, `suggested_action`, `ai_summary`, and `ai_proposal`. These fields should increasingly be treated as soft preparation metadata, not hard interruption claims.
+- Live tests currently use the Boss phone configured in `SETTINGS` (`BOSS_PHONE`) as the sender while the system is under active development. Later test phases should introduce additional actors (clients, family, vendors, internal staff) so contact behavior and explanation quality are exercised against more realistic mixed traffic.
 - Remaining media gap: image/video analysis and richer downstream processing are still pending.
 
 ## Next steps (AI routine, WhatsApp-first)
 - Add `TL_Orchestrator.gs` as the first explicit orchestration layer inside Apps Script.
-  - start with deterministic routing of pending repairs and downstream WhatsApp work rather than more inline branching inside `TL_Webhook.gs`
-  - initial orchestration targets: late-status repair, post-ingest AI follow-up, quiet-window synthesis eligibility, approval wait state, and approved-send dispatch
+  - start with deterministic routing of pending repairs, lightweight preparation, and user-triggered session work rather than more inline branching inside `TL_Webhook.gs`
+  - initial orchestration targets: late-status repair, post-ingest lightweight prep, cleanup/planning session assembly, approval wait state, and approved-send dispatch
   - keep this layer procedural and auditable; AI remains inside specialist worker steps, not in the manager itself
   - execution model for v1:
     - direct webhook work: `doGet(e)`, `doPost(e)`, payload normalization, idempotent ledger write/update, immediate status merge when possible, deferred-work logging when not possible
-    - orchestrator batch work: scan eligible rows/threads and dispatch bounded batches for repair, AI follow-up, quiet-window synthesis, approval-state handling, and approved-send routing
+    - orchestrator batch work: scan eligible rows/threads and dispatch bounded batches for repair, lightweight prep, session assembly, approval-state handling, and approved-send routing
     - separate worker entrypoints: `TL_Repair_Run()`, `TL_AI_RunPending()`, `TL_Synthesis_Run()`, `TL_Approval_Run()`, `TL_Send_RunApproved()`
   - trigger model for v1:
     - WhatsApp webhook remains immediate
     - `TL_Orchestrator.gs` should wake on a time-driven trigger, starting at every 5 minutes
     - do not create one installable trigger per task; use the orchestrator as the recurring dispatcher
 - Configure AI endpoint/token in SETTINGS (`API END POINT`, `API TOKEN`, `AI_DEFAULT_LANGUAGE`). Use existing WhatsApp messages as the first channel before adding email/scheduling/tasks.
-- Extend `SETTINGS` for the Boss-secretary relationship and workload shaping:
-  - `URGENT_PUSH_ENABLED`
-  - `BOSS_INTERRUPT_LEVEL`
-  - `BOSS_UPDATE_INTERVAL_MINUTES`
-  - `BOSS_DECISION_REQUEST_INTERVAL_MINUTES`
-  - `BOSS_DECISION_BATCH_SIZE`
-  - `BOSS_MAX_ITEMS_PER_DIGEST`
-  - `BOSS_URGENT_ITEMS_ALWAYS_FIRST`
-  - `BOSS_INCLUDE_FYI_IN_DIGEST`
-  - `DO_NOT_DISTURB_ENABLED`
-  - use these to control pull-vs-push behavior, digest cadence, and how much decision workload the secretary places on the Boss at a time
+- Extend `SETTINGS` for session shaping and review workload:
+  - preserve existing digest / decision cadence controls where useful for compatibility
+  - prioritize settings that shape cleanup/planning sessions, approval batch size, summary language, and operating cadence
+  - treat proactive push / interruption settings as legacy or de-emphasized rather than core product controls
 - AI flow (initial POC):
-  - Amanda now handles first-pass per-message triage for incoming WhatsApp rows.
-  - Next Amanda layer: batch/thread synthesis after quiet-window stabilization so multiple related messages produce one coherent summary, proposal, and decision recommendation.
-  - Prepare a Boss approval card: Boss edits/approves; on approval, send via WhatsApp and log outbound communication row.
+  - Amanda now handles first-pass lightweight preparation for incoming WhatsApp rows.
+  - Next Amanda layer: user-triggered batch reasoning so multiple related items produce one coherent summary, explanation, plan, and decision recommendation.
+  - Prepare a Boss approval card / packet: Boss edits/approves; on approval, send via WhatsApp and log outbound communication row.
 - Extend inbound WhatsApp parsing beyond text:
   - image/document/video messages: store media type, caption, media id/url metadata, and preserve linkage to the contact/root/topic.
 
@@ -539,11 +552,11 @@ Logging and learning loops are critical for improvement.
   - only after approval does the system execute or finalize
 - Retrieval-style menu actions may answer directly:
   - `מה על הצלחת שלי עכשיו`
-  - `דחוף בלבד`
+  - `מה צריך תשומת לב`
   - `ממתין לאישורים`
   - `טיוטות לתגובה`
   - `משימות פתוחות`
-  - voice/audio notes: transcription is now wired; next step is to feed transcript + summary into downstream task extraction and reply drafting automatically.
+  - voice/audio notes: transcription is now wired; next step is to feed transcript + prepared metadata into downstream task extraction, planning, and reply drafting automatically.
 - Add email pipeline:
   - scan important incoming emails where the user is in `To` or `Cc` (not `Bcc`), import them into `INBOX`, and batch-analyze them as JSON.
   - support outbound email drafting/sending as another Boss-approved execution channel.
@@ -564,13 +577,13 @@ Logging and learning loops are critical for improvement.
 - Batch approval with exception handling:
   - support approve-all, approve-safe-only, one-by-one review, grouped review, and exception-only review while preserving Boss confirmation as an invariant.
 - Boss workload shaping:
-  - use `SETTINGS` to control push vs pull behavior, digest cadence, decision cadence, batch size, urgent-first ordering, and interruption thresholds.
+  - use `SETTINGS` to control session cadence, decision cadence, batch size, review depth, summary language, and workload shaping without making proactive interruption the core product loop.
 - Reusable secretary action templates:
   - common flows such as follow-up, archive-safe items, create task + reminder, send meeting confirmation, and similar repeatable office work.
 - Contact/relationship memory:
   - retain stable context such as tone preference, business stage, prior commitments, reputational sensitivity, and recurring contact patterns.
 - Executive brief / “what’s on my plate now” mode:
-  - provide a concise, high-value control surface showing risks, approvals pending, urgent items, and recommended next actions.
+  - provide a concise, high-value control surface showing why items are surfaced, what is waiting on approval, and recommended next actions.
 - Editable approval cards:
   - every meaningful proposal should come back as a structured Boss card with approve, revise, edit, regroup, or defer paths rather than only binary approval.
 - Dependency-aware tasks:
@@ -579,7 +592,7 @@ Logging and learning loops are critical for improvement.
 - Specialized vertical packs:
   - support profession-specific modules such as therapist/patient flows, recurring session summaries, periodic reports, and other industry workflows.
 - Personalized operating style:
-  - the secretary should adapt to the Boss’s preference for interruption level, summary length, approval style, language, and operating cadence.
+  - the secretary should adapt to the Boss’s preference for summary length, approval style, language, and operating cadence.
 - “What should I do now?” decision mode:
   - a focused mode that returns the best next actions with the least cognitive load, prioritized for practical execution rather than information dump.
 

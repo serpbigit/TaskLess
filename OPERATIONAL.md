@@ -31,7 +31,7 @@ Initial tabs to finalize:
 
 `CONTACTS` stores known contacts and metadata (phone numbers, names).
 
-`SETTINGS` holds configurable runtime settings (e.g., polling interval, batch sizes, AI approval defaults, feature toggles).
+`SETTINGS` holds configurable runtime settings (e.g., polling interval, batch sizes, AI approval defaults, feature toggles, and session-shaping controls).
 
 `LOG` captures internal system operations for debugging.
 
@@ -89,7 +89,7 @@ Class-specific fields:
 - Config is read by Apps Script to control timers/triggers and processing behavior.
 - Settings changes should be logged in `LOG` for auditability.
 - Secretary-control settings should also live here, including `URGENT_PUSH_ENABLED`, `BOSS_INTERRUPT_LEVEL`, `BOSS_UPDATE_INTERVAL_MINUTES`, `BOSS_DECISION_REQUEST_INTERVAL_MINUTES`, `BOSS_DECISION_BATCH_SIZE`, `BOSS_MAX_ITEMS_PER_DIGEST`, `BOSS_URGENT_ITEMS_ALWAYS_FIRST`, `BOSS_INCLUDE_FYI_IN_DIGEST`, and `DO_NOT_DISTURB_ENABLED`.
-- These settings define whether the secretary interrupts proactively, how often it summarizes or requests decisions, and how much decision workload it places on the Boss at a time.
+- These settings should primarily shape review sessions, summaries, and decision workload. Legacy interruption-related settings may remain for compatibility, but proactive interruption is not the core operating model.
 
 ## CONTACTS
 - One row per person/entity with stable identifiers (contact_id, name, alias, org, website, phones, email, role, tags, last_enriched_at, optional last_note cache).
@@ -115,4 +115,4 @@ OPERATIONAL.md is the behavioral contract of the system. If future code or patch
   - AI extracts structured intent and proposal JSON
   - Boss confirms through approval card / packet
   - only then execute or finalize
-- Retrieval flows (for example `מה על הצלחת שלי עכשיו`, `דחוף בלבד`, `ממתין לאישורים`) may respond directly from the ledger without an approval card.
+- Retrieval flows (for example `מה על הצלחת שלי עכשיו`, `מה צריך תשומת לב`, `ממתין לאישורים`) may respond directly from the ledger without an approval card.
