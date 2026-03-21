@@ -78,7 +78,7 @@ const TL_SCHEMA = {
 };
 
 function TL_EnsureSchema() {
-  const ss = SpreadsheetApp.getActive();
+  const ss = TL_Schema_getSpreadsheet_();
   ensureTab_(ss, "INBOX", TL_SCHEMA.INBOX_HEADERS, false);
   ensureTab_(ss, "ARCHIVE", TL_SCHEMA.INBOX_HEADERS, false);
   ensureTab_(ss, "CONTACTS", TL_SCHEMA.CONTACTS_HEADERS, false);
@@ -91,7 +91,7 @@ function TL_EnsureSchema() {
 }
 
 function TL_ResetSchema(forceClear) {
-  const ss = SpreadsheetApp.getActive();
+  const ss = TL_Schema_getSpreadsheet_();
   ensureTab_(ss, "INBOX", TL_SCHEMA.INBOX_HEADERS, !!forceClear);
   ensureTab_(ss, "ARCHIVE", TL_SCHEMA.INBOX_HEADERS, !!forceClear);
   ensureTab_(ss, "CONTACTS", TL_SCHEMA.CONTACTS_HEADERS, !!forceClear);
@@ -108,7 +108,7 @@ function TL_ResetSchema(forceClear) {
  * Destructive: deletes entire sheets. Use with caution.
  */
 function TL_PruneTabs() {
-  const ss = SpreadsheetApp.getActive();
+  const ss = TL_Schema_getSpreadsheet_();
   const allowed = new Set(TL_SCHEMA.ALLOWED_TABS);
   ss.getSheets().forEach(sh => {
     const name = sh.getName();
@@ -116,6 +116,12 @@ function TL_PruneTabs() {
       ss.deleteSheet(sh);
     }
   });
+}
+
+function TL_Schema_getSpreadsheet_() {
+  const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+  if (sheetId) return SpreadsheetApp.openById(sheetId);
+  return SpreadsheetApp.getActiveSpreadsheet();
 }
 
 function ensureTab_(ss, name, headers, forceClear) {

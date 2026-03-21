@@ -498,6 +498,7 @@ Explanation-rich approval flows are more trustworthy than raw confidence claims.
 - Boss menu flow now has a full navigable tree scaffold in Hebrew: main menu, submenus, decision-packet approvals, and capture routing markers for reminder/task/log/schedule flows. Creation flows should route into AI proposal + Boss approval rather than silently execute.
 - Menu-handled inbound follow-up text is now appended before the menu handler runs, so free-text captures such as option `1` notes can be persisted and then upgraded to `record_class=instruction` / `task_status=logged`.
 - Known gap: some status messages arrive before the corresponding message row, leading to status_no_match (logged) and no merge. Need a future cache/merge pass for late statuses.
+- Keep `TL_Onboarding.gs` current as the canonical client-setup module for per-client script properties, sheet binding, schema bootstrap, and future onboarding automation. POC may still use it manually.
 - Known gap: OUTGOING echo rows have empty receiver when recipient_id missing in payload; need fallback logic (e.g., last contact in root/topic window).
 - Known gap: record_version not incremented for communication evolutions (only statuses). Need consistent versioning across updates.
 - Webhook normalization now captures text plus media metadata for image, document, audio, voice, and video messages in INBOX.

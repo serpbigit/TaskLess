@@ -53,6 +53,13 @@ Do not run `clasp deploy` without specifying the deploymentId.
 
 Creating a new deployment would change the webhook URL and break the system.
 
+### Codex shell note
+- In Codex, `clasp` may not resolve directly from PATH even when the repo working directory is correct.
+- Prefer the repo-local wrapper from the repo root:
+  - `.\scripts\clasp.ps1 push`
+  - `.\scripts\clasp.ps1 deploy --deploymentId AKfycbx1p8fg0eFua_9qLJ7tTk0P-cd_zLKxAHnc8KRfyIhgaPtwXANfEZ_QjG3a6pvfVefa --description "<short description>"`
+- If the desktop app shows an approval option such as "don't ask again" for the PowerShell command prefix, it is useful to approve it so future `git`/`clasp` runs are faster.
+
 ## 8. Logging and Schema
 - All flows must log deterministically: inbound events, proposals, executions, successes, errors.
 - Schema snapshots live in SCHEMA.json; export and commit schema changes when they occur.
