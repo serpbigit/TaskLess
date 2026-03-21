@@ -52,6 +52,7 @@ function TL_Email_RunScheduled() {
       triage: triage
     };
     if (typeof TLW_logInfo_ === "function") TLW_logInfo_("email_run_scheduled", result);
+    TL_Email_logExecution_("TL_Email_RunScheduled", result);
     return result;
   });
 }
@@ -62,11 +63,13 @@ function TL_Email_InstallTrigger_1m() {
     .timeBased()
     .everyMinutes(1)
     .create();
-  return {
+  const result = {
     ok: true,
     handler: TL_EMAIL.TRIGGER_HANDLER,
     cadence: "every 1 minute"
   };
+  TL_Email_logExecution_("TL_Email_InstallTrigger_1m", result);
+  return result;
 }
 
 function TL_Email_InstallTrigger_5m() {
@@ -75,11 +78,13 @@ function TL_Email_InstallTrigger_5m() {
     .timeBased()
     .everyMinutes(5)
     .create();
-  return {
+  const result = {
     ok: true,
     handler: TL_EMAIL.TRIGGER_HANDLER,
     cadence: "every 5 minutes"
   };
+  TL_Email_logExecution_("TL_Email_InstallTrigger_5m", result);
+  return result;
 }
 
 function TL_Email_RemoveTriggers() {
@@ -91,14 +96,16 @@ function TL_Email_RemoveTriggers() {
       removed++;
     }
   });
-  return { ok: true, removed: removed };
+  const result = { ok: true, removed: removed };
+  TL_Email_logExecution_("TL_Email_RemoveTriggers", result);
+  return result;
 }
 
 function TL_Email_Status() {
   const triggers = ScriptApp.getProjectTriggers().filter(function(trigger) {
     return trigger.getHandlerFunction() === TL_EMAIL.TRIGGER_HANDLER;
   });
-  return {
+  const result = {
     ok: true,
     handler: TL_EMAIL.TRIGGER_HANDLER,
     trigger_count: triggers.length,
@@ -109,6 +116,8 @@ function TL_Email_Status() {
     email_triage_batch_size: TLW_getSetting_("EMAIL_TRIAGE_BATCH_SIZE") || String(TL_EMAIL.DEFAULT_TRIAGE_BATCH_SIZE),
     checkpoint: TL_Email_getPullCheckpoint_()
   };
+  TL_Email_logExecution_("TL_Email_Status", result);
+  return result;
 }
 
 function TL_Email_withLock_(label, fn) {
@@ -486,6 +495,14 @@ function TL_Email_jsonStringify_(value) {
     return JSON.stringify(value == null ? {} : value);
   } catch (err) {
     return "{}";
+  }
+}
+
+function TL_Email_logExecution_(label, payload) {
+  try {
+    Logger.log(label + " " + JSON.stringify(payload, null, 2));
+  } catch (err) {
+    Logger.log(label + " " + String(payload));
   }
 }
 
