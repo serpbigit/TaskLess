@@ -21,7 +21,8 @@ const TL_SCHEMA = {
     "priority_level","importance_level","urgency_flag","needs_owner_now","suggested_action"
   ],
   CONTACTS_HEADERS: [
-    "contact_id","name","alias","org","website","phone1","phone2","email","role","tags","last_note","last_enriched_at"
+    "contact_id","name","alias","org","website","phone1","phone2","email","role","tags","last_note","last_enriched_at",
+    "source_system","source_id","phone1_normalized","phone2_normalized","email_normalized","labels","sync_status","last_synced_at","notes_internal"
   ],
   CONTACT_ENRICHMENTS_HEADERS: [
     "timestamp","contact_id","contact_name","note_type","note_text","source","linked_record_id","topic_id","notes"

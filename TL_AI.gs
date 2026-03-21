@@ -186,9 +186,9 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Reuven"),
     "Supported intents:",
-    "show_menu, help, show_ai_cost, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, out_of_scope, unknown",
+    "show_menu, help, show_ai_cost, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, out_of_scope, unknown",
     "Strict JSON shape:",
-    '{"intent":"...","route":"menu|summary|capture|none","summary_kind":"pending|urgent|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|menu|help|verticals|settings|reminders|tasks|none","capture_state":"TL_MENU_STATES value or empty string","confidence":0.0,"needs_clarification":"true|false","reply":"...","parameters":{"query":"...","capture_kind":"...","capture_mode":"...","time_hint":"...","target":"..."}}',
+    '{"intent":"...","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|menu|help|verticals|settings|reminders|tasks|none","capture_state":"TL_MENU_STATES value or empty string","confidence":0.0,"needs_clarification":"true|false","reply":"...","parameters":{"query":"...","capture_kind":"...","capture_mode":"...","time_hint":"...","target":"..."}}',
     "Routing rules:",
     "Use summary routes for list/status questions.",
     "Use capture routes for create/add/log/remind/schedule requests.",
@@ -843,7 +843,8 @@ function TL_AI_bossSummaryKindFromIntent_(intent) {
     list_tasks: "tasks",
     list_approvals: "approvals",
     list_pending: "pending",
-    list_urgent: "urgent",
+    list_urgent: "attention",
+    list_attention: "attention",
     list_next_steps: "next_steps",
     list_draft_replies: "draft_replies",
     list_waiting_on_others: "waiting_on_others",
@@ -884,7 +885,7 @@ function TL_AI_bossCaptureStateFromIntent_(intent) {
 function TL_AI_normalizeBossIntentName_(value) {
   const v = String(value || "").trim().toLowerCase();
   const allowed = [
-    "show_menu","help","show_ai_cost","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_next_steps",
+    "show_menu","help","show_ai_cost","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_attention","list_next_steps",
     "list_draft_replies","list_waiting_on_others","list_followups","list_open_tasks","list_blocked_tasks",
     "show_settings","show_verticals",
     "create_reminder_relative","create_reminder_datetime","create_reminder_recurring",
@@ -905,7 +906,8 @@ function TL_AI_normalizeBossIntentRoute_(value) {
 
 function TL_AI_normalizeBossSummaryKind_(value) {
   const v = String(value || "").trim().toLowerCase();
-  const allowed = ["pending","urgent","approvals","next_steps","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","ai_cost","none"];
+  if (v === "urgent") return "attention";
+  const allowed = ["pending","attention","approvals","next_steps","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","ai_cost","none"];
   return allowed.indexOf(v) !== -1 ? v : "none";
 }
 

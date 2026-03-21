@@ -365,6 +365,7 @@ Background Preparation
 • generate lightweight per-item summaries  
 • attach metadata and soft attention signals  
 • avoid expensive per-message global reasoning
+• treat message-level prep as evidence-building, not final priority judgment
 
 Orchestration
 
@@ -378,6 +379,7 @@ Session Reasoning
 • gather prepared items when the Boss asks for cleanup/planning/review  
 • reason across multiple items in one batch  
 • group related threads and commitments  
+• merge cross-record context for the same person across WhatsApp and email when possible  
 • build explanation-rich plans and recommendation packets
 
 Plan Generation
@@ -521,6 +523,20 @@ Explanation-rich approval flows are more trustworthy than raw confidence claims.
     - `TL_Orchestrator.gs` should wake on a time-driven trigger, starting at every 5 minutes
     - do not create one installable trigger per task; use the orchestrator as the recurring dispatcher
 - Configure AI endpoint/token in SETTINGS (`API END POINT`, `API TOKEN`, `AI_DEFAULT_LANGUAGE`). Use existing WhatsApp messages as the first channel before adding email/scheduling/tasks.
+- Contact strategy (current direction):
+  - Google Contacts sync should default to `both_only` (contacts that have both phone and email).
+  - Do not bulk-import the full contact universe by default just to populate `CONTACTS`.
+  - Use Google Contacts as the trusted seed set, then expand context through approval-based linking.
+- Contact resolution flow for incoming WhatsApp:
+  - first resolve by normalized phone
+  - if that contact has an email, immediately expand context on the email side too
+  - if phone resolution does not produce a usable cross-channel contact, fall back to candidate search by normalized name
+  - if name candidates are found, ask the Boss before linking/updating contacts
+  - after approval, run a fresh limited cross-channel history scan and rebuild the brief
+- Identity-linking interaction model:
+  - allow temporary joint-context usage for the current brief without forcing a permanent merge
+  - separately ask whether to update/link the contact record permanently
+  - prefer "link/update contact" language over destructive "merge" language in the first shipped flow
 - Extend `SETTINGS` for session shaping and review workload:
   - preserve existing digest / decision cadence controls where useful for compatibility
   - prioritize settings that shape cleanup/planning sessions, approval batch size, summary language, and operating cadence
@@ -557,6 +573,14 @@ Explanation-rich approval flows are more trustworthy than raw confidence claims.
   - `טיוטות לתגובה`
   - `משימות פתוחות`
   - voice/audio notes: transcription is now wired; next step is to feed transcript + prepared metadata into downstream task extraction, planning, and reply drafting automatically.
+- First shipped session surfaces in code terms:
+  - `מה על הצלחת שלי עכשיו`
+  - `מה צריך תשומת לב`
+  - `ממתין לאישורים`
+  - `הצע לי צעדים הבאים`
+- Session rule:
+  - lightweight prep may emit soft evidence and tags per item
+  - final priority/context judgment should happen in the session layer with the broader "forest" view
 - Add email pipeline:
   - scan important incoming emails where the user is in `To` or `Cc` (not `Bcc`), import them into `INBOX`, and batch-analyze them as JSON.
   - support outbound email drafting/sending as another Boss-approved execution channel.
@@ -565,6 +589,7 @@ Explanation-rich approval flows are more trustworthy than raw confidence claims.
 - Add cross-channel contact intelligence:
   - extract and normalize contact information from WhatsApp messages and emails.
   - match messages/emails to shared contacts so Amanda can reason over broader context (previous emails, previous WhatsApp exchanges, prior commitments, and topic history).
+  - when direct matching fails, surface candidate contacts and ask the Boss whether to use temporary joint context or permanently link the identity.
 - Future voice-output task:
   - add support for AI-generated voice responses: generate approved reply text -> synthesize speech -> send outbound audio/voice note via the appropriate channel.
 - Deferrals for later: email ingestion, calendar/scheduling, and task auto-creation; focus first on WhatsApp AI drafts and Boss approval loop.

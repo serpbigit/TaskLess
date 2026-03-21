@@ -363,7 +363,7 @@ function TL_Menu_BuildManageWorkMenu_() {
   return [
     "ניהול העבודה",
     "1. מה על הצלחת שלי עכשיו",
-    "2. דחוף בלבד",
+    "2. מה צריך תשומת לב",
     "3. ממתין לאישורים",
     "4. הצע לי צעדים הבאים",
     "5. טיוטות לתגובה",
@@ -648,7 +648,8 @@ function TL_Menu_HandleSummaryIntent_(intent) {
   switch (summaryKind) {
     case "ai_cost": return TL_AI_BuildMonthToDateSpendReport_();
     case "pending": return TL_Menu_BuildPendingSummary_();
-    case "urgent": return TL_Menu_BuildUrgentSummary_();
+    case "urgent":
+    case "attention": return TL_Menu_BuildUrgentSummary_();
     case "approvals": return TL_Menu_BuildAwaitingApprovalSummary_();
     case "next_steps": return TL_Menu_BuildSuggestedNextSteps_();
     case "draft_replies": return TL_Menu_BuildDraftRepliesSummary_();
@@ -1272,6 +1273,9 @@ function TL_Menu_BuildSummaryBlock_(title, rows, emptyText) {
 }
 
 function TL_Menu_BuildPendingSummary_() {
+  if (typeof TL_Session_BuildSurface_ === "function") {
+    return TL_Session_BuildSurface_("plate_now");
+  }
   const rows = TL_Menu_FilterRecentRows_(function(item) {
     const values = item.values;
     const taskStatus = TL_Orchestrator_value_(values, "task_status").toLowerCase();
@@ -1285,15 +1289,21 @@ function TL_Menu_BuildPendingSummary_() {
 }
 
 function TL_Menu_BuildUrgentSummary_() {
+  if (typeof TL_Session_BuildSurface_ === "function") {
+    return TL_Session_BuildSurface_("attention");
+  }
   const rows = TL_Menu_FilterRecentRows_(function(item) {
     const values = item.values;
     return TL_Orchestrator_value_(values, "urgency_flag").toLowerCase() === "true" ||
       TL_Orchestrator_value_(values, "needs_owner_now").toLowerCase() === "true";
   }, TL_MENU.MAX_PENDING_SUMMARY);
-  return TL_Menu_BuildSummaryBlock_("דחוף בלבד", rows, "אין כרגע פריטים דחופים.");
+  return TL_Menu_BuildSummaryBlock_("מה צריך תשומת לב", rows, "אין כרגע פריטים בולטים שצריכים תשומת לב.");
 }
 
 function TL_Menu_BuildAwaitingApprovalSummary_() {
+  if (typeof TL_Session_BuildSurface_ === "function") {
+    return TL_Session_BuildSurface_("approvals");
+  }
   const rows = TL_Menu_FilterRecentRows_(function(item) {
     const values = item.values;
     const approvalStatus = TL_Orchestrator_value_(values, "approval_status").toLowerCase();
@@ -1303,6 +1313,9 @@ function TL_Menu_BuildAwaitingApprovalSummary_() {
 }
 
 function TL_Menu_BuildSuggestedNextSteps_() {
+  if (typeof TL_Session_BuildSurface_ === "function") {
+    return TL_Session_BuildSurface_("next_steps");
+  }
   const rows = TL_Menu_FilterRecentRows_(function(item) {
     const values = item.values;
     const action = TL_Orchestrator_value_(values, "suggested_action").toLowerCase();
