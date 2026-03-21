@@ -1,10 +1,13 @@
 /**
- * TL_SheetsStore - bounded sheet store + bootstrap helpers (POC)
+ * TL_SheetsStore - bounded legacy task-store helpers.
  * Default store: bound spreadsheet (getActiveSpreadsheet)
  * Optional override: Script Property TL_CFG_STORE_SHEET_ID
  *
- * Tabs we may create:
- * OPEN, PENDING, REVISION, ARCHIVE, AUDIT_LOG, SETTINGS, COMMANDS_INBOX
+ * Legacy sidecar tabs still used by older email/calendar paths:
+ * OPEN, REVISION
+ *
+ * Canonical product tabs are managed by TL_SchemaSetup.gs.
+ * Do not expand this sidecar footprint unless a migration requires it.
  */
 
 function TL_Sheets_getStore_() {
@@ -44,14 +47,8 @@ function TL_Sheets_bootstrapTabs_() {
   const ss = TL_Sheets_getStore_();
 
   TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"), TL_Sheets_taskHeaders_());
-  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"), TL_Sheets_taskHeaders_());
   TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_REVISION","REVISION"), TL_Sheets_taskHeaders_());
-  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_ARCHIVE","ARCHIVE"), TL_Sheets_taskHeaders_());
-  TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_AUDIT","AUDIT_LOG"), ["ts","actor","eventType","userE164","refId","chunkId","payload"]);
   TL_Sheets_ensureTab_(ss, TL_Config_get_("TL_CFG_TAB_SETTINGS","SETTINGS"), ["key","value"]);
-
-  // Router currently expects this to exist (quick unblock)
-  TL_Sheets_ensureTab_(ss, "COMMANDS_INBOX", ["ts","userE164","text","batchVersion","payloadJson"]);
 
   return {
     ok: true,
@@ -110,7 +107,6 @@ function TL_Sheets_findOpenTasks_(userE164, limit) {
 
   const tabs = [
     TL_Config_get_("TL_CFG_TAB_OPEN","OPEN"),
-    TL_Config_get_("TL_CFG_TAB_PENDING","PENDING"),
     TL_Config_get_("TL_CFG_TAB_REVISION","REVISION")
   ];
 
