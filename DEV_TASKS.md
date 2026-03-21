@@ -9,9 +9,15 @@ Reconstruction guide: see RECONSTRUCTION.md
 
 # 0. System Context
 
-TaskLess is currently in the **infrastructure validation phase**.
+TaskLess is currently in the **WhatsApp-native review and cross-channel context hardening phase**.
 
-The objective of this phase was to prove that business communication can be captured reliably from WhatsApp and stored in a structured backend without disrupting the user's normal workflow.
+The earlier infrastructure-validation work is complete. The current objective is to make the Boss-facing operating loop trustworthy and useful:
+
+• keep `INBOX` as the canonical operational ledger  
+• preserve lightweight always-on preparation on every incoming record  
+• use deeper context only for drafts/review sessions  
+• tighten WhatsApp review UX for approvals, drafts, and cleanup  
+• prepare the system for the next architectural layer: `TOPICS`  
 
 The key architectural decision behind TaskLess is:
 
@@ -145,7 +151,7 @@ TaskLess should run in two layers:
 
 The system should continuously:
 
-• ingest WhatsApp and later email/calendar inputs  
+• ingest WhatsApp and email inputs, and later calendar inputs  
 • normalize/store raw items  
 • produce lightweight summaries and metadata  
 • tag simple signals such as unanswered, follow-up likely, deadline mentioned, or commitment-linked  
@@ -639,4 +645,58 @@ Explanation-rich approval flows are more trustworthy than raw confidence claims.
   - duplicate packet cooldown
   - per-root / per-event loop breaker
   - one-click emergency stop for all background processing
+
+## Current shipped state (latest verified direction)
+- `INBOX` is the canonical operational ledger for both WhatsApp and active email work.
+- `CONTACTS` and `CONTACT_ENRICHMENTS` are now active parts of the draft/review loop, not only passive storage.
+- Boss free-form review requests such as:
+  - `יש משהו שמחכה לאישור שלי`
+  - `מה צריך תשומת לב`
+  - `cleanup`
+  are now routed by the Boss-intent prompt and surfaced through session logic plus one-by-one review packets.
+- Approval UX direction is now:
+  - short digest first
+  - then one-by-one item review in WhatsApp
+  - explicit action labels instead of a vague `אשר`
+  - exact proposed draft/action shown before approval
+- AI prompt contracts were tightened:
+  - clearer JSON schema semantics
+  - field definitions
+  - stronger examples
+  - Boss menu routing now includes `menu_target`
+- Language handling direction is now:
+  - `AI_DEFAULT_LANGUAGE` = Boss-facing UI language
+  - `REPLY_LANGUAGE_POLICY` = recipient-facing draft language policy
+  - default draft policy = `match_incoming`
+
+## Current architectural split (important)
+- Layer 1: universal lightweight preparation on every incoming record
+  - summary
+  - urgency/importance/action hints
+  - record-level metadata
+  - later: lightweight topic tagging
+- Layer 2: deeper context assembly only when preparing a real draft/recommendation/review item
+  - last 5 contact enrichments
+  - last 5 TaskLess emails
+  - last 5 TaskLess WhatsApps
+  - Gmail fallback where useful
+  - later: topic examples / similar-case retrieval
+
+## Next recommended step before TOPICS
+- Implement targeted context hydration for the few items actually shown in a Boss digest/review surface.
+- Do not enrich every open item in the system.
+- Flow:
+  - first rank/filter prepared items
+  - then hydrate only the top surfaced items with richer context
+- This should improve cleanup/approval quality before introducing topic-based similar-case retrieval.
+
+## TOPICS direction (not yet implemented)
+- `TOPICS` should become a reusable cross-client topic catalog, not a loose per-contact note list.
+- Topic behavior should be split the same way:
+  - lightweight topic match / candidate at ingestion
+  - deeper topic-example retrieval only in draft/review/session context
+- Topic retrieval should eventually support:
+  - last similar cases
+  - prior reply patterns
+  - cross-client pattern memory
 

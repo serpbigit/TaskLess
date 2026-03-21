@@ -69,6 +69,11 @@ Creating a new deployment would change the webhook URL and break the system.
 ## 9. Response Style
 - Keep responses concise and operational; include verification guidance when relevant.
 - Provide one clear command sequence only when the user must run it; otherwise perform edits directly.
+- When git/clasp actions are performed by the agent, the closeout should explicitly state:
+  - git commit hash/message when applicable
+  - whether `git push` was run
+  - the exact `clasp` push/deploy commands used
+  - the deployed Apps Script version/description when known
 
 ## 10. File Locations
 - Keep AGENT.md at repo root; reference it from DEV_TASKS.md so it’s easy to find.

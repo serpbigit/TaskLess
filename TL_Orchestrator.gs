@@ -609,15 +609,21 @@ function TL_Approval_RunUnlocked_(batchSize) {
 
 function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
   const loc = TL_AI_getInboxRow_(rowNumber);
-  if (!loc) return false;
+  if (!loc) return { ok: false, reason: "row_not_found" };
 
   const values = loc.values;
   const notes = String(TL_Orchestrator_value_(values, "notes") || "").trim();
   const kind = TL_Orchestrator_captureKindFromNotes_(notes);
-  if (!kind) return false;
+  if (!kind) return { ok: false, reason: "missing_capture_kind" };
 
   const sender = String(TLW_getSetting_("BOSS_PHONE") || "").trim() || TL_Orchestrator_value_(values, "sender");
   const receiver = TL_Orchestrator_value_(values, "display_phone_number") || TL_Orchestrator_value_(values, "receiver");
+  const title = TL_Orchestrator_captureTitleForKind_(kind, values, notes);
+  const summary = String(TL_Orchestrator_value_(values, "ai_summary") || TL_Orchestrator_value_(values, "text") || "").trim();
+  const originalDueText = String(TL_Orchestrator_value_(values, "task_due") || "").trim();
+  const baseDueAt = values[0] instanceof Date ? values[0] : new Date();
+  const parsedDueAt = originalDueText ? TL_Reminder_parseDueAt_(originalDueText, baseDueAt) : null;
+  const dueLabel = parsedDueAt ? TL_Reminder_formatDueLabel_(parsedDueAt, baseDueAt) : originalDueText;
   let notesOut = TL_Capture_appendNote_(values, "boss_capture_finalized=" + kind);
   const updates = {
     approval_required: "false",
@@ -625,7 +631,7 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
     direction: "incoming",
     sender: sender,
     receiver: receiver,
-    execution_status: kind === "journal" ? "logged" : (kind === "reminder" ? "reminder_pending" : (kind === "contact_enrichment" ? "enrichment_logged" : "approved")),
+    execution_status: kind === "journal" ? "logged" : (kind === "reminder" ? "reminder_pending" : (kind === "contact_enrichment" ? "enrichment_logged" : (kind === "schedule" ? "scheduled" : "approved"))),
     notes: notesOut
   };
 
@@ -634,15 +640,12 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
     updates.task_status = kind === "contact_enrichment" ? "enrichment_logged" : "logged";
   } else {
     updates.record_class = "instruction";
-    updates.task_status = kind === "reminder" ? "reminder_pending" : "pending";
+    updates.task_status = kind === "reminder" ? "reminder_pending" : (kind === "schedule" ? "scheduled" : "pending");
   }
 
   if (kind === "reminder") {
-    const originalDueText = String(TL_Orchestrator_value_(values, "task_due") || "").trim();
-    const baseDueAt = values[0] instanceof Date ? values[0] : new Date();
-    const resolvedDueAt = TL_Reminder_parseDueAt_(originalDueText, baseDueAt);
-    if (resolvedDueAt) {
-      updates.task_due = resolvedDueAt.toISOString();
+    if (parsedDueAt) {
+      updates.task_due = parsedDueAt.toISOString();
     }
     if (originalDueText) {
       const dueNote = "reminder_due_text=" + originalDueText.replace(/\n+/g, " ");
@@ -651,6 +654,49 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
       }
       updates.notes = notesOut;
     }
+  }
+
+  if (kind === "schedule") {
+    if (!parsedDueAt) {
+      updates.execution_status = "schedule_failed";
+      updates.task_status = "schedule_failed";
+      notesOut = TL_Capture_appendNote_(values, "schedule_finalize_failed=missing_due");
+      updates.notes = notesOut;
+      TL_Orchestrator_updateRowFields_(rowNumber, updates, "boss_capture_finalized");
+      return {
+        ok: false,
+        kind: kind,
+        title: title,
+        dueLabel: dueLabel,
+        reason: "missing_due",
+        receiptText: "לא הצלחתי לקבוע את האירוע \"" + (title || "ללא כותרת") + "\" כי חסר זמן תקין."
+      };
+    }
+    const scheduleResult = TL_Orchestrator_CreateScheduleEvent_(title, parsedDueAt, summary);
+    if (!scheduleResult.ok) {
+      updates.execution_status = "schedule_failed";
+      updates.task_status = "schedule_failed";
+      notesOut = TL_Capture_appendNote_(values, "schedule_finalize_failed=" + String(scheduleResult.reason || "unknown"));
+      updates.notes = notesOut;
+      TL_Orchestrator_updateRowFields_(rowNumber, updates, "boss_capture_finalized");
+      return {
+        ok: false,
+        kind: kind,
+        title: title,
+        dueLabel: dueLabel,
+        reason: scheduleResult.reason || "schedule_failed",
+        receiptText: "לא הצלחתי לקבוע את האירוע \"" + (title || "ללא כותרת") + "\"."
+      };
+    }
+    updates.task_due = parsedDueAt.toISOString();
+    updates.execution_status = "scheduled";
+    updates.task_status = "scheduled";
+    notesOut = TL_Capture_appendNote_(values, "schedule_event_id=" + String(scheduleResult.eventId || ""));
+    if (scheduleResult.eventLink) {
+      notesOut = String(notesOut || "") ? (String(notesOut || "") + "\nschedule_event_link=" + scheduleResult.eventLink) : ("schedule_event_link=" + scheduleResult.eventLink);
+    }
+    notesOut = String(notesOut || "") ? (String(notesOut || "") + "\nschedule_created_at=" + new Date().toISOString()) : ("schedule_created_at=" + new Date().toISOString());
+    updates.notes = notesOut;
   }
 
   if (kind === "contact_enrichment") {
@@ -670,7 +716,15 @@ function TL_Orchestrator_FinalizeCaptureApproval_(rowNumber) {
   if (kind === "reminder" && TL_Automation_IsEnabled_()) {
     TL_Reminder_EnsureNextTrigger_();
   }
-  return true;
+  return {
+    ok: true,
+    kind: kind,
+    title: title,
+    dueLabel: dueLabel,
+    executionStatus: String(updates.execution_status || "").trim(),
+    taskStatus: String(updates.task_status || "").trim(),
+    receiptText: TL_Orchestrator_BuildCaptureReceipt_(kind, title, dueLabel, summary)
+  };
 }
 
 function TL_Reminder_RunDueUnlocked_(batchSize, options) {
@@ -1940,7 +1994,7 @@ function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, c
     importance_level: String(item.task_priority || ""),
     urgency_flag: item.task_priority === "high" ? "true" : "false",
     needs_owner_now: item.task_priority === "high" ? "true" : "false",
-    suggested_action: kind === "journal" ? "review_manually" : "follow_up"
+    suggested_action: kind === "journal" ? "review_manually" : (kind === "schedule" ? "schedule" : "follow_up")
   };
 }
 
@@ -1974,6 +2028,11 @@ function TL_Capture_upsertChildRow_(childRow) {
 function TL_Capture_buildPacketItem_(childRow, rowNumber) {
   const notes = String(childRow.notes || "");
   const captureKind = TL_Orchestrator_captureKindFromNotes_(notes);
+  const captureTitle = TL_Orchestrator_captureTitleForKind_(captureKind, {
+    ai_proposal: childRow.ai_proposal || childRow.text || "",
+    ai_summary: childRow.ai_summary || childRow.text || "",
+    text: childRow.text || ""
+  }, notes);
   const dueInfo = TL_Capture_buildDueInfo_(childRow.task_due, childRow.timestamp);
   const reminderMessage = captureKind === "reminder"
     ? TL_Reminder_buildMessageText_(
@@ -1989,6 +2048,7 @@ function TL_Capture_buildPacketItem_(childRow, rowNumber) {
     rootId: String(childRow.root_id || ""),
     recordClass: String(childRow.record_class || ""),
     captureKind: captureKind,
+    captureTitle: captureTitle,
     summary: String(childRow.ai_summary || childRow.text || ""),
     proposal: String(childRow.ai_proposal || childRow.text || ""),
     reminderMessage: reminderMessage,
@@ -2054,7 +2114,7 @@ function TL_Orchestrator_captureKindFromNotes_(notes) {
   const match = text.match(/(?:^|[;\n])boss_capture_kind=([^;\n]+)/i);
   if (!match) return "";
   const kind = String(match[1] || "").trim().toLowerCase();
-  if (kind === "reminder" || kind === "task" || kind === "journal" || kind === "contact_enrichment") return kind;
+  if (kind === "reminder" || kind === "task" || kind === "journal" || kind === "contact_enrichment" || kind === "schedule") return kind;
   return kind === "log" || kind === "note" ? "journal" : "";
 }
 
@@ -2138,4 +2198,69 @@ function TL_Orchestrator_captureTitleFromNotes_(notes) {
   const text = String(notes || "");
   const match = text.match(/(?:^|[;\n])boss_capture_title=([^;\n]+)/i);
   return match ? String(match[1] || "").trim() : "";
+}
+
+function TL_Orchestrator_captureTitleForKind_(kind, values, notes) {
+  const fromNotes = TL_Orchestrator_captureTitleFromNotes_(notes);
+  const readField = function(field) {
+    if (!values) return "";
+    if (Array.isArray(values)) return TL_Orchestrator_value_(values, field);
+    return values[field];
+  };
+  const fallback = String(fromNotes || readField("ai_proposal") || readField("ai_summary") || readField("text") || "").trim();
+  if (String(kind || "").trim().toLowerCase() !== "schedule") return fallback;
+  return fallback
+    .replace(/^create a task to schedule\s+/i, "")
+    .replace(/^create a meeting(?: with)?\s+/i, "")
+    .replace(/^schedule\s+/i, "")
+    .replace(/^לקבוע\s+/i, "")
+    .replace(/^קבע(?:י)?\s+/i, "")
+    .replace(/\.$/, "")
+    .trim() || fallback;
+}
+
+function TL_Orchestrator_CreateScheduleEvent_(title, startAt, description) {
+  try {
+    const safeTitle = String(title || "").trim() || "Meeting";
+    const start = startAt instanceof Date ? startAt : null;
+    if (!start) return { ok: false, reason: "missing_start" };
+    const durationMinutes = typeof TL_Calendar_int_ === "function" && typeof TL_Calendar_setting_ === "function"
+      ? TL_Calendar_int_(TL_Calendar_setting_("DEFAULT_MEETING_MINUTES", ""), 60)
+      : 60;
+    const end = new Date(start.getTime() + Math.max(durationMinutes, 15) * 60000);
+    const calendar = typeof TL_Calendar_resolveCalendar_ === "function"
+      ? TL_Calendar_resolveCalendar_(typeof TL_Calendar_calendarId_ === "function" ? TL_Calendar_calendarId_() : "")
+      : CalendarApp.getDefaultCalendar();
+    const event = calendar.createEvent(safeTitle, start, end, {
+      description: String(description || "").trim()
+    });
+    return {
+      ok: true,
+      eventId: String(event.getId() || "").trim(),
+      eventLink: typeof event.getHtmlLink === "function" ? String(event.getHtmlLink() || "").trim() : ""
+    };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e || "calendar_error") };
+  }
+}
+
+function TL_Orchestrator_BuildCaptureReceipt_(kind, title, dueLabel, summary) {
+  const safeKind = String(kind || "").trim().toLowerCase();
+  const safeTitle = String(title || summary || "ללא תיאור").trim();
+  if (safeKind === "schedule") {
+    return "האירוע \"" + safeTitle + "\" נקבע" + (dueLabel ? (" ל-" + dueLabel) : "") + ".";
+  }
+  if (safeKind === "reminder") {
+    return "התזכורת \"" + safeTitle + "\" נקבעה" + (dueLabel ? (" ל-" + dueLabel) : "") + ".";
+  }
+  if (safeKind === "task") {
+    return "המשימה \"" + safeTitle + "\" נפתחה" + (dueLabel ? (" עם יעד " + dueLabel) : "") + ".";
+  }
+  if (safeKind === "journal") {
+    return "הרישום \"" + safeTitle + "\" נשמר.";
+  }
+  if (safeKind === "contact_enrichment") {
+    return "הערת הקשר \"" + safeTitle + "\" נשמרה.";
+  }
+  return "הפעולה \"" + safeTitle + "\" אושרה.";
 }

@@ -212,13 +212,16 @@ function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Required JSON shape:",
-    '{"summary":"...","items":[{"kind":"reminder|task|journal","title":"...","summary":"...","proposal":"...","task_due":"...","task_priority":"low|medium|high","approval_required":"true","notes":"..."}]}',
+    '{"summary":"...","items":[{"kind":"reminder|task|journal|schedule","title":"...","summary":"...","proposal":"...","task_due":"...","task_priority":"low|medium|high","approval_required":"true","notes":"..."}]}',
     "Example JSON response:",
-    '{"summary":"הבוס נתן שלוש הנחיות: תזכורת, משימה ורישום ליומן.","items":[{"kind":"reminder","title":"לקחת תרופה בבוקר","summary":"תזכורת לקחת תרופה מחר בבוקר.","proposal":"לקבוע תזכורת למחר בבוקר לקחת תרופה.","task_due":"מחר בבוקר","task_priority":"high","approval_required":"true","notes":""},{"kind":"task","title":"להתקשר ליעקב","summary":"צריך להתקשר ליעקב.","proposal":"ליצור משימה להתקשר ליעקב.","task_due":"","task_priority":"medium","approval_required":"true","notes":""},{"kind":"journal","title":"לקחתי כדור בערב","summary":"נרשם ביומן שנלקח כדור בערב בשעה 22:00.","proposal":"לרשום ביומן: לקחתי כדור הערב בשעה 22:00.","task_due":"","task_priority":"low","approval_required":"true","notes":""}]}',
+    '{"summary":"הבוס נתן ארבע הנחיות: תזכורת, משימה, פגישה ורישום ליומן.","items":[{"kind":"reminder","title":"לקחת תרופה בבוקר","summary":"תזכורת לקחת תרופה מחר בבוקר.","proposal":"לקחת תרופה בבוקר.","task_due":"מחר בבוקר","task_priority":"high","approval_required":"true","notes":""},{"kind":"task","title":"להתקשר ליעקב","summary":"צריך להתקשר ליעקב.","proposal":"להתקשר ליעקב.","task_due":"","task_priority":"medium","approval_required":"true","notes":""},{"kind":"schedule","title":"פגישה עם עצמי","summary":"לקבוע פגישה עם עצמי מחר ב-10:00 בבוקר.","proposal":"פגישה עם עצמי.","task_due":"מחר ב-10:00 בבוקר","task_priority":"medium","approval_required":"true","notes":""},{"kind":"journal","title":"לקחתי כדור בערב","summary":"נרשם ביומן שנלקח כדור בערב בשעה 22:00.","proposal":"לקחתי כדור בערב בשעה 22:00.","task_due":"","task_priority":"low","approval_required":"true","notes":""}]}',
     "Rules:",
     "Emit one item per distinct intent.",
     "Keep reminder and task items concrete and actionable.",
     "For reminder items, keep the reminder message/body in title and summary, and put timing details in task_due instead of repeating them inside the reminder text.",
+    "Use schedule items for meetings, appointments, and calendar events that should be placed on the calendar.",
+    "For schedule items, title must be the event subject only, not a verb phrase like 'create a task' or 'schedule a meeting'.",
+    "For schedule items, proposal should be the exact event title/description the Boss is approving, not an instruction to create a task.",
     "Keep journal items factual and non-actionable.",
     "Use empty strings when a field is unknown.",
     "Always set approval_required to true.",
@@ -900,6 +903,7 @@ function TL_AI_normalizeBossCaptureKind_(value) {
   const v = String(value || "").trim().toLowerCase();
   if (v === "reminder") return "reminder";
   if (v === "task") return "task";
+  if (v === "schedule" || v === "event" || v === "meeting" || v === "appointment" || v === "calendar") return "schedule";
   if (v === "journal" || v === "log" || v === "note") return "journal";
   return "journal";
 }

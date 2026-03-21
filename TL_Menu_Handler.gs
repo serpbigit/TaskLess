@@ -1271,8 +1271,21 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
   }
 
   if (choice === "1") {
-    TL_Menu_ApprovePacketItems_([current]);
+    const approval = TL_Menu_ApproveDecisionRow_(current.rowNumber);
     packet.cursor = Number(packet.cursor || 0) + 1;
+    const receiptText = TL_Menu_BuildDecisionPacketReceipt_(current, approval);
+    if (!packet.items[packet.cursor || 0]) {
+      TL_Menu_ClearDecisionPacket_(waId);
+      return [
+        receiptText,
+        "אין כרגע עוד פריטים שממתינים להחלטה."
+      ].filter(Boolean).join("\n\n");
+    }
+    TL_Menu_SetDecisionPacket_(waId, packet);
+    return [
+      receiptText,
+      TL_Menu_BuildDecisionPacketOneByOneReply_(packet)
+    ].filter(Boolean).join("\n\n");
   } else if (choice === "2") {
     packet.stage = "edit";
     TL_Menu_SetDecisionPacket_(waId, packet);
@@ -1331,7 +1344,8 @@ function TL_Menu_ApprovePacketItems_(items) {
   (items || []).forEach(function(item) {
     if (!item || !item.rowNumber || unique[item.rowNumber]) return;
     unique[item.rowNumber] = true;
-    if (TL_Menu_ApproveDecisionRow_(item.rowNumber)) result.approved++;
+    const approval = TL_Menu_ApproveDecisionRow_(item.rowNumber);
+    if (approval && approval.ok !== false) result.approved++;
     else result.failed++;
   });
   return result;
@@ -1341,7 +1355,7 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
   try {
     const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
     const sh = ss.getSheetByName(TL_INBOX.SHEET);
-    if (!sh || !rowNumber) return false;
+    if (!sh || !rowNumber) return { ok: false, reason: "missing_sheet_or_row" };
 
     const values = sh.getRange(rowNumber, 1, 1, TL_INBOX.HEADERS.length).getValues()[0];
     const approvalRequired = String(values[TLW_colIndex_("approval_required") - 1] || "").trim().toLowerCase() === "true";
@@ -1350,6 +1364,18 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
     const taskStatus = String(values[TLW_colIndex_("task_status") - 1] || "").trim().toLowerCase();
     const channel = String(values[TLW_colIndex_("channel") - 1] || "").trim().toLowerCase();
     const messageType = String(values[TLW_colIndex_("message_type") - 1] || "").trim().toLowerCase();
+    const notes = String(values[TLW_colIndex_("notes") - 1] || "");
+    const captureKind = typeof TL_Orchestrator_captureKindFromNotes_ === "function"
+      ? TL_Orchestrator_captureKindFromNotes_(notes)
+      : "";
+    const captureTitle = typeof TL_Orchestrator_captureTitleForKind_ === "function"
+      ? TL_Orchestrator_captureTitleForKind_(captureKind, values, notes)
+      : (typeof TL_Orchestrator_captureTitleFromNotes_ === "function" ? TL_Orchestrator_captureTitleFromNotes_(notes) : "");
+    const dueText = String(values[TLW_colIndex_("task_due") - 1] || "").trim();
+    const baseAt = values[0] instanceof Date ? values[0] : new Date();
+    const dueLabel = dueText && typeof TL_Capture_buildDueInfo_ === "function"
+      ? TL_Capture_buildDueInfo_(dueText, baseAt).label
+      : dueText;
     const updates = {
       approval_required: approvalRequired ? "true" : String(values[TLW_colIndex_("approval_required") - 1] || ""),
       approval_status: "approved"
@@ -1399,9 +1425,13 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
           execution_status: "closed_no_send",
           task_status: "closed",
           raw_payload_ref: closedPayload,
-          notes: TL_Email_appendNote_(String(values[TLW_colIndex_("notes") - 1] || ""), "boss_closed_no_send")
+          notes: TL_Email_appendNote_(notes, "boss_closed_no_send")
         }, "boss_close_no_send");
-        return true;
+        return {
+          ok: true,
+          actionKind: "close_no_send",
+          receiptText: "סגרתי את ההודעה ללא שליחת תגובה."
+        };
       }
       const merged = TL_Email_mergePayload_(payload, {
         approvalStatus: "approved",
@@ -1427,12 +1457,16 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
         approval_status: "approved",
         execution_status: "approved",
         raw_payload_ref: merged,
-        notes: TL_Email_appendNote_(String(values[TLW_colIndex_("notes") - 1] || ""), "boss_approved")
+        notes: TL_Email_appendNote_(notes, "boss_approved")
       }, "boss_confirm");
       if (typeof TL_Orchestrator_FinalizeCaptureApproval_ === "function") {
         TL_Orchestrator_FinalizeCaptureApproval_(rowNumber);
       }
-      return true;
+      return {
+        ok: true,
+        actionKind: "send_email",
+        receiptText: "אישרתי את הטיוטה. היא מוכנה לשליחה."
+      };
     }
 
     if (typeof TL_Orchestrator_updateRowFields_ === "function") {
@@ -1444,12 +1478,30 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
       TLW_applyVersionBump_(rowNumber, "boss_confirm");
     }
     if (typeof TL_Orchestrator_FinalizeCaptureApproval_ === "function") {
-      TL_Orchestrator_FinalizeCaptureApproval_(rowNumber);
+      const finalized = TL_Orchestrator_FinalizeCaptureApproval_(rowNumber);
+      if (finalized && typeof finalized === "object") {
+        return finalized;
+      }
     }
-    if (!approvalRequired && approvalStatus === "approved") return true;
-    return true;
+    if (!approvalRequired && approvalStatus === "approved") {
+      return {
+        ok: true,
+        actionKind: "already_approved",
+        receiptText: "הפריט כבר היה מאושר."
+      };
+    }
+    return {
+      ok: true,
+      kind: captureKind,
+      title: captureTitle,
+      dueLabel: dueLabel,
+      receiptText: TL_Menu_BuildCaptureApprovalReceipt_(captureKind, captureTitle, dueLabel, String(values[TLW_colIndex_("ai_summary") - 1] || "").trim())
+    };
   } catch (e) {
-    return false;
+    return {
+      ok: false,
+      reason: String((e && e.message) || e || "approve_failed")
+    };
   }
 }
 
@@ -1611,6 +1663,7 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const dueLabel = String(current.dueLabel || "").trim();
   const reminderMessage = TL_Menu_Preview_(current.reminderMessage || summary, 220);
   const isReminder = String(current.captureKind || "").trim().toLowerCase() === "reminder";
+  const isSchedule = String(current.captureKind || "").trim().toLowerCase() === "schedule";
   const meta = [];
   if (current.isUrgent) meta.push("דחוף");
   else if (current.isHigh) meta.push("חשוב");
@@ -1626,7 +1679,7 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     "הבנתי כך:",
     isReminder ? ("הודעה: " + reminderMessage) : summary,
     proposalBody ? (actionSpec.proposalHeading + "\n" + proposalBody) : "",
-    isReminder && dueLabel ? ("זמן הפעלת תזכורת: " + dueLabel) : (duePreview ? ("יעד: " + duePreview) : ""),
+    isReminder && dueLabel ? ("זמן הפעלת תזכורת: " + dueLabel) : (isSchedule && dueLabel ? ("זמן האירוע: " + dueLabel) : (duePreview ? ("יעד: " + duePreview) : "")),
     "",
     "1. " + actionSpec.primaryLabel,
     "2. " + actionSpec.editLabel,
@@ -1858,6 +1911,17 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
     const threadSubject = String(TL_Orchestrator_value_(values, "thread_subject") || "").trim();
     const textValue = String(TL_Orchestrator_value_(values, "text") || "").trim();
     const contactId = String(TL_Orchestrator_value_(values, "contact_id") || "").trim();
+    const notes = String(TL_Orchestrator_value_(values, "notes") || "");
+    const captureKind = typeof TL_Orchestrator_captureKindFromNotes_ === "function"
+      ? TL_Orchestrator_captureKindFromNotes_(notes)
+      : "";
+    const captureTitle = typeof TL_Orchestrator_captureTitleForKind_ === "function"
+      ? TL_Orchestrator_captureTitleForKind_(captureKind, values, notes)
+      : (typeof TL_Orchestrator_captureTitleFromNotes_ === "function" ? TL_Orchestrator_captureTitleFromNotes_(notes) : "");
+    const dueText = String(TL_Orchestrator_value_(values, "task_due") || "").trim();
+    const dueInfo = dueText && typeof TL_Capture_buildDueInfo_ === "function"
+      ? TL_Capture_buildDueInfo_(dueText, values[0] instanceof Date ? values[0] : new Date())
+      : { preview: dueText, label: dueText };
     const senderProfile = typeof TL_Session_classifyEmailSender_ === "function" && channel === "email"
       ? TL_Session_classifyEmailSender_(sender, contactId, { contactsIndex: contactsIndex })
       : null;
@@ -1886,10 +1950,14 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
       subject: threadSubject,
       rawSnippet: TL_Menu_BuildPacketSnippet_(channel, messageType, textValue),
       suggestedAction: String(TL_Orchestrator_value_(values, "suggested_action") || "").trim(),
+      captureKind: captureKind,
+      captureTitle: captureTitle,
       contactId: contactId,
       approvalStatus: approvalStatus,
       executionStatus: String(TL_Orchestrator_value_(values, "execution_status") || "").trim(),
       taskStatus: String(TL_Orchestrator_value_(values, "task_status") || "").trim(),
+      duePreview: String(dueInfo.preview || "").trim(),
+      dueLabel: String(dueInfo.label || "").trim(),
       isUrgent: classified ? !!classified.isUrgent : false,
       isHigh: classified ? !!classified.isHigh : false
     };
@@ -1948,7 +2016,7 @@ function TL_Menu_BuildApprovalDigest_(items, mode, fallbackText) {
   const emailCount = list.filter(function(item) { return item.channel === "email"; }).length;
   const whatsappCount = list.filter(function(item) { return item.channel === "whatsapp"; }).length;
   const urgentCount = list.filter(function(item) { return !!item.isUrgent || !!item.isHigh; }).length;
-  const sendableCount = list.filter(function(item) { return item.actionKind === "send_email" || item.actionKind === "approve_reminder"; }).length;
+  const sendableCount = list.filter(function(item) { return item.actionKind !== "close_no_send"; }).length;
   const closableCount = list.filter(function(item) { return item.actionKind === "close_no_send"; }).length;
   const title = mode === "drafts" ? "טיוטות לבדיקה" : "ממתין להחלטתך";
   return [
@@ -1965,12 +2033,44 @@ function TL_Menu_GetDecisionPacketActionSpec_(item) {
   const channel = String(item && item.channel || "").trim().toLowerCase();
   const captureKind = String(item && item.captureKind || "").trim().toLowerCase();
   const suggested = String(item && item.suggestedAction || "").trim().toLowerCase();
+  if (captureKind === "schedule") {
+    return {
+      actionKind: "approve_schedule",
+      primaryLabel: "אשר את האירוע",
+      editLabel: "ערוך את פרטי האירוע",
+      proposalHeading: "פרטי האירוע לאישור:"
+    };
+  }
   if (captureKind === "reminder") {
     return {
       actionKind: "approve_reminder",
       primaryLabel: "אשר את התזכורת",
       editLabel: "ערוך את התזכורת",
       proposalHeading: "פרטי התזכורת לאישור:"
+    };
+  }
+  if (captureKind === "task") {
+    return {
+      actionKind: "approve_task",
+      primaryLabel: "אשר את המשימה",
+      editLabel: "ערוך את המשימה",
+      proposalHeading: "פרטי המשימה לאישור:"
+    };
+  }
+  if (captureKind === "journal") {
+    return {
+      actionKind: "save_journal",
+      primaryLabel: "שמור את הרישום",
+      editLabel: "ערוך את הרישום",
+      proposalHeading: "הרישום המוצע:"
+    };
+  }
+  if (captureKind === "contact_enrichment") {
+    return {
+      actionKind: "save_contact_enrichment",
+      primaryLabel: "שמור את הערת הקשר",
+      editLabel: "ערוך את הערת הקשר",
+      proposalHeading: "הערת הקשר לאישור:"
     };
   }
   if (channel === "email") {
@@ -1998,12 +2098,53 @@ function TL_Menu_GetDecisionPacketActionSpec_(item) {
 }
 
 function TL_Menu_BuildDecisionPacketProposalBody_(item, actionSpec) {
+  const captureKind = String(item && item.captureKind || "").trim().toLowerCase();
   const proposal = String(item && item.proposal || "").trim();
+  const captureTitle = String(item && item.captureTitle || "").trim();
+  if (captureKind === "schedule") {
+    return captureTitle || proposal;
+  }
+  if ((captureKind === "task" || captureKind === "journal" || captureKind === "contact_enrichment") && captureTitle) {
+    return captureTitle || proposal;
+  }
   if (proposal) return proposal;
   if (actionSpec && actionSpec.actionKind === "close_no_send") {
     return "הפריט ייסגר ללא שליחת תגובה.";
   }
   return "";
+}
+
+function TL_Menu_BuildDecisionPacketReceipt_(item, approval) {
+  const result = approval && typeof approval === "object" ? approval : { ok: !!approval };
+  if (result.receiptText) return String(result.receiptText).trim();
+  if (result.ok === false) {
+    return "לא הצלחתי להשלים את הפעולה.";
+  }
+  const captureKind = String(result.kind || item && item.captureKind || "").trim().toLowerCase();
+  const captureTitle = String(result.title || item && item.captureTitle || item && item.proposal || item && item.summary || "").trim();
+  const dueLabel = String(result.dueLabel || item && item.dueLabel || "").trim();
+  return TL_Menu_BuildCaptureApprovalReceipt_(captureKind, captureTitle, dueLabel, String(item && item.summary || "").trim());
+}
+
+function TL_Menu_BuildCaptureApprovalReceipt_(kind, title, dueLabel, summary) {
+  const safeKind = String(kind || "").trim().toLowerCase();
+  const safeTitle = String(title || summary || "ללא תיאור").trim();
+  if (safeKind === "schedule") {
+    return "האירוע \"" + safeTitle + "\" נקבע" + (dueLabel ? (" ל-" + dueLabel) : "") + ".";
+  }
+  if (safeKind === "reminder") {
+    return "התזכורת \"" + safeTitle + "\" נקבעה" + (dueLabel ? (" ל-" + dueLabel) : "") + ".";
+  }
+  if (safeKind === "task") {
+    return "המשימה \"" + safeTitle + "\" נפתחה" + (dueLabel ? (" עם יעד " + dueLabel) : "") + ".";
+  }
+  if (safeKind === "journal") {
+    return "הרישום \"" + safeTitle + "\" נשמר.";
+  }
+  if (safeKind === "contact_enrichment") {
+    return "הערת הקשר \"" + safeTitle + "\" נשמרה.";
+  }
+  return "אישרתי את הפעולה.";
 }
 
 function TL_Menu_BuildWaitingOnOthersSummary_() {
