@@ -19,6 +19,10 @@ const TL_EMAIL = {
   PROP_LAST_PULL_MAX_MSG_AT: "TL_EMAIL_LAST_PULL_MAX_MSG_AT"
 };
 
+function TL_Email_threadPermalink_(threadId) {
+  return "https://mail.google.com/mail/u/0/#imp/" + String(threadId || "");
+}
+
 function TL_Email_RunScheduled() {
   return TL_Email_withLock_("scheduled", function() {
     if (typeof TL_Automation_IsEnabled_ === "function" && !TL_Automation_IsEnabled_()) {
@@ -222,7 +226,7 @@ function TL_Email_NormalizeThread_(thread, opts) {
     version: TL_EMAIL.VERSION,
     threadId: threadId,
     refId: refId,
-    permalink: "https://mail.google.com/mail/u/0/#inbox/" + threadId,
+    permalink: TL_Email_threadPermalink_(threadId),
     subject: subject,
     latestMsgId: latestMsgId,
     latestMsgDateIso: latestMsgDateIso,
@@ -812,7 +816,7 @@ function TL_Email_buildSyntheticSnapshot_() {
     version: TL_EMAIL.VERSION,
     threadId: threadId,
     refId: refId,
-    permalink: "https://mail.google.com/mail/u/0/#inbox/" + threadId,
+    permalink: TL_Email_threadPermalink_(threadId),
     subject: "Project update needed",
     latestMsgId: "msg_" + Utilities.getUuid(),
     latestMsgDateIso: now,
