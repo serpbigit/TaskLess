@@ -570,6 +570,7 @@ function TL_Email_TriagePending(opts) {
     result.triaged++;
   }
 
+  TL_Email_logExecution_("TL_Email_TriagePending", result);
   return result;
 }
 
