@@ -27,3 +27,21 @@ function TL_TestMenu() {
     Logger.log("No menu reply produced.");
   }
 }
+
+function TL_Debug_MenuLanguage() {
+  const scriptProperty = String(PropertiesService.getScriptProperties().getProperty("AI_DEFAULT_LANGUAGE") || "");
+  const resolvedSetting = String(TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "");
+  const menuIsEnglish = typeof TL_Menu_IsEnglishUi_ === "function" ? TL_Menu_IsEnglishUi_() : null;
+  const rawBossLanguage = typeof TL_Menu_BossLanguage_ === "function" ? TL_Menu_BossLanguage_() : resolvedSetting;
+
+  const out = {
+    scriptProperty: scriptProperty,
+    resolvedSetting: resolvedSetting,
+    rawBossLanguage: rawBossLanguage,
+    menuIsEnglish: menuIsEnglish
+  };
+
+  Logger.log("TL_Debug_MenuLanguage %s", JSON.stringify(out, null, 2));
+  try { console.log("TL_Debug_MenuLanguage", JSON.stringify(out)); } catch (e) {}
+  return out;
+}
