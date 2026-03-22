@@ -944,6 +944,28 @@ function TL_Menu_DescribeContactCandidate_(contact) {
   return bits.filter(Boolean).join(" | ");
 }
 
+function TL_Menu_IsOutboundCommunicationItem_(item) {
+  const captureKind = String(item && item.captureKind || "").trim().toLowerCase();
+  return captureKind === "whatsapp" || captureKind === "email";
+}
+
+function TL_Menu_ItemNeedsRecipientResolution_(item) {
+  if (!TL_Menu_IsOutboundCommunicationItem_(item)) return false;
+  return String(item && item.resolutionStatus || "").trim().toLowerCase() !== "resolved";
+}
+
+function TL_Menu_OutboundChannelLabel_(item) {
+  const captureKind = String(item && item.captureKind || item && item.channel || "").trim().toLowerCase();
+  return captureKind === "email" ? "Email" : "WhatsApp";
+}
+
+function TL_Menu_OutboundDestinationLabel_(item) {
+  const name = String(item && item.recipientName || "").trim();
+  const destination = String(item && item.recipientDestination || "").trim();
+  if (name && destination) return name + " | " + destination;
+  return name || destination || String(item && item.recipientQuery || "").trim();
+}
+
 function TL_Menu_ExtractNoteValue_(notes, key) {
   const text = String(notes || "");
   const escaped = String(key || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1248,13 +1270,36 @@ function TL_Menu_SetDecisionPacket_(waId, packet) {
         summary: String(item.summary || ""),
         proposal: String(item.proposal || ""),
         sender: String(item.sender || ""),
+        senderLabel: String(item.senderLabel || ""),
         receiver: String(item.receiver || ""),
         channel: String(item.channel || ""),
+        channelLabel: String(item.channelLabel || ""),
         messageType: String(item.messageType || ""),
+        subject: String(item.subject || ""),
+        recipientQuery: String(item.recipientQuery || ""),
+        recipientName: String(item.recipientName || ""),
+        recipientDestination: String(item.recipientDestination || ""),
+        recipientCandidates: Array.isArray(item.recipientCandidates) ? item.recipientCandidates.slice(0, 5).map(function(candidate) {
+          return {
+            contactId: String(candidate && candidate.contactId || ""),
+            name: String(candidate && candidate.name || ""),
+            phone1: String(candidate && candidate.phone1 || ""),
+            phone2: String(candidate && candidate.phone2 || ""),
+            email: String(candidate && candidate.email || ""),
+            preferredDestination: String(candidate && candidate.preferredDestination || ""),
+            matchScore: Number(candidate && candidate.matchScore || 0)
+          };
+        }) : [],
+        resolutionStatus: String(item.resolutionStatus || ""),
+        searchQueries: Array.isArray(item.searchQueries) ? item.searchQueries.slice(0, 12) : [],
         contactId: String(item.contactId || ""),
         approvalStatus: String(item.approvalStatus || ""),
         executionStatus: String(item.executionStatus || ""),
         taskStatus: String(item.taskStatus || ""),
+        captureKind: String(item.captureKind || ""),
+        captureTitle: String(item.captureTitle || ""),
+        duePreview: String(item.duePreview || ""),
+        dueLabel: String(item.dueLabel || ""),
         isUrgent: !!item.isUrgent,
         isHigh: !!item.isHigh
       };
@@ -1281,13 +1326,26 @@ function TL_Menu_StoreDecisionPacket_(waId, kind, items) {
       summary: item.summary,
       proposal: item.proposal,
       sender: item.sender,
+      senderLabel: item.senderLabel,
       receiver: item.receiver,
       channel: item.channel,
+      channelLabel: item.channelLabel,
       messageType: item.messageType,
+      subject: item.subject,
+      recipientQuery: item.recipientQuery,
+      recipientName: item.recipientName,
+      recipientDestination: item.recipientDestination,
+      recipientCandidates: item.recipientCandidates,
+      resolutionStatus: item.resolutionStatus,
+      searchQueries: item.searchQueries,
       contactId: item.contactId,
       approvalStatus: item.approvalStatus,
       executionStatus: item.executionStatus,
       taskStatus: item.taskStatus,
+      captureKind: item.captureKind,
+      captureTitle: item.captureTitle,
+      duePreview: item.duePreview,
+      dueLabel: item.dueLabel,
       isUrgent: item.isUrgent,
       isHigh: item.isHigh
     };
@@ -1295,7 +1353,12 @@ function TL_Menu_StoreDecisionPacket_(waId, kind, items) {
     return !!item.rowNumber;
   });
   if (!packetItems.length) return false;
-  const initialStage = String(kind || "decision") === "capture" && packetItems.length === 1 ? "one_by_one" : "root";
+  const initialStage = String(kind || "decision") === "capture" && (
+    packetItems.length === 1 ||
+    packetItems.some(function(item) {
+      return TL_Menu_IsOutboundCommunicationItem_(item);
+    })
+  ) ? "one_by_one" : "root";
   return TL_Menu_SetDecisionPacket_(waId, {
     kind: kind || "decision",
     stage: initialStage,
@@ -1454,6 +1517,10 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
     return "סיימנו את הסקירה אחד-אחד.";
   }
 
+  if (TL_Menu_ItemNeedsRecipientResolution_(current)) {
+    return TL_Menu_HandleDecisionPacketRecipientReply_(waId, packet, choice);
+  }
+
   if (choice === "1") {
     const approval = TL_Menu_ApproveDecisionRow_(current.rowNumber);
     packet.cursor = Number(packet.cursor || 0) + 1;
@@ -1484,6 +1551,55 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
     return TL_Menu_BuildMenuReply_();
   } else {
     return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
+  }
+
+  if (!packet.items[packet.cursor || 0]) {
+    TL_Menu_ClearDecisionPacket_(waId);
+    return "סיימנו את הסקירה. אין עוד פריטים בחבילה.";
+  }
+
+  TL_Menu_SetDecisionPacket_(waId, packet);
+  return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
+}
+
+function TL_Menu_HandleDecisionPacketRecipientReply_(waId, packet, choice) {
+  const current = packet.items[packet.cursor || 0];
+  if (!current) {
+    TL_Menu_ClearDecisionPacket_(waId);
+    return "אין כרגע פריט פתוח.";
+  }
+
+  const resolutionStatus = String(current.resolutionStatus || "").trim().toLowerCase();
+  const candidates = Array.isArray(current.recipientCandidates) ? current.recipientCandidates : [];
+
+  if (resolutionStatus === "missing") {
+    if (choice === "1") {
+      packet.cursor = Number(packet.cursor || 0) + 1;
+    } else if (choice === "2") {
+      TL_Menu_ClearDecisionPacket_(waId);
+      return "עצרתי את הסקירה אחד-אחד.";
+    } else if (choice === "3") {
+      TL_Menu_ClearDecisionPacket_(waId);
+      return TL_Menu_BuildMenuReply_();
+    } else {
+      return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
+    }
+  } else {
+    const selectedIndex = Number(choice) - 1;
+    if (selectedIndex >= 0 && selectedIndex < candidates.length) {
+      const applied = TL_Menu_ApplyPacketRecipientChoice_(current, candidates[selectedIndex]);
+      packet.items[packet.cursor || 0] = applied;
+      TL_Menu_SetDecisionPacket_(waId, packet);
+      return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, "בחרתי את איש הקשר המתאים.");
+    }
+    if (choice === "8") {
+      packet.cursor = Number(packet.cursor || 0) + 1;
+    } else if (choice === "9") {
+      TL_Menu_ClearDecisionPacket_(waId);
+      return "עצרתי את הסקירה אחד-אחד.";
+    } else {
+      return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
+    }
   }
 
   if (!packet.items[packet.cursor || 0]) {
@@ -1646,10 +1762,18 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
       if (typeof TL_Orchestrator_FinalizeCaptureApproval_ === "function") {
         TL_Orchestrator_FinalizeCaptureApproval_(rowNumber);
       }
+      const emailSendNow = TL_Menu_SendApprovedEmailNow_(rowNumber);
+      if (emailSendNow && emailSendNow.ok) {
+        return {
+          ok: true,
+          actionKind: "send_email",
+          receiptText: "האימייל נשלח אל " + String(emailSendNow.to || "").trim() + "."
+        };
+      }
       return {
-        ok: true,
+        ok: false,
         actionKind: "send_email",
-        receiptText: "אישרתי את הטיוטה. היא מוכנה לשליחה."
+        receiptText: "אישרתי את האימייל, אבל השליחה נכשלה."
       };
     }
 
@@ -1666,6 +1790,29 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
       if (finalized && typeof finalized === "object") {
         return finalized;
       }
+    }
+    if (channel === "whatsapp" && String(captureKind || "").trim().toLowerCase() !== "reminder" &&
+        String(captureKind || "").trim().toLowerCase() !== "task" &&
+        String(captureKind || "").trim().toLowerCase() !== "journal" &&
+        String(captureKind || "").trim().toLowerCase() !== "contact_enrichment" &&
+        String(captureKind || "").trim().toLowerCase() !== "schedule") {
+      const waSendNow = TL_Menu_SendApprovedWhatsAppNow_(rowNumber);
+      if (waSendNow && waSendNow.ok) {
+        return {
+          ok: true,
+          kind: captureKind,
+          title: captureTitle,
+          dueLabel: dueLabel,
+          receiptText: "הודעת ה-WhatsApp נשלחה אל " + String(waSendNow.to || "").trim() + "."
+        };
+      }
+      return {
+        ok: false,
+        kind: captureKind,
+        title: captureTitle,
+        dueLabel: dueLabel,
+        receiptText: "אישרתי את הודעת ה-WhatsApp, אבל השליחה נכשלה."
+      };
     }
     if (!approvalRequired && approvalStatus === "approved") {
       return {
@@ -1687,6 +1834,170 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
       reason: String((e && e.message) || e || "approve_failed")
     };
   }
+}
+
+function TL_Menu_ApplyPacketRecipientChoice_(item, candidate) {
+  const current = item && typeof item === "object" ? item : {};
+  const contact = candidate && typeof candidate === "object" ? candidate : {};
+  const captureKind = String(current.captureKind || "").trim().toLowerCase();
+  const destination = captureKind === "email"
+    ? String(contact.email || contact.preferredDestination || "").trim()
+    : String(contact.phone1 || contact.phone2 || contact.preferredDestination || "").trim();
+  const recipientName = String(contact.name || "").trim();
+  const recipientContactId = String(contact.contactId || "").trim();
+  const rowNumber = Number(current.rowNumber || 0);
+  const loc = rowNumber ? TL_AI_getInboxRow_(rowNumber) : null;
+  const values = loc && loc.values ? loc.values : null;
+  const existingNotes = values ? String(values[TL_colIndex_("notes") - 1] || "") : "";
+  const existingPayload = values && String(current.channel || "").trim().toLowerCase() === "email"
+    ? TL_Email_parseInboxPayload_(String(values[TL_colIndex_("raw_payload_ref") - 1] || ""))
+    : {};
+  const subject = String(current.subject || "").trim();
+  const body = String(current.proposal || "").trim();
+  const sender = String(current.sender || "").trim();
+  const nextNotes = [
+    existingNotes,
+    "boss_capture_contact_id=" + recipientContactId,
+    "boss_capture_contact_name=" + recipientName.replace(/\n+/g, " ").replace(/[;]+/g, ","),
+    "boss_capture_destination=" + destination.replace(/\n+/g, " ").replace(/[;]+/g, ","),
+    "boss_capture_resolution_status=resolved"
+  ].filter(Boolean).join("\n");
+
+  const updates = {
+    receiver: destination,
+    contact_id: recipientContactId,
+    notes: nextNotes
+  };
+
+  if (captureKind === "email") {
+    const payload = TL_Email_mergePayload_(existingPayload, {
+      subject: subject,
+      to: destination,
+      ownerEmail: sender,
+      senderEmail: sender,
+      approvalSnapshot: {
+        to: destination,
+        subject: subject,
+        body: body,
+        cc: "",
+        bcc: "",
+        replyTo: "",
+        threadId: String(current.recordId || current.key || "").trim(),
+        latestMsgId: String(current.recordId || current.key || "").trim(),
+        approvalStatus: "awaiting_approval",
+        sendStatus: "pending",
+        summary: String(current.summary || body || "").trim(),
+        triage: { suggested_action: "reply_now" },
+        historyDepth: 0,
+        historyUsed: []
+      },
+      proposal: {
+        to: destination,
+        subject: subject,
+        body: body,
+        cc: "",
+        bcc: "",
+        replyTo: "",
+        threadId: String(current.recordId || current.key || "").trim(),
+        latestMsgId: String(current.recordId || current.key || "").trim(),
+        summary: String(current.summary || body || "").trim(),
+        approvalStatus: "awaiting_approval",
+        sendStatus: "pending"
+      },
+      approvalStatus: "awaiting_approval",
+      sendStatus: "pending"
+    });
+    updates.raw_payload_ref = TL_Email_jsonStringify_(payload);
+    updates.thread_subject = subject;
+    updates.participants_json = TL_Email_jsonStringify_([sender, destination].filter(Boolean));
+  }
+
+  if (rowNumber && typeof TL_Orchestrator_updateRowFields_ === "function") {
+    TL_Orchestrator_updateRowFields_(rowNumber, updates, "boss_pick_contact");
+  }
+
+  return Object.assign({}, current, {
+    receiver: destination,
+    contactId: recipientContactId,
+    recipientName: recipientName,
+    recipientDestination: destination,
+    recipientCandidates: [TL_Capture_simplifyContactCandidate_(contact, captureKind)],
+    resolutionStatus: "resolved"
+  });
+}
+
+function TL_Menu_SendApprovedEmailNow_(rowNumber) {
+  const loc = TL_AI_getInboxRow_(rowNumber);
+  if (!loc || !loc.values) return { ok: false, reason: "missing_row" };
+  const values = loc.values;
+  const payload = TL_Email_inboxValuesToSnapshot_(values, rowNumber).payload || {};
+  const approval = payload.approvalSnapshot || {};
+  const to = TL_Email_normEmail_(approval.to || payload.to || "");
+  const subject = String(approval.subject || payload.subject || "").trim();
+  const body = String(approval.body || payload.body || "").trim();
+  if (!to || !subject || !body) return { ok: false, reason: "missing_email_fields" };
+
+  try {
+    GmailApp.sendEmail(to, subject, body, {
+      cc: String(approval.cc || "").trim(),
+      bcc: String(approval.bcc || "").trim(),
+      replyTo: String(approval.replyTo || "").trim()
+    });
+  } catch (err) {
+    const failedPayload = TL_Email_mergePayload_(payload, {
+      sendStatus: "failed",
+      lastError: String(err && err.stack ? err.stack : err)
+    });
+    TL_Email_appendInboxVersion_(rowNumber, {
+      execution_status: "send_failed",
+      raw_payload_ref: failedPayload,
+      notes: TL_Email_appendNote_(TL_Orchestrator_value_(values, "notes"), "email_send_failed")
+    }, "email_send_failed");
+    return { ok: false, reason: String(err && err.message ? err.message : err) };
+  }
+
+  const sentAtIso = new Date().toISOString();
+  const sentPayload = TL_Email_mergePayload_(payload, {
+    sendStatus: "sent",
+    sendReceipt: {
+      sentAt: sentAtIso,
+      transport: "GmailApp.sendEmail",
+      to: to,
+      subject: subject,
+      body: body
+    },
+    executedAt: sentAtIso,
+    lastAction: "EMAIL_SEND",
+    lastActionAt: sentAtIso
+  });
+  TL_Email_appendInboxVersion_(rowNumber, {
+    execution_status: "sent",
+    raw_payload_ref: sentPayload,
+    notes: TL_Email_appendNote_(TL_Orchestrator_value_(values, "notes"), "email_sent")
+  }, "email_send");
+  return { ok: true, to: to, subject: subject };
+}
+
+function TL_Menu_SendApprovedWhatsAppNow_(rowNumber) {
+  const loc = TL_AI_getInboxRow_(rowNumber);
+  if (!loc || !loc.values) return { ok: false, reason: "missing_row" };
+  const values = loc.values;
+  const phoneNumberId = String(TL_Orchestrator_value_(values, "phone_number_id") || "").trim();
+  const toWaId = String(TL_Orchestrator_resolveSendTarget_(values) || "").trim();
+  const proposal = String(TL_Orchestrator_value_(values, "ai_proposal") || TL_Orchestrator_value_(values, "text") || "").trim();
+  if (!phoneNumberId || !toWaId || !proposal) return { ok: false, reason: "missing_whatsapp_fields" };
+
+  const sendResult = TLW_sendText_(phoneNumberId, toWaId, proposal, { rowNumber: rowNumber });
+  if (sendResult && sendResult.ok) {
+    TL_Orchestrator_updateRowFields_(rowNumber, {
+      execution_status: "sent"
+    }, "approved_send");
+    return { ok: true, to: toWaId };
+  }
+  TL_Orchestrator_updateRowFields_(rowNumber, {
+    execution_status: "send_failed"
+  }, "send_failed");
+  return { ok: false, reason: String(sendResult && sendResult.body || "send_failed") };
 }
 
 function TL_Menu_ReviseDecisionRow_(rowNumber, revisedText) {
@@ -1836,6 +2147,9 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   if (!current) return "אין עוד פריטים בחבילה.";
   const index = Number(packet.cursor || 0) + 1;
   const total = packet.items.length;
+  if (TL_Menu_ItemNeedsRecipientResolution_(current)) {
+    return TL_Menu_BuildDecisionPacketRecipientReply_(packet, current, index, total, arguments.length > 1 ? arguments[1] : "");
+  }
   const actionSpec = TL_Menu_GetDecisionPacketActionSpec_(current);
   const summary = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 220);
   const proposalBody = TL_Menu_BuildDecisionPacketProposalBody_(current, actionSpec);
@@ -1876,6 +2190,37 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     lines.unshift(String(arguments[1]));
   }
   return lines.filter(Boolean).join("\n");
+}
+
+function TL_Menu_BuildDecisionPacketRecipientReply_(packet, current, index, total, preface) {
+  const channelLabel = TL_Menu_OutboundChannelLabel_(current);
+  const recipientQuery = String(current.recipientQuery || current.recipientName || "").trim() || "ללא שם";
+  const resolutionStatus = String(current.resolutionStatus || "").trim().toLowerCase();
+  const lines = [
+    preface ? String(preface) : "",
+    "סקירה אחד-אחד " + index + "/" + total
+  ];
+
+  if (resolutionStatus === "missing") {
+    return lines.concat([
+      "לא מצאתי איש קשר ברור עבור " + channelLabel + " ל-" + recipientQuery + ".",
+      "1. דלג",
+      "2. עצור",
+      "3. חזרה לתפריט ראשי",
+      "שלח את מספר האפשרות שתבחר"
+    ]).filter(Boolean).join("\n");
+  }
+
+  const candidates = Array.isArray(current.recipientCandidates) ? current.recipientCandidates : [];
+  return lines.concat([
+    "לפני שאכין את ה-" + channelLabel + ", את מי התכוונת לומר?",
+    candidates.slice(0, 5).map(function(candidate, idx) {
+      return String(idx + 1) + ". " + TL_Menu_DescribeContactCandidate_(candidate);
+    }).join("\n"),
+    "8. דלג",
+    "9. עצור",
+    "שלח את מספר איש הקשר."
+  ]).filter(Boolean).join("\n");
 }
 
 function TL_Menu_BuildDecisionPacketEditReply_(packet) {
@@ -2217,6 +2562,22 @@ function TL_Menu_GetDecisionPacketActionSpec_(item) {
   const channel = String(item && item.channel || "").trim().toLowerCase();
   const captureKind = String(item && item.captureKind || "").trim().toLowerCase();
   const suggested = String(item && item.suggestedAction || "").trim().toLowerCase();
+  if (captureKind === "whatsapp") {
+    return {
+      actionKind: "send_whatsapp",
+      primaryLabel: "אשר ושלח ב-WhatsApp",
+      editLabel: "ערוך את ההודעה",
+      proposalHeading: "טיוטת ההודעה לאישור:"
+    };
+  }
+  if (captureKind === "email") {
+    return {
+      actionKind: "send_email",
+      primaryLabel: "אשר ושלח את האימייל",
+      editLabel: "ערוך את האימייל",
+      proposalHeading: "טיוטת האימייל לאישור:"
+    };
+  }
   if (captureKind === "schedule") {
     return {
       actionKind: "approve_schedule",
@@ -2285,6 +2646,17 @@ function TL_Menu_BuildDecisionPacketProposalBody_(item, actionSpec) {
   const captureKind = String(item && item.captureKind || "").trim().toLowerCase();
   const proposal = String(item && item.proposal || "").trim();
   const captureTitle = String(item && item.captureTitle || "").trim();
+  const recipientLabel = TL_Menu_OutboundDestinationLabel_(item);
+  const subject = String(item && item.subject || "").trim();
+  if (captureKind === "whatsapp") {
+    return 'Draft WhatsApp to ' + recipientLabel + ': "' + proposal + '"';
+  }
+  if (captureKind === "email") {
+    return [
+      'Draft Email to ' + recipientLabel + ': "' + proposal + '"',
+      subject ? ("Subject: " + subject) : ""
+    ].filter(Boolean).join("\n");
+  }
   if (captureKind === "schedule") {
     return captureTitle || proposal;
   }
@@ -2313,6 +2685,12 @@ function TL_Menu_BuildDecisionPacketReceipt_(item, approval) {
 function TL_Menu_BuildCaptureApprovalReceipt_(kind, title, dueLabel, summary) {
   const safeKind = String(kind || "").trim().toLowerCase();
   const safeTitle = String(title || summary || "ללא תיאור").trim();
+  if (safeKind === "whatsapp") {
+    return "הודעת ה-WhatsApp \"" + safeTitle + "\" נשלחה.";
+  }
+  if (safeKind === "email") {
+    return "האימייל \"" + safeTitle + "\" נשלח.";
+  }
   if (safeKind === "schedule") {
     return "האירוע \"" + safeTitle + "\" נקבע" + (dueLabel ? (" ל-" + dueLabel) : "") + ".";
   }

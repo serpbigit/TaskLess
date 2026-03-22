@@ -434,10 +434,10 @@ function TL_Capture_RunUnlocked_(batchSize, options) {
     const packetItems = [];
     const childResults = [];
     for (let index = 0; index < normalized.items.length; index++) {
-      const child = normalized.items[index];
+      const child = TL_Capture_prepareOutboundRecipient_(normalized.items[index], captureText);
       const childRow = TL_Capture_buildChildRow_(values, item.rowNumber, child, index, cfg, now);
       const childResult = TL_Capture_upsertChildRow_(childRow);
-      packetItems.push(TL_Capture_buildPacketItem_(childRow, childResult.rowNumber || childResult.row));
+      packetItems.push(TL_Capture_buildPacketItem_(childRow, childResult.rowNumber || childResult.row, child));
       childResults.push(childResult);
       result.items.push(childResult);
     }
@@ -1899,6 +1899,9 @@ function TL_Capture_normalizeItem_(item) {
     title: title,
     summary: summary,
     proposal: proposal,
+    subject: String(item.subject || "").trim(),
+    recipient_query: String(item.recipient_query || "").trim(),
+    search_queries: typeof TL_AI_normalizeSearchQueries_ === "function" ? TL_AI_normalizeSearchQueries_(item.search_queries) : [],
     task_due: String(item.task_due || "").trim(),
     task_priority: String(item.task_priority || "").trim().toLowerCase(),
     approval_required: String(item.approval_required || "true").trim().toLowerCase() === "true",
@@ -1912,11 +1915,80 @@ function TL_Capture_makeFallbackItem_(captureText) {
     title: TL_BossPolicy_preview_(captureText, 60),
     summary: TL_BossPolicy_preview_(captureText, 120),
     proposal: TL_BossPolicy_preview_(captureText, 120),
+    subject: "",
+    recipient_query: "",
+    search_queries: [],
     task_due: "",
     task_priority: "low",
     approval_required: true,
     notes: ""
   };
+}
+
+function TL_Capture_isOutboundCommunicationKind_(kind) {
+  const v = String(kind || "").trim().toLowerCase();
+  return v === "whatsapp" || v === "email";
+}
+
+function TL_Capture_simplifyContactCandidate_(contact, channel) {
+  const safe = contact || {};
+  const normalizedChannel = String(channel || "").trim().toLowerCase();
+  return {
+    contactId: String(safe.contactId || "").trim(),
+    name: String(safe.name || "").trim(),
+    phone1: String(safe.phone1 || "").trim(),
+    phone2: String(safe.phone2 || "").trim(),
+    email: String(safe.email || "").trim(),
+    preferredDestination: normalizedChannel === "email"
+      ? String(safe.email || "").trim()
+      : String(safe.phone1 || safe.phone2 || "").trim(),
+    matchScore: Number(safe.matchScore || 0),
+    matchReasons: Array.isArray(safe.matchReasons) ? safe.matchReasons.slice(0, 6) : []
+  };
+}
+
+function TL_Capture_prepareOutboundRecipient_(item, captureText, contactsOverride) {
+  const normalized = item && typeof item === "object" ? Object.assign({}, item) : {};
+  const channel = String(normalized.kind || "").trim().toLowerCase();
+  if (!TL_Capture_isOutboundCommunicationKind_(channel)) return normalized;
+
+  const resolution = typeof TL_Contacts_resolveBySearchHints_ === "function"
+    ? TL_Contacts_resolveBySearchHints_({
+        rawText: String(captureText || "").trim(),
+        extraction: {
+          recipient_query: String(normalized.recipient_query || "").trim(),
+          search_queries: Array.isArray(normalized.search_queries) ? normalized.search_queries : []
+        }
+      }, contactsOverride)
+    : { contact: null, candidates: [], queries: [] };
+
+  const candidates = (resolution && Array.isArray(resolution.candidates) ? resolution.candidates : [])
+    .map(function(contact) {
+      return TL_Capture_simplifyContactCandidate_(contact, channel);
+    })
+    .filter(function(contact) {
+      return !!String(contact.contactId || "").trim();
+    })
+    .slice(0, 5);
+
+  const resolved = resolution && resolution.contact
+    ? TL_Capture_simplifyContactCandidate_(resolution.contact, channel)
+    : null;
+
+  normalized.search_queries = Array.isArray(resolution && resolution.queries) && resolution.queries.length
+    ? resolution.queries
+    : (Array.isArray(normalized.search_queries) ? normalized.search_queries : []);
+  normalized.recipient_candidates = candidates;
+  normalized.resolution_status = resolved ? "resolved" : (candidates.length ? "ambiguous" : "missing");
+  normalized.recipient_name = resolved ? String(resolved.name || "").trim() : "";
+  normalized.recipient_destination = resolved
+    ? String(channel === "email" ? resolved.email : (resolved.phone1 || resolved.phone2 || "")).trim()
+    : "";
+  normalized.recipient_contact_id = resolved ? String(resolved.contactId || "").trim() : "";
+  if (channel === "email" && !String(normalized.subject || "").trim()) {
+    normalized.subject = String(normalized.title || "").trim();
+  }
+  return normalized;
 }
 
 function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, cfg, now) {
@@ -1927,11 +1999,19 @@ function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, c
   const displayPhone = TL_Orchestrator_value_(sourceValues, "display_phone_number");
   const bossPhone = cfg.bossPhone;
   const sender = displayPhone || TLW_getSetting_("BUSINESS_PHONE") || TLW_getSetting_("DISPLAY_PHONE_NUMBER") || "";
-  const receiver = bossPhone;
   const title = String(item.title || "").trim();
   const proposalText = String(item.proposal || item.summary || item.title || "").trim();
   const summary = String(item.summary || item.title || proposalText || "").trim();
   const kind = String(item.kind || "journal").trim().toLowerCase();
+  const isOutboundComm = TL_Capture_isOutboundCommunicationKind_(kind);
+  const recipientQuery = String(item.recipient_query || "").trim();
+  const recipientName = String(item.recipient_name || "").trim();
+  const recipientDestination = String(item.recipient_destination || "").trim();
+  const recipientContactId = String(item.recipient_contact_id || "").trim();
+  const resolutionStatus = String(item.resolution_status || "").trim().toLowerCase() || (isOutboundComm ? "missing" : "");
+  const receiver = isOutboundComm ? recipientDestination : bossPhone;
+  const emailOwner = typeof TL_Email_ownerEmail_ === "function" ? TL_Email_ownerEmail_() : "";
+  const effectiveSender = kind === "email" ? emailOwner : sender;
   const messageId = "CAP_" + parentEventId + "_" + String(index + 1);
   const recordId = "CAPR_" + parentEventId + "_" + String(index + 1);
   const notes = [
@@ -1946,6 +2026,68 @@ function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, c
   if (title) {
     notes.push("boss_capture_title=" + String(title).replace(/\n+/g, " "));
   }
+  if (recipientQuery) {
+    notes.push("boss_capture_recipient_query=" + recipientQuery.replace(/\n+/g, " "));
+  }
+  if (resolutionStatus) {
+    notes.push("boss_capture_resolution_status=" + resolutionStatus);
+  }
+  if (recipientContactId) {
+    notes.push("boss_capture_contact_id=" + recipientContactId);
+  }
+  if (recipientName) {
+    notes.push("boss_capture_contact_name=" + recipientName.replace(/\n+/g, " "));
+  }
+  if (recipientDestination) {
+    notes.push("boss_capture_destination=" + recipientDestination.replace(/\n+/g, " "));
+  }
+  if (item.subject) {
+    notes.push("boss_capture_subject=" + String(item.subject).replace(/\n+/g, " "));
+  }
+  if (Array.isArray(item.search_queries) && item.search_queries.length) {
+    notes.push("boss_capture_search_queries=" + encodeURIComponent(JSON.stringify(item.search_queries)));
+  }
+
+  const emailSubject = String(item.subject || title || "").trim();
+  const emailPayload = kind === "email" ? {
+    subject: emailSubject,
+    to: recipientDestination,
+    ownerEmail: effectiveSender,
+    senderEmail: effectiveSender,
+    approvalSnapshot: {
+      to: recipientDestination,
+      subject: emailSubject,
+      body: proposalText,
+      cc: "",
+      bcc: "",
+      replyTo: "",
+      threadId: recordId,
+      latestMsgId: messageId,
+      approvalStatus: "awaiting_approval",
+      sendStatus: "pending",
+      summary: summary,
+      triage: { suggested_action: "reply_now" },
+      historyDepth: 0,
+      historyUsed: []
+    },
+    proposal: {
+      to: recipientDestination,
+      subject: emailSubject,
+      body: proposalText,
+      cc: "",
+      bcc: "",
+      replyTo: "",
+      threadId: recordId,
+      latestMsgId: messageId,
+      summary: summary,
+      approvalStatus: "awaiting_approval",
+      sendStatus: "pending"
+    },
+    approvalStatus: "awaiting_approval",
+    sendStatus: "pending",
+    flattenedText: proposalText,
+    participants: [effectiveSender, recipientDestination].filter(Boolean)
+  } : null;
 
   return {
     timestamp: now,
@@ -1954,26 +2096,26 @@ function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, c
     parent_event_id: parentEventId,
     record_id: recordId,
     record_version: 1,
-    record_class: "proposal",
-    channel: "whatsapp",
+    record_class: kind === "email" ? "communication" : "proposal",
+    channel: kind === "email" ? "email" : "whatsapp",
     direction: "outgoing",
     phone_number_id: phoneNumberId,
     display_phone_number: displayPhone,
-    sender: sender,
+    sender: effectiveSender,
     receiver: receiver,
     message_id: messageId,
-    message_type: "text",
+    message_type: kind === "email" ? "email_thread" : "text",
     text: proposalText,
     ai_summary: summary,
     ai_proposal: proposalText,
     approval_required: "true",
-    approval_status: "draft",
+    approval_status: "awaiting_approval",
     execution_status: "proposal_ready",
     status_latest: "",
     status_timestamp: "",
     statuses_count: 0,
-    contact_id: "",
-    raw_payload_ref: "",
+    contact_id: recipientContactId,
+    raw_payload_ref: emailPayload ? JSON.stringify(emailPayload) : "",
     notes: notes.join(";"),
     task_due: String(item.task_due || ""),
     task_status: "proposal_ready",
@@ -1994,7 +2136,12 @@ function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, c
     importance_level: String(item.task_priority || ""),
     urgency_flag: item.task_priority === "high" ? "true" : "false",
     needs_owner_now: item.task_priority === "high" ? "true" : "false",
-    suggested_action: kind === "journal" ? "review_manually" : (kind === "schedule" ? "schedule" : "follow_up")
+    suggested_action: kind === "journal" ? "review_manually" : (kind === "schedule" ? "schedule" : (isOutboundComm ? "reply_now" : "follow_up")),
+    thread_id: kind === "email" ? recordId : "",
+    thread_subject: kind === "email" ? emailSubject : "",
+    latest_message_at: kind === "email" ? new Date(now).toISOString() : "",
+    external_url: "",
+    participants_json: kind === "email" ? JSON.stringify([effectiveSender, recipientDestination].filter(Boolean)) : ""
   };
 }
 
@@ -2025,7 +2172,7 @@ function TL_Capture_upsertChildRow_(childRow) {
   };
 }
 
-function TL_Capture_buildPacketItem_(childRow, rowNumber) {
+function TL_Capture_buildPacketItem_(childRow, rowNumber, sourceItem) {
   const notes = String(childRow.notes || "");
   const captureKind = TL_Orchestrator_captureKindFromNotes_(notes);
   const captureTitle = TL_Orchestrator_captureTitleForKind_(captureKind, {
@@ -2041,6 +2188,7 @@ function TL_Capture_buildPacketItem_(childRow, rowNumber) {
         TL_Orchestrator_captureTitleFromNotes_(notes)
       )
     : "";
+  const item = sourceItem && typeof sourceItem === "object" ? sourceItem : {};
   return {
     key: String(childRow.record_id || childRow.event_id || childRow.message_id || ("row_" + rowNumber)),
     rowNumber: Number(rowNumber || 0),
@@ -2054,6 +2202,17 @@ function TL_Capture_buildPacketItem_(childRow, rowNumber) {
     reminderMessage: reminderMessage,
     sender: String(childRow.sender || ""),
     receiver: String(childRow.receiver || ""),
+    senderLabel: String(childRow.sender || ""),
+    channel: String(childRow.channel || ""),
+    channelLabel: String(childRow.channel || ""),
+    messageType: String(childRow.message_type || ""),
+    subject: String(item.subject || childRow.thread_subject || ""),
+    recipientQuery: String(item.recipient_query || ""),
+    recipientName: String(item.recipient_name || ""),
+    recipientDestination: String(item.recipient_destination || childRow.receiver || ""),
+    recipientCandidates: Array.isArray(item.recipient_candidates) ? item.recipient_candidates.slice(0, 5) : [],
+    resolutionStatus: String(item.resolution_status || "").trim().toLowerCase(),
+    searchQueries: Array.isArray(item.search_queries) ? item.search_queries.slice(0, 12) : [],
     contactId: String(childRow.contact_id || ""),
     approvalStatus: String(childRow.approval_status || ""),
     executionStatus: String(childRow.execution_status || ""),
@@ -2082,7 +2241,12 @@ function TL_Capture_buildDuePreview_(dueText, baseAt) {
 }
 
 function TL_Capture_buildPacketText_(summary, packetItems, cfg, now) {
-  if (packetItems && packetItems.length === 1 && typeof TL_Menu_BuildDecisionPacketOneByOneReply_ === "function") {
+  if (packetItems &&
+      typeof TL_Menu_BuildDecisionPacketOneByOneReply_ === "function" &&
+      (packetItems.length === 1 || packetItems.some(function(item) {
+        return String(item && item.captureKind || "").trim().toLowerCase() === "whatsapp" ||
+          String(item && item.captureKind || "").trim().toLowerCase() === "email";
+      }))) {
     return TL_Menu_BuildDecisionPacketOneByOneReply_({
       kind: "capture",
       stage: "one_by_one",

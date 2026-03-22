@@ -212,9 +212,9 @@ function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Required JSON shape:",
-    '{"summary":"...","items":[{"kind":"reminder|task|journal|schedule","title":"...","summary":"...","proposal":"...","task_due":"...","task_priority":"low|medium|high","approval_required":"true","notes":"..."}]}',
+    '{"summary":"...","items":[{"kind":"reminder|task|journal|schedule|whatsapp|email","title":"...","summary":"...","proposal":"...","subject":"...","recipient_query":"...","search_queries":[{"type":"name|name_prefix|phone_fragment|email|relationship|org","value":"..."}],"task_due":"...","task_priority":"low|medium|high","approval_required":"true","notes":"..."}]}',
     "Example JSON response:",
-    '{"summary":"הבוס נתן ארבע הנחיות: תזכורת, משימה, פגישה ורישום ליומן.","items":[{"kind":"reminder","title":"לקחת תרופה בבוקר","summary":"תזכורת לקחת תרופה מחר בבוקר.","proposal":"לקחת תרופה בבוקר.","task_due":"מחר בבוקר","task_priority":"high","approval_required":"true","notes":""},{"kind":"task","title":"להתקשר ליעקב","summary":"צריך להתקשר ליעקב.","proposal":"להתקשר ליעקב.","task_due":"","task_priority":"medium","approval_required":"true","notes":""},{"kind":"schedule","title":"פגישה עם עצמי","summary":"לקבוע פגישה עם עצמי מחר ב-10:00 בבוקר.","proposal":"פגישה עם עצמי.","task_due":"מחר ב-10:00 בבוקר","task_priority":"medium","approval_required":"true","notes":""},{"kind":"journal","title":"לקחתי כדור בערב","summary":"נרשם ביומן שנלקח כדור בערב בשעה 22:00.","proposal":"לקחתי כדור בערב בשעה 22:00.","task_due":"","task_priority":"low","approval_required":"true","notes":""}]}',
+    '{"summary":"הבוס נתן ארבע הנחיות: תזכורת, משימה, פגישה והודעת וואטסאפ.","items":[{"kind":"reminder","title":"לקחת תרופה בבוקר","summary":"תזכורת לקחת תרופה מחר בבוקר.","proposal":"לקחת תרופה בבוקר.","subject":"","recipient_query":"","search_queries":[],"task_due":"מחר בבוקר","task_priority":"high","approval_required":"true","notes":""},{"kind":"task","title":"להתקשר ליעקב","summary":"צריך להתקשר ליעקב.","proposal":"להתקשר ליעקב.","subject":"","recipient_query":"","search_queries":[],"task_due":"","task_priority":"medium","approval_required":"true","notes":""},{"kind":"schedule","title":"פגישה עם עצמי","summary":"לקבוע פגישה עם עצמי מחר ב-10:00 בבוקר.","proposal":"פגישה עם עצמי.","subject":"","recipient_query":"","search_queries":[],"task_due":"מחר ב-10:00 בבוקר","task_priority":"medium","approval_required":"true","notes":""},{"kind":"whatsapp","title":"להודיע לדוד שאגיע בעוד שעה","summary":"לשלוח לדוד הודעת וואטסאפ שאחזור בעוד שעה.","proposal":"אני אחזור בעוד שעה.","subject":"","recipient_query":"David","search_queries":[{"type":"name","value":"David"},{"type":"name","value":"דוד"},{"type":"name_prefix","value":"Dav"}],"task_due":"","task_priority":"medium","approval_required":"true","notes":""}]}',
     "Rules:",
     "Emit one item per distinct intent.",
     "Keep reminder and task items concrete and actionable.",
@@ -222,6 +222,14 @@ function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
     "Use schedule items for meetings, appointments, and calendar events that should be placed on the calendar.",
     "For schedule items, title must be the event subject only, not a verb phrase like 'create a task' or 'schedule a meeting'.",
     "For schedule items, proposal should be the exact event title/description the Boss is approving, not an instruction to create a task.",
+    "Use whatsapp items for new outbound WhatsApp messages the Boss wants to send.",
+    "Use email items for new outbound emails the Boss wants to send.",
+    "For whatsapp and email items, recipient_query must be the person/contact the Boss mentioned.",
+    "For whatsapp and email items, search_queries must be an ordered list of separate CONTACTS searches to try.",
+    "Prefer including both Hebrew and English spellings when useful, plus a short prefix and any phone fragment.",
+    "Do not combine name and phone into one search string. Return separate query objects.",
+    "For email items, put the email subject in subject and the body text in proposal.",
+    "For whatsapp items, subject should be empty.",
     "Keep journal items factual and non-actionable.",
     "Use empty strings when a field is unknown.",
     "Always set approval_required to true.",
@@ -916,6 +924,8 @@ function TL_AI_normalizeBossCaptureKind_(value) {
   if (v === "reminder") return "reminder";
   if (v === "task") return "task";
   if (v === "schedule" || v === "event" || v === "meeting" || v === "appointment" || v === "calendar") return "schedule";
+  if (v === "whatsapp" || v === "wa" || v === "whatsapp_message" || v === "message") return "whatsapp";
+  if (v === "email" || v === "mail" || v === "gmail") return "email";
   if (v === "journal" || v === "log" || v === "note") return "journal";
   return "journal";
 }
@@ -929,11 +939,17 @@ function TL_AI_normalizeBossCaptureItem_(item) {
   const taskDue = String(item.task_due || "").trim();
   const taskPriority = TL_AI_normalizeLevel_(item.task_priority);
   const notes = String(item.notes || "").trim();
+  const subject = String(item.subject || "").trim();
+  const recipientQuery = String(item.recipient_query || "").trim();
+  const searchQueries = TL_AI_normalizeSearchQueries_(item.search_queries);
   return {
     kind: kind,
     title: title,
     summary: summary,
     proposal: proposal,
+    subject: subject,
+    recipient_query: recipientQuery,
+    search_queries: searchQueries,
     task_due: taskDue,
     task_priority: taskPriority,
     approval_required: "true",

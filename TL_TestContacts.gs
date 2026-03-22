@@ -11,7 +11,9 @@ function TL_TestContacts_RunAll() {
     sync_mode_filter: TL_TestContacts_SyncModeFilterRun(),
     phone_candidate_split: TL_TestContacts_PhoneCandidateSplitRun(),
     replace_error_phone: TL_TestContacts_ReplaceErrorPhoneRun(),
-    resolve_search_queries: TL_TestContacts_ResolveSearchQueriesRun()
+    resolve_search_queries: TL_TestContacts_ResolveSearchQueriesRun(),
+    prepare_outbound_recipient: TL_TestContacts_PrepareOutboundRecipientRun(),
+    outbound_card_format: TL_TestContacts_OutboundCardFormatRun()
   };
 }
 
@@ -256,5 +258,70 @@ function TL_TestContacts_ResolveSearchQueriesRun() {
     resolved: result && result.contact ? result.contact.contactId : "",
     firstCandidate: result && result.candidates && result.candidates[0] ? result.candidates[0].contactId : "",
     queries: result && result.queries ? result.queries : []
+  };
+}
+
+function TL_TestContacts_PrepareOutboundRecipientRun() {
+  const contacts = [
+    {
+      contactId: "GC_1",
+      name: "David Cohen",
+      alias: "David",
+      org: "",
+      role: "",
+      tags: "",
+      email: "david@example.com",
+      phone1: "972506847373",
+      phone2: "",
+      phone1Norm: "972506847373",
+      phone2Norm: "",
+      emailNorm: "david@example.com"
+    }
+  ];
+
+  const result = TL_Capture_prepareOutboundRecipient_({
+    kind: "email",
+    title: "Good job",
+    summary: "Send David a quick note.",
+    proposal: "This works.",
+    subject: "Good job",
+    recipient_query: "David",
+    search_queries: [
+      { type: "name", value: "David" },
+      { type: "name_prefix", value: "Dav" }
+    ]
+  }, "Email David that this works.", contacts);
+
+  return {
+    ok: result &&
+      result.resolution_status === "resolved" &&
+      result.recipient_name === "David Cohen" &&
+      result.recipient_destination === "david@example.com" &&
+      result.recipient_contact_id === "GC_1",
+    result: result
+  };
+}
+
+function TL_TestContacts_OutboundCardFormatRun() {
+  const emailBody = TL_Menu_BuildDecisionPacketProposalBody_({
+    captureKind: "email",
+    recipientName: "David Cohen",
+    recipientDestination: "david@example.com",
+    proposal: "This works.",
+    subject: "Good job"
+  });
+  const waBody = TL_Menu_BuildDecisionPacketProposalBody_({
+    captureKind: "whatsapp",
+    recipientName: "David Cohen",
+    recipientDestination: "972506847373",
+    proposal: "I'll be back in an hour."
+  });
+
+  return {
+    ok: emailBody.indexOf("Draft Email to David Cohen | david@example.com") !== -1 &&
+      emailBody.indexOf("Subject: Good job") !== -1 &&
+      waBody.indexOf("Draft WhatsApp to David Cohen | 972506847373") !== -1,
+    emailBody: emailBody,
+    waBody: waBody
   };
 }
