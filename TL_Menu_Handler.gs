@@ -60,6 +60,18 @@ const TL_MENU_STATES = {
   VERTICAL_REPORTS: "vertical_reports"
 };
 
+function TL_Menu_BossLanguage_() {
+  return String(TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "Hebrew").trim();
+}
+
+function TL_Menu_IsEnglishUi_() {
+  return /^english$/i.test(TL_Menu_BossLanguage_());
+}
+
+function TL_Menu_T_(hebrewText, englishText) {
+  return TL_Menu_IsEnglishUi_() ? String(englishText || hebrewText || "") : String(hebrewText || englishText || "");
+}
+
 function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
   const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
   const from = String(ev.from || "").trim();
@@ -73,7 +85,10 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
 
   if (TL_Menu_IsExitCommand_(rawText)) {
     TL_Menu_ResetSession_(bossWaId);
-    return "איפסתי את הזרימה הנוכחית. חזרנו למצב נקי. אם תרצה, כתוב \"תפריט\" כדי להתחיל מחדש.";
+    return TL_Menu_T_(
+      "איפסתי את הזרימה הנוכחית. חזרנו למצב נקי. אם תרצה, כתוב \"תפריט\" כדי להתחיל מחדש.",
+      "I reset the current flow. We are back to a clean state. If you want, type \"menu\" to start again."
+    );
   }
 
   const existingPacket = TL_Menu_GetDecisionPacket_(bossWaId);
@@ -137,6 +152,23 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
 
 function TL_Menu_BuildMenuReply_() {
   const bossName = String(TLW_getSetting_("BOSS_NAME") || "").trim();
+  if (TL_Menu_IsEnglishUi_()) {
+    return [
+      bossName ? ("Hello " + bossName + ",") : "Hello,",
+      "What would you like to do?",
+      "1. Set a reminder",
+      "2. New task",
+      "3. Log something",
+      "4. Schedule something",
+      "5. Manage work",
+      "6. Settings",
+      "7. Help / what can I say",
+      "8. Specialized tools",
+      "9. Enrich a contact",
+      "0. Exit / reset",
+      "Send the number of the option you choose"
+    ].join("\n");
+  }
   return [
     bossName ? ("שלום " + bossName + ",") : "שלום,",
     "מה תרצה לעשות?",
@@ -232,14 +264,26 @@ function TL_Menu_HandleRootChoice_(waId, choice) {
   if (choice === "6") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.SETTINGS);
   if (choice === "7") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.HELP);
   if (choice === "8") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.VERTICALS);
-  if (choice === "9") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_CONTACT_ENRICH, "כתוב/אמור למי להוסיף הקשר ומה חשוב לזכור. לדוגמה: \"תוסיף לדוד הערה שנפגשתי איתו ולבן שלו יש חתונה בשבוע הבא\".");
+  if (choice === "9") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_CONTACT_ENRICH, TL_Menu_T_(
+    "כתוב/אמור למי להוסיף הקשר ומה חשוב לזכור. לדוגמה: \"תוסיף לדוד הערה שנפגשתי איתו ולבן שלו יש חתונה בשבוע הבא\".",
+    "Write or say who to enrich and what is important to remember. Example: \"Add a note for David that I met him and his son gets married next week.\""
+  ));
   return TL_Menu_BuildMenuReply_();
 }
 
 function TL_Menu_HandleRemindersChoice_(waId, choice) {
-  if (choice === "1") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_REMINDER_RELATIVE, "כתוב/אמור את התזכורת. לדוגמה: \"תזכירי לי בעוד שעתיים להתקשר ליעקב\".");
-  if (choice === "2") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_REMINDER_DATETIME, "כתוב/אמור את התזכורת עם תאריך ושעה. לדוגמה: \"תזכירי לי מחר ב-08:00 לקחת תרופה\".");
-  if (choice === "3") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_REMINDER_RECURRING, "כתוב/אמור את התזכורת החוזרת. לדוגמה: \"תזכירי לי כל יום ב-22:00 לקחת כדור\".");
+  if (choice === "1") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_REMINDER_RELATIVE, TL_Menu_T_(
+    "כתוב/אמור את התזכורת. לדוגמה: \"תזכירי לי בעוד שעתיים להתקשר ליעקב\".",
+    "Write or say the reminder. Example: \"Remind me in two hours to call Yaakov.\""
+  ));
+  if (choice === "2") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_REMINDER_DATETIME, TL_Menu_T_(
+    "כתוב/אמור את התזכורת עם תאריך ושעה. לדוגמה: \"תזכירי לי מחר ב-08:00 לקחת תרופה\".",
+    "Write or say the reminder with date and time. Example: \"Remind me tomorrow at 08:00 to take my medicine.\""
+  ));
+  if (choice === "3") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_REMINDER_RECURRING, TL_Menu_T_(
+    "כתוב/אמור את התזכורת החוזרת. לדוגמה: \"תזכירי לי כל יום ב-22:00 לקחת כדור\".",
+    "Write or say the recurring reminder. Example: \"Remind me every day at 22:00 to take a pill.\""
+  ));
   if (choice === "4") return TL_Menu_BuildRemindersSummary_();
   if (choice === "5") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
   if (choice === "6") return TL_Menu_BuildMenuReply_();
@@ -247,31 +291,43 @@ function TL_Menu_HandleRemindersChoice_(waId, choice) {
 }
 
 function TL_Menu_HandleTaskChoice_(waId, choice) {
-  if (choice === "1") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_TASK_NO_DUE, "כתוב/אמור את פרטי המשימה בלי תאריך יעד.");
-  if (choice === "2") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_TASK_WITH_DUE, "כתוב/אמור את המשימה עם תאריך יעד. לדוגמה: \"תפתחי לי משימה לשלוח הצעת מחיר עד יום חמישי\".");
-  if (choice === "3") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_TASK_DEPENDENT, "כתוב/אמור את המשימה והתלות. לדוגמה: \"תפתחי משימה להתקשר ליעקב אחרי שדני שולח מחירים\".");
-  if (choice === "4") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_TASK_PERSONAL, "כתוב/אמור את המשימה האישית.");
-  if (choice === "5") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_TASK_BUSINESS, "כתוב/אמור את המשימה העסקית.");
+  if (choice === "1") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_TASK_NO_DUE, TL_Menu_T_("כתוב/אמור את פרטי המשימה בלי תאריך יעד.", "Write or say the task details without a due date."));
+  if (choice === "2") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_TASK_WITH_DUE, TL_Menu_T_(
+    "כתוב/אמור את המשימה עם תאריך יעד. לדוגמה: \"תפתחי לי משימה לשלוח הצעת מחיר עד יום חמישי\".",
+    "Write or say the task with a due date. Example: \"Create a task to send the price quote by Thursday.\""
+  ));
+  if (choice === "3") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_TASK_DEPENDENT, TL_Menu_T_(
+    "כתוב/אמור את המשימה והתלות. לדוגמה: \"תפתחי משימה להתקשר ליעקב אחרי שדני שולח מחירים\".",
+    "Write or say the task and its dependency. Example: \"Create a task to call Yaakov after Danny sends the prices.\""
+  ));
+  if (choice === "4") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_TASK_PERSONAL, TL_Menu_T_("כתוב/אמור את המשימה האישית.", "Write or say the personal task."));
+  if (choice === "5") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_TASK_BUSINESS, TL_Menu_T_("כתוב/אמור את המשימה העסקית.", "Write or say the business task."));
   if (choice === "6") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
   if (choice === "7") return TL_Menu_BuildMenuReply_();
   return TL_Menu_BuildTaskMenu_();
 }
 
 function TL_Menu_HandleLogChoice_(waId, choice) {
-  if (choice === "1") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_LOG_HEALTH, "כתוב/אמור מה לרשום בבריאות / תרופות.");
-  if (choice === "2") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_LOG_HABITS, "כתוב/אמור מה לרשום בספורט / הרגלים.");
-  if (choice === "3") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_LOG_JOURNAL, "כתוב/אמור מה לרשום ביומן האישי.");
-  if (choice === "4") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_LOG_NOTE, "כתוב/אמור את ההערה הכללית.");
+  if (choice === "1") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_LOG_HEALTH, TL_Menu_T_("כתוב/אמור מה לרשום בבריאות / תרופות.", "Write or say what to log for health / medication."));
+  if (choice === "2") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_LOG_HABITS, TL_Menu_T_("כתוב/אמור מה לרשום בספורט / הרגלים.", "Write or say what to log for sports / habits."));
+  if (choice === "3") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_LOG_JOURNAL, TL_Menu_T_("כתוב/אמור מה לרשום ביומן האישי.", "Write or say what to log in the personal journal."));
+  if (choice === "4") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_LOG_NOTE, TL_Menu_T_("כתוב/אמור את ההערה הכללית.", "Write or say the general note."));
   if (choice === "5") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
   if (choice === "6") return TL_Menu_BuildMenuReply_();
   return TL_Menu_BuildLogMenu_();
 }
 
 function TL_Menu_HandleScheduleChoice_(waId, choice) {
-  if (choice === "1") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_SCHEDULE_BUSINESS, "כתוב/אמור את פרטי הפגישה העסקית. לדוגמה: \"תקבעי לי פגישה עם רותי ביום חמישי ב-15:00\".");
-  if (choice === "2") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_SCHEDULE_FAMILY, "כתוב/אמור את פרטי האירוע המשפחתי.");
-  if (choice === "3") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_SCHEDULE_REMINDER, "כתוב/אמור תזכורת עם זמן.");
-  if (choice === "4") return TL_Menu_BuildPlaceholderReply_("מה יש לי ביומן", "תצוגת יומן מלאה תתחבר למסלול היומן. כרגע הסיידקאר קיים אבל לא מחובר עדיין לתשובת תפריט.");
+  if (choice === "1") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_SCHEDULE_BUSINESS, TL_Menu_T_(
+    "כתוב/אמור את פרטי הפגישה העסקית. לדוגמה: \"תקבעי לי פגישה עם רותי ביום חמישי ב-15:00\".",
+    "Write or say the business meeting details. Example: \"Schedule a meeting with Ruti on Thursday at 15:00.\""
+  ));
+  if (choice === "2") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_SCHEDULE_FAMILY, TL_Menu_T_("כתוב/אמור את פרטי האירוע המשפחתי.", "Write or say the family event details."));
+  if (choice === "3") return TL_Menu_OpenCapture_(waId, TL_MENU_STATES.CAPTURE_SCHEDULE_REMINDER, TL_Menu_T_("כתוב/אמור תזכורת עם זמן.", "Write or say a timed reminder."));
+  if (choice === "4") return TL_Menu_BuildPlaceholderReply_(
+    TL_Menu_T_("מה יש לי ביומן", "What's on my calendar"),
+    TL_Menu_T_("תצוגת יומן מלאה תתחבר למסלול היומן. כרגע הסיידקאר קיים אבל לא מחובר עדיין לתשובת תפריט.", "A full calendar view will connect to the calendar flow. The sidecar exists, but it is not yet wired into the menu reply.")
+  );
   if (choice === "5") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
   if (choice === "6") return TL_Menu_BuildMenuReply_();
   return TL_Menu_BuildScheduleMenu_();
@@ -294,31 +350,31 @@ function TL_Menu_HandleManageWorkChoice_(waId, choice) {
 
 function TL_Menu_HandleSettingsChoice_(waId, choice) {
   if (choice === "1") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.SETTINGS_SECRETARY);
-  if (choice === "2") return TL_Menu_BuildPlaceholderReply_("תדירות עדכונים", "עריכת תדירות העדכונים דרך התפריט עוד לא חוברה. כרגע זה נשלט מ-SETTINGS דרך BOSS_UPDATE_INTERVAL_MINUTES.");
-  if (choice === "3") return TL_Menu_BuildPlaceholderReply_("תדירות בקשות החלטה", "עריכת תדירות בקשות החלטה דרך התפריט עוד לא חוברה. כרגע זה נשלט מ-SETTINGS דרך BOSS_DECISION_REQUEST_INTERVAL_MINUTES.");
-  if (choice === "4") return TL_Menu_BuildPlaceholderReply_("גודל אצווה להחלטות", "עריכת גודל אצווה דרך התפריט עוד לא חוברה. כרגע זה נשלט מ-SETTINGS דרך BOSS_DECISION_BATCH_SIZE ו-BOSS_MAX_ITEMS_PER_DIGEST.");
+  if (choice === "2") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("תדירות עדכונים", "Update cadence"), TL_Menu_T_("עריכת תדירות העדכונים דרך התפריט עוד לא חוברה. כרגע זה נשלט מ-SETTINGS דרך BOSS_UPDATE_INTERVAL_MINUTES.", "Changing update cadence through the menu is not wired yet. Right now it is controlled from SETTINGS via BOSS_UPDATE_INTERVAL_MINUTES."));
+  if (choice === "3") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("תדירות בקשות החלטה", "Decision request cadence"), TL_Menu_T_("עריכת תדירות בקשות החלטה דרך התפריט עוד לא חוברה. כרגע זה נשלט מ-SETTINGS דרך BOSS_DECISION_REQUEST_INTERVAL_MINUTES.", "Changing decision request cadence through the menu is not wired yet. Right now it is controlled from SETTINGS via BOSS_DECISION_REQUEST_INTERVAL_MINUTES."));
+  if (choice === "4") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("גודל אצווה להחלטות", "Decision batch size"), TL_Menu_T_("עריכת גודל אצווה דרך התפריט עוד לא חוברה. כרגע זה נשלט מ-SETTINGS דרך BOSS_DECISION_BATCH_SIZE ו-BOSS_MAX_ITEMS_PER_DIGEST.", "Changing batch size through the menu is not wired yet. Right now it is controlled from SETTINGS via BOSS_DECISION_BATCH_SIZE and BOSS_MAX_ITEMS_PER_DIGEST."));
   if (choice === "5") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.SETTINGS_LANGUAGE);
-  if (choice === "6") return TL_Menu_BuildPlaceholderReply_("התאמה אישית של התפריט", "התאמה אישית של התפריט עוד לא חוברה, אבל המבנה כבר מוגדר כרודמאפ.");
+  if (choice === "6") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("התאמה אישית של התפריט", "Menu customization"), TL_Menu_T_("התאמה אישית של התפריט עוד לא חוברה, אבל המבנה כבר מוגדר כרודמאפ.", "Menu customization is not wired yet, but the structure is already defined in the roadmap."));
   if (choice === "7") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
   if (choice === "8") return TL_Menu_BuildMenuReply_();
   return TL_Menu_BuildSettingsMenu_();
 }
 
 function TL_Menu_HandleSettingsSecretaryChoice_(waId, choice) {
-  if (choice === "1") return TL_Menu_BuildPlaceholderReply_("הפעל / כבה דחוף בלבד", "שינוי דרך התפריט עוד לא חובר. כרגע הערך נשלט מ-SETTINGS.");
-  if (choice === "2") return TL_Menu_BuildPlaceholderReply_("רמת התערבות", "שינוי דרך התפריט עוד לא חובר. כרגע הערך נשלט מ-SETTINGS.");
-  if (choice === "3") return TL_Menu_BuildPlaceholderReply_("דחופים תמיד ראשונים", "שינוי דרך התפריט עוד לא חובר. כרגע הערך נשלט מ-SETTINGS.");
-  if (choice === "4") return TL_Menu_BuildPlaceholderReply_("FYI בעדכון", "שינוי דרך התפריט עוד לא חובר. כרגע הערך נשלט מ-SETTINGS.");
-  if (choice === "5") return TL_Menu_BuildPlaceholderReply_("נא לא להפריע", "שינוי דרך התפריט עוד לא חובר. כרגע הערך נשלט מ-SETTINGS.");
+  if (choice === "1") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("הפעל / כבה דחוף בלבד", "Urgent-only mode"), TL_Menu_T_("שינוי דרך התפריט עוד לא חובר. כרגע הערך נשלט מ-SETTINGS.", "Changing this through the menu is not wired yet. Right now the value is controlled from SETTINGS."));
+  if (choice === "2") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("רמת התערבות", "Intervention level"), TL_Menu_T_("שינוי דרך התפריט עוד לא חובר. כרגע הערך נשלט מ-SETTINGS.", "Changing this through the menu is not wired yet. Right now the value is controlled from SETTINGS."));
+  if (choice === "3") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("דחופים תמיד ראשונים", "Urgent always first"), TL_Menu_T_("שינוי דרך התפריט עוד לא חובר. כרגע הערך נשלט מ-SETTINGS.", "Changing this through the menu is not wired yet. Right now the value is controlled from SETTINGS."));
+  if (choice === "4") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("FYI בעדכון", "Include FYI in updates"), TL_Menu_T_("שינוי דרך התפריט עוד לא חובר. כרגע הערך נשלט מ-SETTINGS.", "Changing this through the menu is not wired yet. Right now the value is controlled from SETTINGS."));
+  if (choice === "5") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("נא לא להפריע", "Do not disturb"), TL_Menu_T_("שינוי דרך התפריט עוד לא חובר. כרגע הערך נשלט מ-SETTINGS.", "Changing this through the menu is not wired yet. Right now the value is controlled from SETTINGS."));
   if (choice === "6") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.SETTINGS);
   if (choice === "7") return TL_Menu_BuildMenuReply_();
   return TL_Menu_BuildSettingsSecretaryMenu_();
 }
 
 function TL_Menu_HandleSettingsLanguageChoice_(waId, choice) {
-  if (choice === "1") return TL_Menu_BuildPlaceholderReply_("עברית להכל", "ברירת המחדל כרגע היא עברית. שינוי מלא דרך התפריט עוד לא חובר.");
-  if (choice === "2") return TL_Menu_BuildPlaceholderReply_("שפת תפריט", "שפת תפריט נרשמה כדרישת המשך, אבל שינוי דרך התפריט עוד לא חובר.");
-  if (choice === "3") return TL_Menu_BuildPlaceholderReply_("שפת AI", "שפת AI נרשמה כדרישת המשך, אבל שינוי דרך התפריט עוד לא חובר.");
+  if (choice === "1") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("עברית להכל", "Hebrew for everything"), TL_Menu_T_("ברירת המחדל כרגע היא עברית. שינוי מלא דרך התפריט עוד לא חובר.", "The default is currently Hebrew. Full change through the menu is not wired yet."));
+  if (choice === "2") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("שפת תפריט", "Menu language"), TL_Menu_T_("שפת תפריט נרשמה כדרישת המשך, אבל שינוי דרך התפריט עוד לא חובר.", "Menu language is noted as a follow-up requirement, but changing it through the menu is not wired yet."));
+  if (choice === "3") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("שפת AI", "AI language"), TL_Menu_T_("שפת AI נרשמה כדרישת המשך, אבל שינוי דרך התפריט עוד לא חובר.", "AI language is noted as a follow-up requirement, but changing it through the menu is not wired yet."));
   if (choice === "4") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.SETTINGS);
   if (choice === "5") return TL_Menu_BuildMenuReply_();
   return TL_Menu_BuildSettingsLanguageMenu_();
@@ -331,9 +387,9 @@ function TL_Menu_HandleHelpChoice_(waId, choice) {
 }
 
 function TL_Menu_HandleVerticalsChoice_(waId, choice) {
-  if (choice === "1") return TL_Menu_BuildPlaceholderReply_("מטפלת / מטופלים", "המסלול הייעודי הזה עוד לא מומש, אבל הוא על הרודמאפ כמודול ורטיקלי.");
-  if (choice === "2") return TL_Menu_BuildPlaceholderReply_("סיכומי מפגשים", "המסלול הזה עוד לא מומש, אבל הוא שמור כיכולות עתידיות.");
-  if (choice === "3") return TL_Menu_BuildPlaceholderReply_("דוחות תקופתיים", "המסלול הזה עוד לא מומש, אבל הוא שמור כיכולות עתידיות.");
+  if (choice === "1") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("מטפלת / מטופלים", "Therapist / clients"), TL_Menu_T_("המסלול הייעודי הזה עוד לא מומש, אבל הוא על הרודמאפ כמודול ורטיקלי.", "This dedicated flow is not implemented yet, but it is on the roadmap as a vertical module."));
+  if (choice === "2") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("סיכומי מפגשים", "Session summaries"), TL_Menu_T_("המסלול הזה עוד לא מומש, אבל הוא שמור כיכולות עתידיות.", "This flow is not implemented yet, but it is reserved as future capability."));
+  if (choice === "3") return TL_Menu_BuildPlaceholderReply_(TL_Menu_T_("דוחות תקופתיים", "Periodic reports"), TL_Menu_T_("המסלול הזה עוד לא מומש, אבל הוא שמור כיכולות עתידיות.", "This flow is not implemented yet, but it is reserved as future capability."));
   if (choice === "4") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
   if (choice === "5") return TL_Menu_BuildMenuReply_();
   return TL_Menu_BuildVerticalsMenu_();
@@ -346,7 +402,7 @@ function TL_Menu_OpenSubmenu_(waId, state) {
 
 function TL_Menu_OpenCapture_(waId, state, prompt) {
   TL_Menu_SetState_(waId, state);
-  return String(prompt || "כתוב/אמור את הפרטים.");
+  return String(prompt || TL_Menu_T_("כתוב/אמור את הפרטים.", "Write or say the details."));
 }
 
 function TL_Menu_BuildMenuForState_(state) {
@@ -366,6 +422,19 @@ function TL_Menu_BuildMenuForState_(state) {
 }
 
 function TL_Menu_BuildRemindersMenu_() {
+  if (TL_Menu_IsEnglishUi_()) {
+    return [
+      "Reminders",
+      "1. In some time",
+      "2. On a date and time",
+      "3. Every day / every week",
+      "4. Reminder list",
+      "5. Back to previous menu",
+      "6. Back to main menu",
+      "0. Exit / reset",
+      "Send the number of the option you choose"
+    ].join("\n");
+  }
   return [
     "תזכורות",
     "1. בעוד זמן מסוים",
@@ -380,6 +449,20 @@ function TL_Menu_BuildRemindersMenu_() {
 }
 
 function TL_Menu_BuildTaskMenu_() {
+  if (TL_Menu_IsEnglishUi_()) {
+    return [
+      "New task",
+      "1. Without a date",
+      "2. With a date",
+      "3. Dependent on something else",
+      "4. Personal task",
+      "5. Business task",
+      "6. Back to previous menu",
+      "7. Back to main menu",
+      "0. Exit / reset",
+      "Send the number of the option you choose"
+    ].join("\n");
+  }
   return [
     "משימה חדשה",
     "1. בלי תאריך",
@@ -395,6 +478,19 @@ function TL_Menu_BuildTaskMenu_() {
 }
 
 function TL_Menu_BuildLogMenu_() {
+  if (TL_Menu_IsEnglishUi_()) {
+    return [
+      "Log",
+      "1. Health / medication",
+      "2. Sports / habits",
+      "3. Personal journal",
+      "4. General note",
+      "5. Back to previous menu",
+      "6. Back to main menu",
+      "0. Exit / reset",
+      "Send the number of the option you choose"
+    ].join("\n");
+  }
   return [
     "רישום",
     "1. בריאות / תרופות",
@@ -409,6 +505,19 @@ function TL_Menu_BuildLogMenu_() {
 }
 
 function TL_Menu_BuildScheduleMenu_() {
+  if (TL_Menu_IsEnglishUi_()) {
+    return [
+      "Calendar and scheduling",
+      "1. Business meeting",
+      "2. Family event",
+      "3. Timed reminder",
+      "4. What's on my calendar",
+      "5. Back to previous menu",
+      "6. Back to main menu",
+      "0. Exit / reset",
+      "Send the number of the option you choose"
+    ].join("\n");
+  }
   return [
     "יומן ותיאום",
     "1. פגישה עסקית",
@@ -423,6 +532,24 @@ function TL_Menu_BuildScheduleMenu_() {
 }
 
 function TL_Menu_BuildManageWorkMenu_() {
+  if (TL_Menu_IsEnglishUi_()) {
+    return [
+      "Manage work",
+      "1. What's on my plate right now",
+      "2. What needs attention",
+      "3. Awaiting approvals",
+      "4. Suggest next steps",
+      "5. Draft replies",
+      "6. Waiting on others",
+      "7. Follow-ups",
+      "8. Open tasks",
+      "9. Blocked tasks",
+      "10. Back to previous menu",
+      "11. Back to main menu",
+      "0. Exit / reset",
+      "Send the number of the option you choose"
+    ].join("\n");
+  }
   return [
     "ניהול העבודה",
     "1. מה על הצלחת שלי עכשיו",
@@ -442,6 +569,21 @@ function TL_Menu_BuildManageWorkMenu_() {
 }
 
 function TL_Menu_BuildSettingsMenu_() {
+  if (TL_Menu_IsEnglishUi_()) {
+    return [
+      "Settings",
+      "1. Secretary settings",
+      "2. Update cadence",
+      "3. Decision request cadence",
+      "4. Decision batch size",
+      "5. Language",
+      "6. Menu customization",
+      "7. Back to previous menu",
+      "8. Back to main menu",
+      "0. Exit / reset",
+      "Send the number of the option you choose"
+    ].join("\n");
+  }
   return [
     "הגדרות",
     "1. הגדרות המזכירה",
@@ -458,6 +600,20 @@ function TL_Menu_BuildSettingsMenu_() {
 }
 
 function TL_Menu_BuildSettingsSecretaryMenu_() {
+  if (TL_Menu_IsEnglishUi_()) {
+    return [
+      "Secretary settings",
+      "1. Turn urgent-only on / off",
+      "2. Intervention level",
+      "3. Urgent always first",
+      "4. Include FYI in updates",
+      "5. Do not disturb",
+      "6. Back to previous menu",
+      "7. Back to main menu",
+      "0. Exit / reset",
+      "Send the number of the option you choose"
+    ].join("\n");
+  }
   return [
     "הגדרות המזכירה",
     "1. הפעל / כבה דחוף בלבד",
@@ -473,6 +629,18 @@ function TL_Menu_BuildSettingsSecretaryMenu_() {
 }
 
 function TL_Menu_BuildSettingsLanguageMenu_() {
+  if (TL_Menu_IsEnglishUi_()) {
+    return [
+      "Language",
+      "1. Hebrew for everything",
+      "2. Menu language",
+      "3. AI language",
+      "4. Back to previous menu",
+      "5. Back to main menu",
+      "0. Exit / reset",
+      "Send the number of the option you choose"
+    ].join("\n");
+  }
   return [
     "שפה",
     "1. עברית להכל",
@@ -486,6 +654,21 @@ function TL_Menu_BuildSettingsLanguageMenu_() {
 }
 
 function TL_Menu_BuildHelpMenu_() {
+  if (TL_Menu_IsEnglishUi_()) {
+    return [
+      "Help / what can I say",
+      "1. Remind me tomorrow at 08:00 to take medicine",
+      "2. Open a task to call Yaakov",
+      "3. Log that I took a pill at 22:00",
+      "4. Schedule a meeting with Ruti on Thursday",
+      "5. What's on my plate right now?",
+      "6. What is urgent right now?",
+      "7. Back to previous menu",
+      "8. Back to main menu",
+      "0. Exit / reset",
+      "Send the number of the option you choose"
+    ].join("\n");
+  }
   return [
     "עזרה / מה אפשר להגיד",
     "1. תזכירי לי מחר ב-08:00 לקחת תרופה",
@@ -502,6 +685,18 @@ function TL_Menu_BuildHelpMenu_() {
 }
 
 function TL_Menu_BuildVerticalsMenu_() {
+  if (TL_Menu_IsEnglishUi_()) {
+    return [
+      "Specialized tools",
+      "1. Therapist / clients",
+      "2. Session summaries",
+      "3. Periodic reports",
+      "4. Back to previous menu",
+      "5. Back to main menu",
+      "0. Exit / reset",
+      "Send the number of the option you choose"
+    ].join("\n");
+  }
   return [
     "כלים ייעודיים",
     "1. מטפלת / מטופלים",
@@ -518,13 +713,16 @@ function TL_Menu_BuildPlaceholderReply_(title, body) {
   return [
     String(title || "בקרוב"),
     String(body || "המסלול הזה עוד לא חובר במלואו."),
-    "חזור לתפריט הראשי עם \"תפריט\" או בחר אפשרות אחרת."
+    TL_Menu_T_("חזור לתפריט הראשי עם \"תפריט\" או בחר אפשרות אחרת.", "Go back to the main menu with \"menu\" or choose another option.")
   ].join("\n");
 }
 
 function TL_Menu_BuildOutOfScopeReply_() {
   return [
-    "מצטערת, כאן אני מטפלת רק בניהול, תזכורות, משימות, יומן, הודעות עבודה והחלטות לאישור.",
+    TL_Menu_T_(
+      "מצטערת, כאן אני מטפלת רק בניהול, תזכורות, משימות, יומן, הודעות עבודה והחלטות לאישור.",
+      "Sorry, here I only handle management, reminders, tasks, calendar, work messages, and approval decisions."
+    ),
     "",
     TL_Menu_BuildMenuReply_()
   ].join("\n");
@@ -1070,12 +1268,12 @@ function TL_Menu_BuildCaptureAck_(intent) {
   if (reply) return reply;
   if (intentName.indexOf("create_") === 0) {
     return [
-      "קיבלתי.",
-      "רשמתי את זה כפריט עבודה חדש.",
-      "אבנה מזה הצעה לאישור לפני ביצוע."
+      TL_Menu_T_("קיבלתי.", "Got it."),
+      TL_Menu_T_("רשמתי את זה כפריט עבודה חדש.", "I logged this as a new work item."),
+      TL_Menu_T_("אבנה מזה הצעה לאישור לפני ביצוע.", "I’ll turn this into a proposal for your approval before execution.")
     ].join("\n");
   }
-  return "קיבלתי.";
+  return TL_Menu_T_("קיבלתי.", "Got it.");
 }
 
 function TL_Menu_HasDecisionPacket_(waId) {
