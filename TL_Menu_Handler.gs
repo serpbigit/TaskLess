@@ -17,6 +17,7 @@ const TL_MENU = {
   TRIGGERS: ["תפריט","menu","/menu","עזרה","help","מה אפשר לעשות","what can i do","what can i say"],
   HELP_TRIGGERS: ["עזרה","help","מה אפשר לעשות","what can i do","what can i say"],
   COST_TRIGGERS: ["עלות","cost","ai cost","עלות ai","עלות ה-ai","עלות של ai"],
+  EXIT_TRIGGERS: ["יציאה","איפוס","בטל","cancel","exit","reset","stop"],
   STATE_KEY_PREFIX: "MENU_STATE_", // + wa_id
   PACKET_KEY_PREFIX: "MENU_PACKET_", // + wa_id
   MAX_PENDING_SUMMARY: 5
@@ -69,6 +70,11 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
   const rawText = String(ev.text || "").trim();
   const text = rawText.toLowerCase();
   if (!text) return TL_Menu_BuildMenuReply_();
+
+  if (TL_Menu_IsExitCommand_(rawText)) {
+    TL_Menu_ResetSession_(bossWaId);
+    return "איפסתי את הזרימה הנוכחית. חזרנו למצב נקי. אם תרצה, כתוב \"תפריט\" כדי להתחיל מחדש.";
+  }
 
   const existingPacket = TL_Menu_GetDecisionPacket_(bossWaId);
   const shouldTreatAsPacketReply = !!existingPacket && (
@@ -143,6 +149,7 @@ function TL_Menu_BuildMenuReply_() {
     "7. עזרה / מה אפשר להגיד",
     "8. כלים ייעודיים",
     "9. העשר איש קשר",
+    "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -156,6 +163,21 @@ function TL_Menu_GetState_(waId) {
   return value === "idle" ? TL_MENU_STATES.ROOT : value;
 }
 
+function TL_Menu_ClearState_(waId) {
+  try {
+    PropertiesService.getScriptProperties().deleteProperty(TL_MENU.STATE_KEY_PREFIX + String(waId || "").trim());
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function TL_Menu_ResetSession_(waId) {
+  TL_Menu_ClearDecisionPacket_(waId);
+  TL_Menu_ClearState_(waId);
+  return true;
+}
+
 function TL_Menu_IsNumericChoice_(text) {
   return !!TL_Menu_ParseChoice_(text);
 }
@@ -166,6 +188,15 @@ function TL_Menu_ParseChoice_(text) {
   const match = normalized.match(/^(\d{1,2})(?:\s|[).,:-]|$)/);
   if (match && match[1]) return String(match[1]).trim();
   return /^\d+$/.test(normalized) ? normalized : "";
+}
+
+function TL_Menu_IsExitCommand_(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (!normalized) return false;
+  if (TL_Menu_ParseChoice_(normalized) === "0") return true;
+  return TL_MENU.EXIT_TRIGGERS.some(function(trigger) {
+    return normalized === String(trigger || "").trim().toLowerCase();
+  });
 }
 
 function TL_Menu_IsCaptureState_(state) {
@@ -343,6 +374,7 @@ function TL_Menu_BuildRemindersMenu_() {
     "4. רשימת תזכורות",
     "5. חזרה לתפריט קודם",
     "6. חזרה לתפריט ראשי",
+    "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -357,6 +389,7 @@ function TL_Menu_BuildTaskMenu_() {
     "5. משימה עסקית",
     "6. חזרה לתפריט קודם",
     "7. חזרה לתפריט ראשי",
+    "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -370,6 +403,7 @@ function TL_Menu_BuildLogMenu_() {
     "4. הערה כללית",
     "5. חזרה לתפריט קודם",
     "6. חזרה לתפריט ראשי",
+    "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -383,6 +417,7 @@ function TL_Menu_BuildScheduleMenu_() {
     "4. מה יש לי ביומן",
     "5. חזרה לתפריט קודם",
     "6. חזרה לתפריט ראשי",
+    "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -401,6 +436,7 @@ function TL_Menu_BuildManageWorkMenu_() {
     "9. משימות חסומות",
     "10. חזרה לתפריט קודם",
     "11. חזרה לתפריט ראשי",
+    "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -416,6 +452,7 @@ function TL_Menu_BuildSettingsMenu_() {
     "6. התאמה אישית של התפריט",
     "7. חזרה לתפריט קודם",
     "8. חזרה לתפריט ראשי",
+    "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -430,6 +467,7 @@ function TL_Menu_BuildSettingsSecretaryMenu_() {
     "5. נא לא להפריע",
     "6. חזרה לתפריט קודם",
     "7. חזרה לתפריט ראשי",
+    "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -442,6 +480,7 @@ function TL_Menu_BuildSettingsLanguageMenu_() {
     "3. שפת AI",
     "4. חזרה לתפריט קודם",
     "5. חזרה לתפריט ראשי",
+    "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -457,6 +496,7 @@ function TL_Menu_BuildHelpMenu_() {
     "6. מה דחוף כרגע?",
     "7. חזרה לתפריט קודם",
     "8. חזרה לתפריט ראשי",
+    "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -469,6 +509,7 @@ function TL_Menu_BuildVerticalsMenu_() {
     "3. דוחות תקופתיים",
     "4. חזרה לתפריט קודם",
     "5. חזרה לתפריט ראשי",
+    "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ].join("\n");
 }
@@ -804,6 +845,7 @@ function TL_Menu_ShouldHandleText_(waId, text) {
   if (!normalized) return false;
   const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
   if (bossPhone && TLW_normalizePhone_(waId || "") !== bossPhone) return false;
+  if (TL_Menu_IsExitCommand_(normalized)) return true;
   if (TL_MENU.TRIGGERS.some(function(t) { return normalized === String(t || "").trim().toLowerCase(); })) return true;
   if (TL_MENU.COST_TRIGGERS.some(function(t) { return normalized === String(t || "").trim().toLowerCase(); })) return true;
   if (TL_Menu_IsAiCostQuery_(normalized)) return true;
