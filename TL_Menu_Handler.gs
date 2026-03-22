@@ -61,15 +61,21 @@ const TL_MENU_STATES = {
 };
 
 function TL_Menu_BossLanguage_() {
-  return String(TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "Hebrew").trim();
+  return TL_Language_BossUiLanguage_();
 }
 
 function TL_Menu_IsEnglishUi_() {
-  return /^english$/i.test(TL_Menu_BossLanguage_());
+  return !TL_Language_IsHebrew_(TL_Menu_BossLanguage_());
 }
 
 function TL_Menu_T_(hebrewText, englishText) {
-  return TL_Menu_IsEnglishUi_() ? String(englishText || hebrewText || "") : String(hebrewText || englishText || "");
+  return TL_Language_UiText_(String(hebrewText || englishText || ""), TL_Menu_BossLanguage_());
+}
+
+function TL_Menu_HebrewBlock_(lines) {
+  return TL_Menu_T_((lines || []).filter(function(line) {
+    return line !== null && line !== undefined && line !== "";
+  }).join("\n"));
 }
 
 function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
@@ -128,16 +134,16 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
       if (enrichCapture && enrichCapture.sent) return "";
       return enrichCapture && enrichCapture.reply
         ? enrichCapture.reply
-        : "לא הצלחתי להכין כרגע הצעת העשרה לאיש קשר. נסה לכתוב שם ברור וההערה שחשוב לשמור.";
+        : TL_Menu_T_("לא הצלחתי להכין כרגע הצעת העשרה לאיש קשר. נסה לכתוב שם ברור וההערה שחשוב לשמור.");
     }
     TL_Menu_AnnotateBossCapture_(inboxRow, state);
     TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
     const immediateCapture = TL_Menu_RunImmediateCapture_(inboxRow);
     if (immediateCapture && immediateCapture.sent) return "";
     return [
-      "קיבלתי.",
-      "אבנה מזה הצעת פעולה מסודרת לאישור שלך לפני ביצוע.",
-      "אם צריך, אחזור אליך עם כרטיס אישור או שאלת הבהרה."
+      TL_Menu_T_("קיבלתי."),
+      TL_Menu_T_("אבנה מזה הצעת פעולה מסודרת לאישור שלך לפני ביצוע."),
+      TL_Menu_T_("אם צריך, אחזור אליך עם כרטיס אישור או שאלת הבהרה.")
     ].join("\n");
   }
 
@@ -152,24 +158,7 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
 
 function TL_Menu_BuildMenuReply_() {
   const bossName = String(TLW_getSetting_("BOSS_NAME") || "").trim();
-  if (TL_Menu_IsEnglishUi_()) {
-    return [
-      bossName ? ("Hello " + bossName + ",") : "Hello,",
-      "What would you like to do?",
-      "1. Set a reminder",
-      "2. New task",
-      "3. Log something",
-      "4. Schedule something",
-      "5. Manage work",
-      "6. Settings",
-      "7. Help / what can I say",
-      "8. Specialized tools",
-      "9. Enrich a contact",
-      "0. Exit / reset",
-      "Send the number of the option you choose"
-    ].join("\n");
-  }
-  return [
+  return TL_Menu_HebrewBlock_([
     bossName ? ("שלום " + bossName + ",") : "שלום,",
     "מה תרצה לעשות?",
     "1. תזכיר לי",
@@ -183,7 +172,7 @@ function TL_Menu_BuildMenuReply_() {
     "9. העשר איש קשר",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_SetState_(waId, state) {
@@ -422,20 +411,7 @@ function TL_Menu_BuildMenuForState_(state) {
 }
 
 function TL_Menu_BuildRemindersMenu_() {
-  if (TL_Menu_IsEnglishUi_()) {
-    return [
-      "Reminders",
-      "1. In some time",
-      "2. On a date and time",
-      "3. Every day / every week",
-      "4. Reminder list",
-      "5. Back to previous menu",
-      "6. Back to main menu",
-      "0. Exit / reset",
-      "Send the number of the option you choose"
-    ].join("\n");
-  }
-  return [
+  return TL_Menu_HebrewBlock_([
     "תזכורות",
     "1. בעוד זמן מסוים",
     "2. בתאריך ושעה",
@@ -445,25 +421,11 @@ function TL_Menu_BuildRemindersMenu_() {
     "6. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildTaskMenu_() {
-  if (TL_Menu_IsEnglishUi_()) {
-    return [
-      "New task",
-      "1. Without a date",
-      "2. With a date",
-      "3. Dependent on something else",
-      "4. Personal task",
-      "5. Business task",
-      "6. Back to previous menu",
-      "7. Back to main menu",
-      "0. Exit / reset",
-      "Send the number of the option you choose"
-    ].join("\n");
-  }
-  return [
+  return TL_Menu_HebrewBlock_([
     "משימה חדשה",
     "1. בלי תאריך",
     "2. עם תאריך",
@@ -474,24 +436,11 @@ function TL_Menu_BuildTaskMenu_() {
     "7. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildLogMenu_() {
-  if (TL_Menu_IsEnglishUi_()) {
-    return [
-      "Log",
-      "1. Health / medication",
-      "2. Sports / habits",
-      "3. Personal journal",
-      "4. General note",
-      "5. Back to previous menu",
-      "6. Back to main menu",
-      "0. Exit / reset",
-      "Send the number of the option you choose"
-    ].join("\n");
-  }
-  return [
+  return TL_Menu_HebrewBlock_([
     "רישום",
     "1. בריאות / תרופות",
     "2. ספורט / הרגלים",
@@ -501,24 +450,11 @@ function TL_Menu_BuildLogMenu_() {
     "6. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildScheduleMenu_() {
-  if (TL_Menu_IsEnglishUi_()) {
-    return [
-      "Calendar and scheduling",
-      "1. Business meeting",
-      "2. Family event",
-      "3. Timed reminder",
-      "4. What's on my calendar",
-      "5. Back to previous menu",
-      "6. Back to main menu",
-      "0. Exit / reset",
-      "Send the number of the option you choose"
-    ].join("\n");
-  }
-  return [
+  return TL_Menu_HebrewBlock_([
     "יומן ותיאום",
     "1. פגישה עסקית",
     "2. אירוע משפחתי",
@@ -528,29 +464,11 @@ function TL_Menu_BuildScheduleMenu_() {
     "6. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildManageWorkMenu_() {
-  if (TL_Menu_IsEnglishUi_()) {
-    return [
-      "Manage work",
-      "1. What's on my plate right now",
-      "2. What needs attention",
-      "3. Awaiting approvals",
-      "4. Suggest next steps",
-      "5. Draft replies",
-      "6. Waiting on others",
-      "7. Follow-ups",
-      "8. Open tasks",
-      "9. Blocked tasks",
-      "10. Back to previous menu",
-      "11. Back to main menu",
-      "0. Exit / reset",
-      "Send the number of the option you choose"
-    ].join("\n");
-  }
-  return [
+  return TL_Menu_HebrewBlock_([
     "ניהול העבודה",
     "1. מה על הצלחת שלי עכשיו",
     "2. מה צריך תשומת לב",
@@ -565,26 +483,11 @@ function TL_Menu_BuildManageWorkMenu_() {
     "11. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildSettingsMenu_() {
-  if (TL_Menu_IsEnglishUi_()) {
-    return [
-      "Settings",
-      "1. Secretary settings",
-      "2. Update cadence",
-      "3. Decision request cadence",
-      "4. Decision batch size",
-      "5. Language",
-      "6. Menu customization",
-      "7. Back to previous menu",
-      "8. Back to main menu",
-      "0. Exit / reset",
-      "Send the number of the option you choose"
-    ].join("\n");
-  }
-  return [
+  return TL_Menu_HebrewBlock_([
     "הגדרות",
     "1. הגדרות המזכירה",
     "2. תדירות עדכונים",
@@ -596,25 +499,11 @@ function TL_Menu_BuildSettingsMenu_() {
     "8. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildSettingsSecretaryMenu_() {
-  if (TL_Menu_IsEnglishUi_()) {
-    return [
-      "Secretary settings",
-      "1. Turn urgent-only on / off",
-      "2. Intervention level",
-      "3. Urgent always first",
-      "4. Include FYI in updates",
-      "5. Do not disturb",
-      "6. Back to previous menu",
-      "7. Back to main menu",
-      "0. Exit / reset",
-      "Send the number of the option you choose"
-    ].join("\n");
-  }
-  return [
+  return TL_Menu_HebrewBlock_([
     "הגדרות המזכירה",
     "1. הפעל / כבה דחוף בלבד",
     "2. רמת התערבות",
@@ -625,23 +514,11 @@ function TL_Menu_BuildSettingsSecretaryMenu_() {
     "7. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildSettingsLanguageMenu_() {
-  if (TL_Menu_IsEnglishUi_()) {
-    return [
-      "Language",
-      "1. Hebrew for everything",
-      "2. Menu language",
-      "3. AI language",
-      "4. Back to previous menu",
-      "5. Back to main menu",
-      "0. Exit / reset",
-      "Send the number of the option you choose"
-    ].join("\n");
-  }
-  return [
+  return TL_Menu_HebrewBlock_([
     "שפה",
     "1. עברית להכל",
     "2. שפת תפריט",
@@ -650,26 +527,11 @@ function TL_Menu_BuildSettingsLanguageMenu_() {
     "5. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildHelpMenu_() {
-  if (TL_Menu_IsEnglishUi_()) {
-    return [
-      "Help / what can I say",
-      "1. Remind me tomorrow at 08:00 to take medicine",
-      "2. Open a task to call Yaakov",
-      "3. Log that I took a pill at 22:00",
-      "4. Schedule a meeting with Ruti on Thursday",
-      "5. What's on my plate right now?",
-      "6. What is urgent right now?",
-      "7. Back to previous menu",
-      "8. Back to main menu",
-      "0. Exit / reset",
-      "Send the number of the option you choose"
-    ].join("\n");
-  }
-  return [
+  return TL_Menu_HebrewBlock_([
     "עזרה / מה אפשר להגיד",
     "1. תזכירי לי מחר ב-08:00 לקחת תרופה",
     "2. תפתחי לי משימה להתקשר ליעקב",
@@ -681,23 +543,11 @@ function TL_Menu_BuildHelpMenu_() {
     "8. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildVerticalsMenu_() {
-  if (TL_Menu_IsEnglishUi_()) {
-    return [
-      "Specialized tools",
-      "1. Therapist / clients",
-      "2. Session summaries",
-      "3. Periodic reports",
-      "4. Back to previous menu",
-      "5. Back to main menu",
-      "0. Exit / reset",
-      "Send the number of the option you choose"
-    ].join("\n");
-  }
-  return [
+  return TL_Menu_HebrewBlock_([
     "כלים ייעודיים",
     "1. מטפלת / מטופלים",
     "2. סיכומי מפגשים",
@@ -706,7 +556,7 @@ function TL_Menu_BuildVerticalsMenu_() {
     "5. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildPlaceholderReply_(title, body) {
@@ -776,7 +626,7 @@ function TL_Menu_RunImmediateContactEnrichmentCapture_(bossWaId, inboxRow) {
 
     const captureText = String(TL_Capture_getInputText_(loc.values) || "").trim();
     if (!captureText) {
-      return { sent: false, reply: "לא קיבלתי טקסט ברור להעשרת איש קשר. נסה לכתוב שם והקשר שחשוב לזכור." };
+      return { sent: false, reply: TL_Menu_T_("לא קיבלתי טקסט ברור להעשרת איש קשר. נסה לכתוב שם והקשר שחשוב לזכור.") };
     }
 
     const extraction = typeof TL_AI_ExtractContactEnrichment_ === "function"
@@ -796,17 +646,17 @@ function TL_Menu_RunImmediateContactEnrichmentCapture_(bossWaId, inboxRow) {
         return {
           sent: false,
           reply: [
-            "מצאתי כמה אנשי קשר אפשריים, אבל אני צריכה שתדייק לפני שאשמור:",
+            TL_Menu_T_("מצאתי כמה אנשי קשר אפשריים, אבל אני צריכה שתדייק לפני שאשמור:"),
             candidates.slice(0, 5).map(function(item, idx) {
               return String(idx + 1) + ". " + TL_Menu_DescribeContactCandidate_(item);
             }).join("\n"),
-            "שלח שוב עם שם מלא יותר, טלפון או אימייל."
+            TL_Menu_T_("שלח שוב עם שם מלא יותר, טלפון או אימייל.")
           ].join("\n")
         };
       }
       return {
         sent: false,
-        reply: "לא מצאתי איש קשר ברור לשייך אליו את ההעשרה. שלח שוב עם שם ברור, טלפון או אימייל."
+        reply: TL_Menu_T_("לא מצאתי איש קשר ברור לשייך אליו את ההעשרה. שלח שוב עם שם ברור, טלפון או אימייל.")
       };
     }
 
@@ -817,7 +667,7 @@ function TL_Menu_RunImmediateContactEnrichmentCapture_(bossWaId, inboxRow) {
     const childRow = TL_Menu_BuildContactEnrichmentProposalRow_(loc.values, rowNumber, item, cfg, cfg.now || new Date());
     const childResult = TL_Capture_upsertChildRow_(childRow);
     if (!childResult || !childResult.rowNumber) {
-      return { sent: false, reply: "לא הצלחתי ליצור כרגע כרטיס אישור להעשרת איש קשר." };
+      return { sent: false, reply: TL_Menu_T_("לא הצלחתי ליצור כרגע כרטיס אישור להעשרת איש קשר.") };
     }
 
     const packetItem = TL_Capture_buildPacketItem_(childRow, childResult.rowNumber);
@@ -842,7 +692,7 @@ function TL_Menu_RunImmediateContactEnrichmentCapture_(bossWaId, inboxRow) {
     } catch (e) {}
     return {
       sent: false,
-      reply: "היתה תקלה בהכנת העשרת איש הקשר. נסה שוב בעוד רגע."
+      reply: TL_Menu_T_("היתה תקלה בהכנת העשרת איש הקשר. נסה שוב בעוד רגע.")
     };
   }
 }
@@ -854,9 +704,9 @@ function TL_Menu_BuildContactEnrichmentItem_(captureText, extraction, contact) {
   const contactPhone = String(contact && (contact.phone1 || contact.phone2 || "") || "").trim();
   const summary = String((extraction && extraction.summary) || "").trim() || (contactName ? (contactName + ": " + noteText) : noteText);
   const proposal = String((extraction && extraction.proposal) || "").trim() || (
-    "להוסיף לאיש הקשר " + (contactName || contact.contactId) +
+    TL_Menu_T_("להוסיף לאיש הקשר ") + (contactName || contact.contactId) +
     (contactPhone ? (" (" + contactPhone + ")") : "") +
-    " את ההקשר: " + noteText
+    TL_Menu_T_(" את ההקשר: ") + noteText
   );
   return {
     kind: "contact_enrichment",
@@ -880,10 +730,10 @@ function TL_Menu_BuildContactEnrichmentSummary_(contact, noteText) {
   const phone = String(contact && (contact.phone1 || contact.phone2 || "") || "").trim();
   const email = String(contact && contact.email || "").trim();
   return [
-    contactName ? ("איש קשר: " + contactName) : "",
-    phone ? ("טלפון: " + phone) : "",
-    email ? ("אימייל: " + email) : "",
-    "הקשר לשמירה: " + String(noteText || "").trim()
+    contactName ? (TL_Menu_T_("איש קשר: ") + contactName) : "",
+    phone ? (TL_Menu_T_("טלפון: ") + phone) : "",
+    email ? (TL_Menu_T_("אימייל: ") + email) : "",
+    TL_Menu_T_("הקשר לשמירה: ") + String(noteText || "").trim()
   ].filter(Boolean).join(" | ");
 }
 
@@ -1403,10 +1253,10 @@ function TL_Menu_HandleDecisionPacketRootReply_(waId, packet, choice) {
     const approved = TL_Menu_ApprovePacketItems_(packet.items);
     TL_Menu_ClearDecisionPacket_(waId);
     return [
-      "אישרתי את כל הפריטים בחבילה.",
-      "סה\"כ אושרו: " + approved.approved,
-      approved.failed ? ("נכשלו: " + approved.failed) : "",
-      "המערכת תמשיך לעיבוד/שליחה לפי הזרימה הרגילה."
+      TL_Menu_T_("אישרתי את כל הפריטים בחבילה."),
+      TL_Menu_T_("סה\"כ אושרו: ") + approved.approved,
+      approved.failed ? (TL_Menu_T_("נכשלו: ") + approved.failed) : "",
+      TL_Menu_T_("המערכת תמשיך לעיבוד/שליחה לפי הזרימה הרגילה.")
     ].filter(Boolean).join("\n");
   }
   if (choice === "2") {
@@ -1427,7 +1277,7 @@ function TL_Menu_HandleDecisionPacketRootReply_(waId, packet, choice) {
   }
   if (choice === "5") {
     TL_Menu_ClearDecisionPacket_(waId);
-    return "בסדר. לא בוצע דבר כרגע.";
+    return TL_Menu_T_("בסדר. לא בוצע דבר כרגע.");
   }
   if (choice === "6") {
     TL_Menu_ClearDecisionPacket_(waId);
@@ -1441,19 +1291,19 @@ function TL_Menu_HandleDecisionPacketFewReply_(waId, packet, choice) {
     const subset = packet.items.slice(0, Math.min(3, packet.items.length));
     const approved = TL_Menu_ApprovePacketItems_(subset);
     TL_Menu_ClearDecisionPacket_(waId);
-    return "אישרתי חלק מהחבילה. אושרו " + approved.approved + " פריטים ראשונים.";
+    return TL_Menu_T_("אישרתי חלק מהחבילה. אושרו ") + approved.approved + TL_Menu_T_(" פריטים ראשונים.");
   }
   if (choice === "2") {
     const urgentOnly = packet.items.filter(function(item) { return item.isUrgent; });
     const approved = TL_Menu_ApprovePacketItems_(urgentOnly);
     TL_Menu_ClearDecisionPacket_(waId);
-    return "אישרתי רק את הפריטים הדחופים. אושרו " + approved.approved + " פריטים.";
+    return TL_Menu_T_("אישרתי רק את הפריטים הדחופים. אושרו ") + approved.approved + TL_Menu_T_(" פריטים.");
   }
   if (choice === "3") {
     const topOne = packet.items.slice(0, 1);
     const approved = TL_Menu_ApprovePacketItems_(topOne);
     TL_Menu_ClearDecisionPacket_(waId);
-    return "אישרתי רק את הפריט הראשון. אושרו " + approved.approved + " פריטים.";
+    return TL_Menu_T_("אישרתי רק את הפריט הראשון. אושרו ") + approved.approved + TL_Menu_T_(" פריטים.");
   }
   if (choice === "4") {
     packet.stage = "root";
@@ -1477,9 +1327,9 @@ function TL_Menu_HandleDecisionPacketSmartReply_(waId, packet, choice) {
     const remaining = Math.max(packet.items.length - approved.approved, 0);
     TL_Menu_ClearDecisionPacket_(waId);
     return [
-      "אישרתי את הדחופים/החשובים בלבד.",
-      "אושרו: " + approved.approved,
-      "נשארו ללא אישור: " + remaining
+      TL_Menu_T_("אישרתי את הדחופים/החשובים בלבד."),
+      TL_Menu_T_("אושרו: ") + approved.approved,
+      TL_Menu_T_("נשארו ללא אישור: ") + remaining
     ].join("\n");
   }
   if (choice === "2") {
@@ -1489,7 +1339,7 @@ function TL_Menu_HandleDecisionPacketSmartReply_(waId, packet, choice) {
     if (!exceptions.length) {
       packet.stage = "root";
       TL_Menu_SetDecisionPacket_(waId, packet);
-      return "אין כרגע חריגים. כל הפריטים נראים דחופים/חשובים.";
+      return TL_Menu_T_("אין כרגע חריגים. כל הפריטים נראים דחופים/חשובים.");
     }
     packet.stage = "one_by_one";
     packet.cursor = 0;
@@ -1514,7 +1364,7 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
   const current = packet.items[packet.cursor || 0];
   if (!current) {
     TL_Menu_ClearDecisionPacket_(waId);
-    return "סיימנו את הסקירה אחד-אחד.";
+    return TL_Menu_T_("סיימנו את הסקירה אחד-אחד.");
   }
 
   if (TL_Menu_ItemNeedsRecipientResolution_(current)) {
@@ -1529,7 +1379,7 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
       TL_Menu_ClearDecisionPacket_(waId);
       return [
         receiptText,
-        "אין כרגע עוד פריטים שממתינים להחלטה."
+        TL_Menu_T_("אין כרגע עוד פריטים שממתינים להחלטה.")
       ].filter(Boolean).join("\n\n");
     }
     TL_Menu_SetDecisionPacket_(waId, packet);
@@ -1545,7 +1395,7 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
     packet.cursor = Number(packet.cursor || 0) + 1;
   } else if (choice === "4") {
     TL_Menu_ClearDecisionPacket_(waId);
-    return "עצרתי את הסקירה אחד-אחד.";
+    return TL_Menu_T_("עצרתי את הסקירה אחד-אחד.");
   } else if (choice === "5") {
     TL_Menu_ClearDecisionPacket_(waId);
     return TL_Menu_BuildMenuReply_();
@@ -1555,7 +1405,7 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
 
   if (!packet.items[packet.cursor || 0]) {
     TL_Menu_ClearDecisionPacket_(waId);
-    return "סיימנו את הסקירה. אין עוד פריטים בחבילה.";
+    return TL_Menu_T_("סיימנו את הסקירה. אין עוד פריטים בחבילה.");
   }
 
   TL_Menu_SetDecisionPacket_(waId, packet);
@@ -1566,7 +1416,7 @@ function TL_Menu_HandleDecisionPacketRecipientReply_(waId, packet, choice) {
   const current = packet.items[packet.cursor || 0];
   if (!current) {
     TL_Menu_ClearDecisionPacket_(waId);
-    return "אין כרגע פריט פתוח.";
+    return TL_Menu_T_("אין כרגע פריט פתוח.");
   }
 
   const resolutionStatus = String(current.resolutionStatus || "").trim().toLowerCase();
@@ -1577,7 +1427,7 @@ function TL_Menu_HandleDecisionPacketRecipientReply_(waId, packet, choice) {
       packet.cursor = Number(packet.cursor || 0) + 1;
     } else if (choice === "2") {
       TL_Menu_ClearDecisionPacket_(waId);
-      return "עצרתי את הסקירה אחד-אחד.";
+      return TL_Menu_T_("עצרתי את הסקירה אחד-אחד.");
     } else if (choice === "3") {
       TL_Menu_ClearDecisionPacket_(waId);
       return TL_Menu_BuildMenuReply_();
@@ -1590,13 +1440,13 @@ function TL_Menu_HandleDecisionPacketRecipientReply_(waId, packet, choice) {
       const applied = TL_Menu_ApplyPacketRecipientChoice_(current, candidates[selectedIndex]);
       packet.items[packet.cursor || 0] = applied;
       TL_Menu_SetDecisionPacket_(waId, packet);
-      return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, "בחרתי את איש הקשר המתאים.");
+      return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("בחרתי את איש הקשר המתאים."));
     }
     if (choice === "8") {
       packet.cursor = Number(packet.cursor || 0) + 1;
     } else if (choice === "9") {
       TL_Menu_ClearDecisionPacket_(waId);
-      return "עצרתי את הסקירה אחד-אחד.";
+      return TL_Menu_T_("עצרתי את הסקירה אחד-אחד.");
     } else {
       return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
     }
@@ -1604,7 +1454,7 @@ function TL_Menu_HandleDecisionPacketRecipientReply_(waId, packet, choice) {
 
   if (!packet.items[packet.cursor || 0]) {
     TL_Menu_ClearDecisionPacket_(waId);
-    return "סיימנו את הסקירה. אין עוד פריטים בחבילה.";
+    return TL_Menu_T_("סיימנו את הסקירה. אין עוד פריטים בחבילה.");
   }
 
   TL_Menu_SetDecisionPacket_(waId, packet);
@@ -1615,7 +1465,7 @@ function TL_Menu_HandleDecisionPacketEditReply_(waId, packet, text) {
   const current = packet.items[packet.cursor || 0];
   if (!current) {
     TL_Menu_ClearDecisionPacket_(waId);
-    return "אין כרגע פריט לעריכה.";
+    return TL_Menu_T_("אין כרגע פריט לעריכה.");
   }
 
   const choice = String(text || "").trim();
@@ -1623,7 +1473,7 @@ function TL_Menu_HandleDecisionPacketEditReply_(waId, packet, text) {
   if (choice === "1") {
     packet.stage = "one_by_one";
     TL_Menu_SetDecisionPacket_(waId, packet);
-    return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, "ביטלתי את העריכה.");
+    return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("ביטלתי את העריכה."));
   }
   if (choice === "2") {
     TL_Menu_ClearDecisionPacket_(waId);
@@ -1635,7 +1485,7 @@ function TL_Menu_HandleDecisionPacketEditReply_(waId, packet, text) {
   current.proposal = revised.proposal;
   packet.stage = "one_by_one";
   TL_Menu_SetDecisionPacket_(waId, packet);
-  return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, "עדכנתי את הנוסח. אשר אם זה נכון, או ערוך שוב.");
+  return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדכנתי את הנוסח. אשר אם זה נכון, או ערוך שוב."));
 }
 
 function TL_Menu_ApprovePacketItems_(items) {
@@ -1730,7 +1580,7 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
         return {
           ok: true,
           actionKind: "close_no_send",
-          receiptText: "סגרתי את ההודעה ללא שליחת תגובה."
+          receiptText: TL_Menu_T_("סגרתי את ההודעה ללא שליחת תגובה.")
         };
       }
       const merged = TL_Email_mergePayload_(payload, {
@@ -1767,13 +1617,13 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
         return {
           ok: true,
           actionKind: "send_email",
-          receiptText: "האימייל נשלח אל " + String(emailSendNow.to || "").trim() + "."
+          receiptText: TL_Menu_T_("האימייל נשלח אל ") + String(emailSendNow.to || "").trim() + "."
         };
       }
       return {
         ok: false,
         actionKind: "send_email",
-        receiptText: "אישרתי את האימייל, אבל השליחה נכשלה."
+        receiptText: TL_Menu_T_("אישרתי את האימייל, אבל השליחה נכשלה.")
       };
     }
 
@@ -1803,7 +1653,7 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
           kind: captureKind,
           title: captureTitle,
           dueLabel: dueLabel,
-          receiptText: "הודעת ה-WhatsApp נשלחה אל " + String(waSendNow.to || "").trim() + "."
+          receiptText: TL_Menu_T_("הודעת ה-WhatsApp נשלחה אל ") + String(waSendNow.to || "").trim() + "."
         };
       }
       return {
@@ -1811,14 +1661,14 @@ function TL_Menu_ApproveDecisionRow_(rowNumber) {
         kind: captureKind,
         title: captureTitle,
         dueLabel: dueLabel,
-        receiptText: "אישרתי את הודעת ה-WhatsApp, אבל השליחה נכשלה."
+        receiptText: TL_Menu_T_("אישרתי את הודעת ה-WhatsApp, אבל השליחה נכשלה.")
       };
     }
     if (!approvalRequired && approvalStatus === "approved") {
       return {
         ok: true,
         actionKind: "already_approved",
-        receiptText: "הפריט כבר היה מאושר."
+        receiptText: TL_Menu_T_("הפריט כבר היה מאושר.")
       };
     }
     return {
@@ -2103,7 +1953,7 @@ function TL_Menu_ReviseDecisionRow_(rowNumber, revisedText) {
 }
 
 function TL_Menu_BuildDecisionPacketReply_(packet) {
-  return [
+  return TL_Menu_HebrewBlock_([
     TL_Menu_BuildDecisionPacketHeader_(packet),
     "1. כן, אשר הכל",
     "2. רק חלק",
@@ -2112,11 +1962,11 @@ function TL_Menu_BuildDecisionPacketReply_(packet) {
     "5. דחה לעכשיו",
     "6. חזרה לתפריט ראשי",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildDecisionPacketFewReply_(packet) {
-  return [
+  return TL_Menu_HebrewBlock_([
     "אישור חלקי",
     "1. אשר את 3 הראשונים",
     "2. אשר רק דחופים",
@@ -2124,13 +1974,13 @@ function TL_Menu_BuildDecisionPacketFewReply_(packet) {
     "4. חזרה לתפריט קודם",
     "5. חזרה לתפריט ראשי",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildDecisionPacketSmartReply_(packet) {
   const urgentCount = packet.items.filter(function(item) { return item.isUrgent || item.isHigh; }).length;
   const exceptionCount = Math.max(packet.items.length - urgentCount, 0);
-  return [
+  return TL_Menu_HebrewBlock_([
     "חלוקה חכמה",
     "דחופים/חשובים: " + urgentCount,
     "חריגים: " + exceptionCount,
@@ -2139,7 +1989,7 @@ function TL_Menu_BuildDecisionPacketSmartReply_(packet) {
     "3. חזרה לתפריט קודם",
     "4. חזרה לתפריט ראשי",
     "שלח את מספר האפשרות שתבחר"
-  ].join("\n");
+  ]);
 }
 
 function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
@@ -2167,24 +2017,24 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   else if (current.isHigh) meta.push("חשוב");
   const label = meta.length ? ("[" + meta.join(" · ") + "]") : "";
   const lines = [
-    "סקירה אחד-אחד " + index + "/" + total,
+    TL_Menu_T_("סקירה אחד-אחד ") + index + "/" + total,
     label ? label : "",
-    senderLabel ? ("מאת: " + senderLabel) : "",
-    channelLabel ? ("ערוץ: " + channelLabel) : "",
-    subjectLabel ? ("נושא: " + subjectLabel) : "",
-    rawSnippet ? ("קטע מההודעה:\n" + rawSnippet) : "",
+    senderLabel ? (TL_Menu_T_("מאת: ") + senderLabel) : "",
+    channelLabel ? (TL_Menu_T_("ערוץ: ") + channelLabel) : "",
+    subjectLabel ? (TL_Menu_T_("נושא: ") + subjectLabel) : "",
+    rawSnippet ? (TL_Menu_T_("קטע מההודעה:") + "\n" + rawSnippet) : "",
     "",
-    "הבנתי כך:",
-    isReminder ? ("הודעה: " + reminderMessage) : summary,
+    TL_Menu_T_("הבנתי כך:"),
+    isReminder ? (TL_Menu_T_("הודעה: ") + reminderMessage) : summary,
     proposalBody ? (actionSpec.proposalHeading + "\n" + proposalBody) : "",
-    isReminder && dueLabel ? ("זמן הפעלת תזכורת: " + dueLabel) : (isSchedule && dueLabel ? ("זמן האירוע: " + dueLabel) : (duePreview ? ("יעד: " + duePreview) : "")),
+    isReminder && dueLabel ? (TL_Menu_T_("זמן הפעלת תזכורת: ") + dueLabel) : (isSchedule && dueLabel ? (TL_Menu_T_("זמן האירוע: ") + dueLabel) : (duePreview ? (TL_Menu_T_("יעד: ") + duePreview) : "")),
     "",
     "1. " + actionSpec.primaryLabel,
     "2. " + actionSpec.editLabel,
-    "3. דלג",
-    "4. עצור",
-    "5. חזרה לתפריט ראשי",
-    "שלח את מספר האפשרות שתבחר"
+    "3. " + TL_Menu_T_("דלג"),
+    "4. " + TL_Menu_T_("עצור"),
+    "5. " + TL_Menu_T_("חזרה לתפריט ראשי"),
+    TL_Menu_T_("שלח את מספר האפשרות שתבחר")
   ];
   if (arguments.length > 1 && arguments[1]) {
     lines.unshift(String(arguments[1]));
@@ -2194,47 +2044,47 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
 
 function TL_Menu_BuildDecisionPacketRecipientReply_(packet, current, index, total, preface) {
   const channelLabel = TL_Menu_OutboundChannelLabel_(current);
-  const recipientQuery = String(current.recipientQuery || current.recipientName || "").trim() || "ללא שם";
+  const recipientQuery = String(current.recipientQuery || current.recipientName || "").trim() || TL_Menu_T_("ללא שם");
   const resolutionStatus = String(current.resolutionStatus || "").trim().toLowerCase();
   const lines = [
     preface ? String(preface) : "",
-    "סקירה אחד-אחד " + index + "/" + total
+    TL_Menu_T_("סקירה אחד-אחד ") + index + "/" + total
   ];
 
   if (resolutionStatus === "missing") {
     return lines.concat([
-      "לא מצאתי איש קשר ברור עבור " + channelLabel + " ל-" + recipientQuery + ".",
-      "1. דלג",
-      "2. עצור",
-      "3. חזרה לתפריט ראשי",
-      "שלח את מספר האפשרות שתבחר"
+      TL_Menu_T_("לא מצאתי איש קשר ברור עבור ") + channelLabel + " " + TL_Menu_T_("ל-") + recipientQuery + ".",
+      "1. " + TL_Menu_T_("דלג"),
+      "2. " + TL_Menu_T_("עצור"),
+      "3. " + TL_Menu_T_("חזרה לתפריט ראשי"),
+      TL_Menu_T_("שלח את מספר האפשרות שתבחר")
     ]).filter(Boolean).join("\n");
   }
 
   const candidates = Array.isArray(current.recipientCandidates) ? current.recipientCandidates : [];
   return lines.concat([
-    "לפני שאכין את ה-" + channelLabel + ", את מי התכוונת לומר?",
+    TL_Menu_T_("לפני שאכין את ה-") + channelLabel + ", " + TL_Menu_T_("את מי התכוונת לומר?"),
     candidates.slice(0, 5).map(function(candidate, idx) {
       return String(idx + 1) + ". " + TL_Menu_DescribeContactCandidate_(candidate);
     }).join("\n"),
-    "8. דלג",
-    "9. עצור",
-    "שלח את מספר איש הקשר."
+    "8. " + TL_Menu_T_("דלג"),
+    "9. " + TL_Menu_T_("עצור"),
+    TL_Menu_T_("שלח את מספר איש הקשר.")
   ]).filter(Boolean).join("\n");
 }
 
 function TL_Menu_BuildDecisionPacketEditReply_(packet) {
   const current = packet.items[packet.cursor || 0];
-  if (!current) return "אין כרגע פריט לעריכה.";
+  if (!current) return TL_Menu_T_("אין כרגע פריט לעריכה.");
   const summary = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 220);
   return [
-    "עריכת פריט",
-    "הנוסח הנוכחי:",
+    TL_Menu_T_("עריכת פריט"),
+    TL_Menu_T_("הנוסח הנוכחי:"),
     summary,
     "",
-    "כתוב או אמור עכשיו את הנוסח החדש שתרצה שאציע לאישור.",
-    "1. ביטול עריכה",
-    "2. חזרה לתפריט ראשי"
+    TL_Menu_T_("כתוב או אמור עכשיו את הנוסח החדש שתרצה שאציע לאישור."),
+    "1. " + TL_Menu_T_("ביטול עריכה"),
+    "2. " + TL_Menu_T_("חזרה לתפריט ראשי")
   ].join("\n");
 }
 
@@ -2243,14 +2093,14 @@ function TL_Menu_BuildDecisionPacketHeader_(packet) {
   const urgent = packet.items.filter(function(item) { return item.isUrgent; }).length;
   if (total === 1) {
     return [
-      "יש פריט אחד שמחכה לאישור שלך.",
-      "אפשר לאשר, לערוך, לדלג או לחזור לתפריט הראשי."
+      TL_Menu_T_("יש פריט אחד שמחכה לאישור שלך."),
+      TL_Menu_T_("אפשר לאשר, לערוך, לדלג או לחזור לתפריט הראשי.")
     ].join("\n");
   }
   return [
-    "האם לאשר את הפריטים הבאים?",
-    "סה\"כ פריטים: " + total,
-    "דחופים: " + urgent
+    TL_Menu_T_("האם לאשר את הפריטים הבאים?"),
+    TL_Menu_T_("סה\"כ פריטים: ") + total,
+    TL_Menu_T_("דחופים: ") + urgent
   ].join("\n");
 }
 
@@ -2305,13 +2155,13 @@ function TL_Menu_FormatRowSummary_(item) {
   const due = TL_Orchestrator_value_(values, "task_due");
   const rootId = TL_Orchestrator_value_(values, "root_id");
   const prefix = status ? ("[" + status + "] ") : "";
-  const duePart = due ? (" | יעד: " + due) : "";
+  const duePart = due ? (" | " + TL_Menu_T_("יעד: ") + due) : "";
   return "- " + prefix + preview + duePart + (rootId ? (" (root " + rootId + ")") : "");
 }
 
 function TL_Menu_BuildSummaryBlock_(title, rows, emptyText) {
-  if (!rows || !rows.length) return String(emptyText || "אין כרגע פריטים.");
-  return [title].concat(rows.map(TL_Menu_FormatRowSummary_)).join("\n");
+  if (!rows || !rows.length) return TL_Menu_T_(String(emptyText || "אין כרגע פריטים."));
+  return [TL_Menu_T_(String(title || ""))].concat(rows.map(TL_Menu_FormatRowSummary_)).join("\n");
 }
 
 function TL_Menu_BuildPendingSummary_() {
@@ -2396,14 +2246,14 @@ function TL_Menu_attachApprovalPacketHint_(waId, text, mode) {
   }
   const livePacket = packet || TL_Menu_GetDecisionPacket_(waId);
   const reviewIntro = items.length === 1
-    ? "פותח עכשיו את הפריט היחיד שממתין להחלטה."
-    : ("פותח עכשיו פריט 1 מתוך " + items.length + ".");
+    ? TL_Menu_T_("פותח עכשיו את הפריט היחיד שממתין להחלטה.")
+    : (TL_Menu_T_("פותח עכשיו פריט 1 מתוך ") + items.length + ".");
   const digest = TL_Menu_BuildApprovalDigest_(items, mode, base);
   return [
     digest,
     "",
     reviewIntro,
-    livePacket ? TL_Menu_BuildDecisionPacketOneByOneReply_(livePacket) : "לא הצלחתי לפתוח את הפריט לסקירה."
+    livePacket ? TL_Menu_BuildDecisionPacketOneByOneReply_(livePacket) : TL_Menu_T_("לא הצלחתי לפתוח את הפריט לסקירה.")
   ].join("\n\n");
 }
 
@@ -2541,20 +2391,20 @@ function TL_Menu_BuildPacketSnippet_(channel, messageType, textValue) {
 function TL_Menu_BuildApprovalDigest_(items, mode, fallbackText) {
   const list = Array.isArray(items) ? items : [];
   const total = list.length;
-  if (!total) return String(fallbackText || "").trim();
+  if (!total) return TL_Menu_T_(String(fallbackText || "").trim());
   const emailCount = list.filter(function(item) { return item.channel === "email"; }).length;
   const whatsappCount = list.filter(function(item) { return item.channel === "whatsapp"; }).length;
   const urgentCount = list.filter(function(item) { return !!item.isUrgent || !!item.isHigh; }).length;
   const sendableCount = list.filter(function(item) { return item.actionKind !== "close_no_send"; }).length;
   const closableCount = list.filter(function(item) { return item.actionKind === "close_no_send"; }).length;
-  const title = mode === "drafts" ? "טיוטות לבדיקה" : "ממתין להחלטתך";
+  const title = mode === "drafts" ? TL_Menu_T_("טיוטות לבדיקה") : TL_Menu_T_("ממתין להחלטתך");
   return [
     title,
-    "פתוחים עכשיו: " + total,
-    "דורשים החלטה: " + total + (urgentCount ? (" | דחוף/חשוב: " + urgentCount) : ""),
-    sendableCount ? ("מוכנים לשליחה/ביצוע: " + sendableCount) : "",
-    closableCount ? ("מוכנים לסגירה: " + closableCount) : "",
-    "ערוצים: email " + emailCount + (whatsappCount ? (" | whatsapp " + whatsappCount) : "")
+    TL_Menu_T_("פתוחים עכשיו: ") + total,
+    TL_Menu_T_("דורשים החלטה: ") + total + (urgentCount ? (" | " + TL_Menu_T_("דחוף/חשוב: ") + urgentCount) : ""),
+    sendableCount ? (TL_Menu_T_("מוכנים לשליחה/ביצוע: ") + sendableCount) : "",
+    closableCount ? (TL_Menu_T_("מוכנים לסגירה: ") + closableCount) : "",
+    TL_Menu_T_("ערוצים: ") + "email " + emailCount + (whatsappCount ? (" | whatsapp " + whatsappCount) : "")
   ].filter(Boolean).join("\n");
 }
 
@@ -2565,80 +2415,80 @@ function TL_Menu_GetDecisionPacketActionSpec_(item) {
   if (captureKind === "whatsapp") {
     return {
       actionKind: "send_whatsapp",
-      primaryLabel: "אשר ושלח ב-WhatsApp",
-      editLabel: "ערוך את ההודעה",
-      proposalHeading: "טיוטת ההודעה לאישור:"
+      primaryLabel: TL_Menu_T_("אשר ושלח ב-WhatsApp"),
+      editLabel: TL_Menu_T_("ערוך את ההודעה"),
+      proposalHeading: TL_Menu_T_("טיוטת ההודעה לאישור:")
     };
   }
   if (captureKind === "email") {
     return {
       actionKind: "send_email",
-      primaryLabel: "אשר ושלח את האימייל",
-      editLabel: "ערוך את האימייל",
-      proposalHeading: "טיוטת האימייל לאישור:"
+      primaryLabel: TL_Menu_T_("אשר ושלח את האימייל"),
+      editLabel: TL_Menu_T_("ערוך את האימייל"),
+      proposalHeading: TL_Menu_T_("טיוטת האימייל לאישור:")
     };
   }
   if (captureKind === "schedule") {
     return {
       actionKind: "approve_schedule",
-      primaryLabel: "אשר את האירוע",
-      editLabel: "ערוך את פרטי האירוע",
-      proposalHeading: "פרטי האירוע לאישור:"
+      primaryLabel: TL_Menu_T_("אשר את האירוע"),
+      editLabel: TL_Menu_T_("ערוך את פרטי האירוע"),
+      proposalHeading: TL_Menu_T_("פרטי האירוע לאישור:")
     };
   }
   if (captureKind === "reminder") {
     return {
       actionKind: "approve_reminder",
-      primaryLabel: "אשר את התזכורת",
-      editLabel: "ערוך את התזכורת",
-      proposalHeading: "פרטי התזכורת לאישור:"
+      primaryLabel: TL_Menu_T_("אשר את התזכורת"),
+      editLabel: TL_Menu_T_("ערוך את התזכורת"),
+      proposalHeading: TL_Menu_T_("פרטי התזכורת לאישור:")
     };
   }
   if (captureKind === "task") {
     return {
       actionKind: "approve_task",
-      primaryLabel: "אשר את המשימה",
-      editLabel: "ערוך את המשימה",
-      proposalHeading: "פרטי המשימה לאישור:"
+      primaryLabel: TL_Menu_T_("אשר את המשימה"),
+      editLabel: TL_Menu_T_("ערוך את המשימה"),
+      proposalHeading: TL_Menu_T_("פרטי המשימה לאישור:")
     };
   }
   if (captureKind === "journal") {
     return {
       actionKind: "save_journal",
-      primaryLabel: "שמור את הרישום",
-      editLabel: "ערוך את הרישום",
-      proposalHeading: "הרישום המוצע:"
+      primaryLabel: TL_Menu_T_("שמור את הרישום"),
+      editLabel: TL_Menu_T_("ערוך את הרישום"),
+      proposalHeading: TL_Menu_T_("הרישום המוצע:")
     };
   }
   if (captureKind === "contact_enrichment") {
     return {
       actionKind: "save_contact_enrichment",
-      primaryLabel: "שמור את הערת הקשר",
-      editLabel: "ערוך את הערת הקשר",
-      proposalHeading: "הערת הקשר לאישור:"
+      primaryLabel: TL_Menu_T_("שמור את הערת הקשר"),
+      editLabel: TL_Menu_T_("ערוך את הערת הקשר"),
+      proposalHeading: TL_Menu_T_("הערת הקשר לאישור:")
     };
   }
   if (channel === "email") {
     if (suggested === "ignore" || suggested === "wait") {
       return {
         actionKind: "close_no_send",
-        primaryLabel: "סגור בלי לשלוח",
-        editLabel: "ערוך את ההחלטה/הנוסח",
-        proposalHeading: "הפעולה המוצעת:"
+        primaryLabel: TL_Menu_T_("סגור בלי לשלוח"),
+        editLabel: TL_Menu_T_("ערוך את ההחלטה/הנוסח"),
+        proposalHeading: TL_Menu_T_("הפעולה המוצעת:")
       };
     }
     return {
       actionKind: "send_email",
-      primaryLabel: "אשר את הטיוטה לשליחה",
-      editLabel: "ערוך את הטיוטה",
-      proposalHeading: "הטיוטה המלאה לאישור:"
+      primaryLabel: TL_Menu_T_("אשר את הטיוטה לשליחה"),
+      editLabel: TL_Menu_T_("ערוך את הטיוטה"),
+      proposalHeading: TL_Menu_T_("הטיוטה המלאה לאישור:")
     };
   }
   return {
     actionKind: "generic_approve",
-    primaryLabel: "אשר את הפעולה",
-    editLabel: "ערוך את הפעולה",
-    proposalHeading: "הפעולה המוצעת:"
+    primaryLabel: TL_Menu_T_("אשר את הפעולה"),
+    editLabel: TL_Menu_T_("ערוך את הפעולה"),
+    proposalHeading: TL_Menu_T_("הפעולה המוצעת:")
   };
 }
 
@@ -2649,12 +2499,12 @@ function TL_Menu_BuildDecisionPacketProposalBody_(item, actionSpec) {
   const recipientLabel = TL_Menu_OutboundDestinationLabel_(item);
   const subject = String(item && item.subject || "").trim();
   if (captureKind === "whatsapp") {
-    return 'Draft WhatsApp to ' + recipientLabel + ': "' + proposal + '"';
+    return TL_Menu_T_("טיוטת WhatsApp אל ") + recipientLabel + ': "' + proposal + '"';
   }
   if (captureKind === "email") {
     return [
-      'Draft Email to ' + recipientLabel + ': "' + proposal + '"',
-      subject ? ("Subject: " + subject) : ""
+      TL_Menu_T_("טיוטת אימייל אל ") + recipientLabel + ': "' + proposal + '"',
+      subject ? (TL_Menu_T_("נושא: ") + subject) : ""
     ].filter(Boolean).join("\n");
   }
   if (captureKind === "schedule") {
@@ -2665,7 +2515,7 @@ function TL_Menu_BuildDecisionPacketProposalBody_(item, actionSpec) {
   }
   if (proposal) return proposal;
   if (actionSpec && actionSpec.actionKind === "close_no_send") {
-    return "הפריט ייסגר ללא שליחת תגובה.";
+    return TL_Menu_T_("הפריט ייסגר ללא שליחת תגובה.");
   }
   return "";
 }
@@ -2674,7 +2524,7 @@ function TL_Menu_BuildDecisionPacketReceipt_(item, approval) {
   const result = approval && typeof approval === "object" ? approval : { ok: !!approval };
   if (result.receiptText) return String(result.receiptText).trim();
   if (result.ok === false) {
-    return "לא הצלחתי להשלים את הפעולה.";
+    return TL_Menu_T_("לא הצלחתי להשלים את הפעולה.");
   }
   const captureKind = String(result.kind || item && item.captureKind || "").trim().toLowerCase();
   const captureTitle = String(result.title || item && item.captureTitle || item && item.proposal || item && item.summary || "").trim();
@@ -2684,29 +2534,29 @@ function TL_Menu_BuildDecisionPacketReceipt_(item, approval) {
 
 function TL_Menu_BuildCaptureApprovalReceipt_(kind, title, dueLabel, summary) {
   const safeKind = String(kind || "").trim().toLowerCase();
-  const safeTitle = String(title || summary || "ללא תיאור").trim();
+  const safeTitle = String(title || summary || TL_Menu_T_("ללא תיאור")).trim();
   if (safeKind === "whatsapp") {
-    return "הודעת ה-WhatsApp \"" + safeTitle + "\" נשלחה.";
+    return TL_Menu_T_("הודעת ה-WhatsApp \"") + safeTitle + TL_Menu_T_("\" נשלחה.");
   }
   if (safeKind === "email") {
-    return "האימייל \"" + safeTitle + "\" נשלח.";
+    return TL_Menu_T_("האימייל \"") + safeTitle + TL_Menu_T_("\" נשלח.");
   }
   if (safeKind === "schedule") {
-    return "האירוע \"" + safeTitle + "\" נקבע" + (dueLabel ? (" ל-" + dueLabel) : "") + ".";
+    return TL_Menu_T_("האירוע \"") + safeTitle + TL_Menu_T_("\" נקבע") + (dueLabel ? (TL_Menu_T_(" ל-") + dueLabel) : "") + ".";
   }
   if (safeKind === "reminder") {
-    return "התזכורת \"" + safeTitle + "\" נקבעה" + (dueLabel ? (" ל-" + dueLabel) : "") + ".";
+    return TL_Menu_T_("התזכורת \"") + safeTitle + TL_Menu_T_("\" נקבעה") + (dueLabel ? (TL_Menu_T_(" ל-") + dueLabel) : "") + ".";
   }
   if (safeKind === "task") {
-    return "המשימה \"" + safeTitle + "\" נפתחה" + (dueLabel ? (" עם יעד " + dueLabel) : "") + ".";
+    return TL_Menu_T_("המשימה \"") + safeTitle + TL_Menu_T_("\" נפתחה") + (dueLabel ? (TL_Menu_T_(" עם יעד ") + dueLabel) : "") + ".";
   }
   if (safeKind === "journal") {
-    return "הרישום \"" + safeTitle + "\" נשמר.";
+    return TL_Menu_T_("הרישום \"") + safeTitle + TL_Menu_T_("\" נשמר.");
   }
   if (safeKind === "contact_enrichment") {
-    return "הערת הקשר \"" + safeTitle + "\" נשמרה.";
+    return TL_Menu_T_("הערת הקשר \"") + safeTitle + TL_Menu_T_("\" נשמרה.");
   }
-  return "אישרתי את הפעולה.";
+  return TL_Menu_T_("אישרתי את הפעולה.");
 }
 
 function TL_Menu_BuildWaitingOnOthersSummary_() {
