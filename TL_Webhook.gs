@@ -569,7 +569,8 @@ function TLW_enrichEvent_(ev, ts) {
     thread_subject: "",
     latest_message_at: "",
     external_url: "",
-    participants_json: ""
+    participants_json: "",
+    capture_language: ""
   };
 }
 
@@ -638,7 +639,8 @@ function TLW_appendInboxRow_(obj, rawJson) {
     String(obj.thread_subject||""),
     String(obj.latest_message_at||""),
     String(obj.external_url||""),
-    String(obj.participants_json||"")
+    String(obj.participants_json||""),
+    String(obj.capture_language||"")
   ];
 
   sh.appendRow(row);

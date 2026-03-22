@@ -9,6 +9,21 @@ Reconstruction guide: see RECONSTRUCTION.md
 
 # 0. System Context
 
+## Repo naming lanes
+
+This repo remains TaskLess-first, but during active development it may also contain Automatziot.com business-facing/demo flows exposed through the same coexist phone used for POC and potential-client demonstrations.
+
+Adopt the following naming lanes:
+
+• `TL_*.gs` = TaskLess core runtime and deterministic tests
+• `Onboarding_*.gs` = critical client onboarding/setup modules
+• `Helper_*.gs` = probes, diagnostics, schema tooling, verification, and troubleshooting helpers
+• `Auto_*.gs` = Automatziot.com business-facing/demo/customer flows
+
+Rule:
+
+Do not place Automatziot-specific or troubleshooting code under ambiguous `TL_` names when a more precise prefix exists.
+
 TaskLess is currently in the **WhatsApp-native review and cross-channel context hardening phase**.
 
 The earlier infrastructure-validation work is complete. The current objective is to make the Boss-facing operating loop trustworthy and useful:
@@ -47,6 +62,12 @@ TaskLess Logging Layer
 Google Sheets CRM
 
 This pipeline is now **fully operational**.
+
+Current personal Apps Script runtime:
+
+• Script ID: `1FlH23KHoQkKhLuKC-4k9bViZQcslXFe6LRnDcUQ_faIZpQdmAXjc1AXm`
+• Deployment ID: `AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo`
+• Latest deployed version: `@3` (`hebrew-first-ui-translation-layer`)
 
 ---
 
@@ -398,6 +419,12 @@ Scheduling
 
 • detect appointment intent inside session/planning flows  
 • create calendar events only after approval
+• park a first-class `Calendar` menu with:
+  - `Next 24 hours`
+  - `Today`
+  - `Next 7 days`
+  - `Schedule new event`
+• default calendar view should favor operational visibility (`Next 24 hours`) over a generic daily view
 
 Assistant Layer
 
@@ -504,7 +531,7 @@ Explanation-rich approval flows are more trustworthy than raw confidence claims.
 - Boss menu flow now has a full navigable tree scaffold in Hebrew: main menu, submenus, decision-packet approvals, and capture routing markers for reminder/task/log/schedule flows. Creation flows should route into AI proposal + Boss approval rather than silently execute.
 - Menu-handled inbound follow-up text is now appended before the menu handler runs, so free-text captures such as option `1` notes can be persisted and then upgraded to `record_class=instruction` / `task_status=logged`.
 - Known gap: some status messages arrive before the corresponding message row, leading to status_no_match (logged) and no merge. Need a future cache/merge pass for late statuses.
-- Keep `TL_Onboarding.gs` current as the canonical client-setup module for per-client script properties, sheet binding, schema bootstrap, and future onboarding automation. POC may still use it manually.
+- Keep `Onboarding_TaskLessClientSetup.gs` current as the canonical client-setup module for per-client script properties, sheet binding, schema bootstrap, and future onboarding automation. POC may still use it manually.
 - Known gap: OUTGOING echo rows have empty receiver when recipient_id missing in payload; need fallback logic (e.g., last contact in root/topic window).
 - Known gap: record_version not incremented for communication evolutions (only statuses). Need consistent versioning across updates.
 - Webhook normalization now captures text plus media metadata for image, document, audio, voice, and video messages in INBOX.

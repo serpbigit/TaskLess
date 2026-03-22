@@ -1,5 +1,5 @@
 /**
- * TL_WA_GenerateSystemUserToken
+ * Onboarding_GenerateSystemUserToken
  *
  * Requires Script Properties:
  * - TL_USER_ACCESS_TOKEN
@@ -11,7 +11,7 @@
  * - TL_SYSTEM_TOKEN
  */
 
-function TL_WA_fetchJson_(url, options) {
+function Onboarding_fetchJson_(url, options) {
   const res = UrlFetchApp.fetch(url, Object.assign({
     muteHttpExceptions: true
   }, options || {}));
@@ -34,17 +34,17 @@ function TL_WA_fetchJson_(url, options) {
   };
 }
 
-function TL_WA_requireProp_(key) {
+function Onboarding_requireProp_(key) {
   const value = TL_Config_get_(key, "");
   if (!value) throw new Error("Missing Script Property: " + key);
   return String(value).trim();
 }
 
-function TL_WA_graphBase_() {
+function Onboarding_graphBase_() {
   return "https://graph.facebook.com/v25.0";
 }
 
-function TL_WA_buildAppSecretProof_(accessToken, appSecret) {
+function Onboarding_buildAppSecretProof_(accessToken, appSecret) {
   const bytes = Utilities.computeHmacSha256Signature(accessToken, appSecret);
   return bytes.map(function(b) {
     const n = b < 0 ? b + 256 : b;
@@ -52,19 +52,19 @@ function TL_WA_buildAppSecretProof_(accessToken, appSecret) {
   }).join("");
 }
 
-function TL_WA_DescribeSystemUserForTokenGen() {
-  const adminToken   = TL_WA_requireProp_("TL_USER_ACCESS_TOKEN");
-  const appSecret    = TL_WA_requireProp_("TL_META_APP_SECRET");
-  const systemUserId = TL_WA_requireProp_("TL_SYSTEM_USER_ID");
-  const proof        = TL_WA_buildAppSecretProof_(adminToken, appSecret);
+function Onboarding_DescribeSystemUserForTokenGen() {
+  const adminToken   = Onboarding_requireProp_("TL_USER_ACCESS_TOKEN");
+  const appSecret    = Onboarding_requireProp_("TL_META_APP_SECRET");
+  const systemUserId = Onboarding_requireProp_("TL_SYSTEM_USER_ID");
+  const proof        = Onboarding_buildAppSecretProof_(adminToken, appSecret);
 
   const url =
-    TL_WA_graphBase_() + "/" + encodeURIComponent(systemUserId) +
+    Onboarding_graphBase_() + "/" + encodeURIComponent(systemUserId) +
     "?fields=id,name" +
     "&access_token=" + encodeURIComponent(adminToken) +
     "&appsecret_proof=" + encodeURIComponent(proof);
 
-  const out = TL_WA_fetchJson_(url, { method: "get" });
+  const out = Onboarding_fetchJson_(url, { method: "get" });
   Logger.log(JSON.stringify(out.json, null, 2));
 
   if (!out.ok) {
@@ -74,12 +74,12 @@ function TL_WA_DescribeSystemUserForTokenGen() {
   return out.json;
 }
 
-function TL_WA_GenerateSystemUserToken() {
-  const adminToken   = TL_WA_requireProp_("TL_USER_ACCESS_TOKEN");
-  const appSecret    = TL_WA_requireProp_("TL_META_APP_SECRET");
-  const systemUserId = TL_WA_requireProp_("TL_SYSTEM_USER_ID");
-  const appId        = TL_WA_requireProp_("TL_META_APP_ID");
-  const proof        = TL_WA_buildAppSecretProof_(adminToken, appSecret);
+function Onboarding_GenerateSystemUserToken() {
+  const adminToken   = Onboarding_requireProp_("TL_USER_ACCESS_TOKEN");
+  const appSecret    = Onboarding_requireProp_("TL_META_APP_SECRET");
+  const systemUserId = Onboarding_requireProp_("TL_SYSTEM_USER_ID");
+  const appId        = Onboarding_requireProp_("TL_META_APP_ID");
+  const proof        = Onboarding_buildAppSecretProof_(adminToken, appSecret);
 
   const scopes = [
     "whatsapp_business_management",
@@ -88,7 +88,7 @@ function TL_WA_GenerateSystemUserToken() {
   ].join(",");
 
   const url =
-    TL_WA_graphBase_() + "/" + encodeURIComponent(systemUserId) + "/access_tokens" +
+    Onboarding_graphBase_() + "/" + encodeURIComponent(systemUserId) + "/access_tokens" +
     "?access_token=" + encodeURIComponent(adminToken) +
     "&appsecret_proof=" + encodeURIComponent(proof);
 
@@ -97,7 +97,7 @@ function TL_WA_GenerateSystemUserToken() {
     "&scope=" + encodeURIComponent(scopes) +
     "&set_token_expires_in_60_days=false";
 
-  const out = TL_WA_fetchJson_(url, {
+  const out = Onboarding_fetchJson_(url, {
     method: "post",
     contentType: "application/x-www-form-urlencoded",
     payload: payload

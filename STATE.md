@@ -18,6 +18,13 @@ Current focus:
 - WhatsApp-first Boss operating model
 - Use `checkpoint`, `park this`, `switch target to ...`, `what is local vs deployed vs tested`, and `session handoff`
 
+## 3.1) Repo Naming Convention
+- `TL_*.gs` stays the canonical prefix for TaskLess core runtime.
+- `Onboarding_*.gs` is used for critical client onboarding/setup flows.
+- `Helper_*.gs` is used for probes, diagnostics, verification scripts, schema tooling, and other non-runtime helpers.
+- `Auto_*.gs` is reserved for Automatziot.com business-facing/demo flows that may temporarily share the same coexist phone during development.
+- The repo may therefore contain both TaskLess core and Automatziot-facing code, but the prefixes should keep the ownership and runtime role explicit.
+
 ## 4) Current Product/Runtime Model
 
 ### Canonical tabs
@@ -70,12 +77,18 @@ TaskLess thinks all the time, but speaks only when spoken to.
 ## 5) Local vs Deployed vs Tested
 
 ### Local
-- No known uncommitted product code at handoff.
+- Current local `.clasp.json` target Script ID:
+  - `1FlH23KHoQkKhLuKC-4k9bViZQcslXFe6LRnDcUQ_faIZpQdmAXjc1AXm`
+- Recent local product changes now pushed into the personal Apps Script project head.
 - Docs need to remain aligned with runtime behavior after this state refresh.
 
 ### Deployed / Live
+Current personal web app deployment:
+- Script ID: `1FlH23KHoQkKhLuKC-4k9bViZQcslXFe6LRnDcUQ_faIZpQdmAXjc1AXm`
+- Deployment ID: `AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo`
+
 Latest deployed version:
-- `@128` — `reply-language-and-digest-tightening`
+- `@3` — `hebrew-first-ui-translation-layer`
 
 Recent important deployed versions:
 - `@121` approval summary cleanup + email ledger improvements
@@ -89,6 +102,7 @@ Recent important deployed versions:
 
 ### Verified in runtime
 - WhatsApp webhook ingest is live
+- personal Gmail-owned Apps Script project is now the active runtime project
 - Boss menu / free-form Boss intent routing is live
 - Boss packet interception bug is fixed
 - contact sync from Google Contacts works with `both_only` import strategy

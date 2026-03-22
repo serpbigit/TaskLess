@@ -1,5 +1,5 @@
 /**
- * TL_descriptive_minimumWabaPhoneIds.gs
+ * Helper_MinimumWabaPhoneIds.gs
  *
  * Goal:
  * - Start from a known WABA ID
@@ -11,22 +11,22 @@
  * - Direct WABA ID: 1359984478739186
  */
 
-const TL_GRAPH_VERSION = "v21.0";
-const TL_GRAPH_BASE = `https://graph.facebook.com/${TL_GRAPH_VERSION}`;
-const TL_TOKEN_PROPERTY_KEY = "TL_SYSTEM_TOKEN";
+const HELPER_GRAPH_VERSION = "v21.0";
+const HELPER_GRAPH_BASE = `https://graph.facebook.com/${HELPER_GRAPH_VERSION}`;
+const HELPER_TOKEN_PROPERTY_KEY = "TL_SYSTEM_TOKEN";
 
 // This is a WABA ID from Meta UI
-const TL_WABA_ID = "1359984478739186";
+const HELPER_WABA_ID = "1359984478739186";
 
-function TL_descriptive_run_minimum() {
-  const token = TL_getToken_();
-  if (!token) throw new Error(`Missing Script Property: ${TL_TOKEN_PROPERTY_KEY}`);
+function Helper_MinimumWabaPhoneIds_Run() {
+  const token = Helper_MinimumWabaPhoneIds_getToken_();
+  if (!token) throw new Error(`Missing Script Property: ${HELPER_TOKEN_PROPERTY_KEY}`);
 
   Logger.log("=== DIRECT WABA LOOKUP ===");
-  Logger.log(`WABA ID: ${TL_WABA_ID}`);
+  Logger.log(`WABA ID: ${HELPER_WABA_ID}`);
 
-  const waba = TL_fetchJson_(
-    TL_buildUrl_(TL_WABA_ID, {
+  const waba = Helper_MinimumWabaPhoneIds_fetchJson_(
+    Helper_MinimumWabaPhoneIds_buildUrl_(HELPER_WABA_ID, {
       fields: "id,name,message_template_namespace"
     }),
     token
@@ -37,8 +37,8 @@ function TL_descriptive_run_minimum() {
   Logger.log(`WABA name: ${waba.name || ""}`);
   Logger.log(`message_template_namespace: ${waba.message_template_namespace || ""}`);
 
-  const phoneEdge = TL_fetchJson_(
-    TL_buildEdgeUrl_(TL_WABA_ID, "phone_numbers", {
+  const phoneEdge = Helper_MinimumWabaPhoneIds_fetchJson_(
+    Helper_MinimumWabaPhoneIds_buildEdgeUrl_(HELPER_WABA_ID, "phone_numbers", {
       fields: "id,display_phone_number,verified_name,quality_rating,status,platform_type,code_verification_status"
     }),
     token
@@ -70,11 +70,11 @@ function TL_descriptive_run_minimum() {
 
 /** Helpers */
 
-function TL_getToken_() {
-  return PropertiesService.getScriptProperties().getProperty(TL_TOKEN_PROPERTY_KEY);
+function Helper_MinimumWabaPhoneIds_getToken_() {
+  return PropertiesService.getScriptProperties().getProperty(HELPER_TOKEN_PROPERTY_KEY);
 }
 
-function TL_buildUrl_(objectId, params) {
+function Helper_MinimumWabaPhoneIds_buildUrl_(objectId, params) {
   const qp = [];
   Object.keys(params || {}).forEach((k) => {
     const v = params[k];
@@ -82,10 +82,10 @@ function TL_buildUrl_(objectId, params) {
     qp.push(encodeURIComponent(k) + "=" + encodeURIComponent(String(v)));
   });
   const query = qp.length ? "?" + qp.join("&") : "";
-  return `${TL_GRAPH_BASE}/${encodeURIComponent(String(objectId))}${query}`;
+  return `${HELPER_GRAPH_BASE}/${encodeURIComponent(String(objectId))}${query}`;
 }
 
-function TL_buildEdgeUrl_(objectId, edgeName, params) {
+function Helper_MinimumWabaPhoneIds_buildEdgeUrl_(objectId, edgeName, params) {
   const qp = [];
   Object.keys(params || {}).forEach((k) => {
     const v = params[k];
@@ -93,10 +93,10 @@ function TL_buildEdgeUrl_(objectId, edgeName, params) {
     qp.push(encodeURIComponent(k) + "=" + encodeURIComponent(String(v)));
   });
   const query = qp.length ? "?" + qp.join("&") : "";
-  return `${TL_GRAPH_BASE}/${encodeURIComponent(String(objectId))}/${encodeURIComponent(String(edgeName))}${query}`;
+  return `${HELPER_GRAPH_BASE}/${encodeURIComponent(String(objectId))}/${encodeURIComponent(String(edgeName))}${query}`;
 }
 
-function TL_fetchJson_(url, token) {
+function Helper_MinimumWabaPhoneIds_fetchJson_(url, token) {
   const res = UrlFetchApp.fetch(url, {
     method: "get",
     headers: { Authorization: "Bearer " + token },

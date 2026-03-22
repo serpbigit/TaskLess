@@ -8,7 +8,8 @@ function TL_TestFreeCapture_RunAll() {
   return {
     capture: TL_TestFreeCapture_MultiIntentCaptureRun(),
     approval: TL_TestFreeCapture_BatchApprovalRun(),
-    end_to_end: TL_TestFreeCapture_EndToEndRun()
+    end_to_end: TL_TestFreeCapture_EndToEndRun(),
+    capture_language: TL_TestFreeCapture_CaptureLanguagePropagationRun()
   };
 }
 
@@ -259,6 +260,60 @@ function TL_TestFreeCapture_EndToEndRun() {
   return result;
 }
 
+function TL_TestFreeCapture_CaptureLanguagePropagationRun() {
+  const rootId = "root_free_capture_lang_" + Utilities.getUuid();
+  const seed = TL_TestFreeCapture_seedBossCaptureRow_({
+    root_id: rootId,
+    message_id: "msg_free_capture_lang_" + Utilities.getUuid(),
+    text: "Please remind me to call Dana tomorrow morning."
+  });
+
+  const captureResult = TL_Capture_Run(1, {
+    useAi: false,
+    promptFn: function() {
+      return {
+        summary: "english capture summary",
+        items: [
+          {
+            kind: "reminder",
+            title: "Call Dana",
+            summary: "Call Dana tomorrow morning.",
+            proposal: "Call Dana tomorrow morning.",
+            task_due: "tomorrow morning",
+            task_priority: "medium",
+            approval_required: "true"
+          }
+        ]
+      };
+    },
+    sendFn: function() {
+      return { ok: true, status: 200, body: "{}" };
+    },
+    storePacketFn: function() {
+      return true;
+    }
+  });
+
+  const parent = TL_TestFreeCapture_findLatestRow_(rootId, "communication", "seed=free_capture");
+  const child = TL_TestFreeCapture_findLatestByCaptureKind_(rootId, "reminder");
+  const parentValues = parent ? parent.values : [];
+  const childValues = child ? child.values : [];
+  const parentLanguage = parent ? String(parentValues[TLW_colIndex_("capture_language") - 1] || "") : "";
+  const childLanguage = child ? String(childValues[TLW_colIndex_("capture_language") - 1] || "") : "";
+  const result = {
+    ok: !!parent && !!child && parentLanguage === "English" && childLanguage === "English",
+    root_id: rootId,
+    seed_row: seed.rowNumber,
+    capture_result: captureResult,
+    parent_row: parent ? parent.rowNumber : "",
+    parent_language: parentLanguage,
+    child_row: child ? child.rowNumber : "",
+    child_language: childLanguage
+  };
+  Logger.log("TL_TestFreeCapture_CaptureLanguagePropagationRun: %s", JSON.stringify(result, null, 2));
+  return result;
+}
+
 function TL_TestFreeCapture_seedBossCaptureRow_(overrides) {
   const phoneNumberId = TL_TestFreeCapture_getPhoneNumberId_();
   const displayPhone = TL_TestFreeCapture_getDisplayPhoneNumber_();
@@ -312,7 +367,8 @@ function TL_TestFreeCapture_seedBossCaptureRow_(overrides) {
     importance_level: "",
     urgency_flag: "",
     needs_owner_now: "",
-    suggested_action: ""
+    suggested_action: "",
+    capture_language: String(overrides && overrides.capture_language ? overrides.capture_language : "")
   };
   const appended = TLW_appendInboxRow_(row, TLW_safeStringify_({
     source: "TL_TestFreeCapture",

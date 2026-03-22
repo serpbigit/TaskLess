@@ -416,6 +416,7 @@ function TL_Capture_RunUnlocked_(batchSize, options) {
     }
 
     result.scanned++;
+    const captureLanguage = TL_Capture_resolveLanguage_(values, captureText, cfg.language);
     let extraction = null;
     try {
       extraction = promptFn ? promptFn(captureText, item, cfg) : (useAi && typeof TL_AI_ExtractBossCapture_ === "function" ? TL_AI_ExtractBossCapture_(captureText) : null);
@@ -480,6 +481,7 @@ function TL_Capture_RunUnlocked_(batchSize, options) {
     if (sendResult && sendResult.ok) {
       TL_Orchestrator_updateRowFields_(item.rowNumber, {
         ai_summary: normalized.summary || TL_Orchestrator_value_(values, "ai_summary"),
+        capture_language: captureLanguage,
         notes: TL_Capture_appendNote_(values, [
           "boss_capture_state=processed",
           "boss_capture_items=" + String(packetItems.length),
@@ -492,6 +494,7 @@ function TL_Capture_RunUnlocked_(batchSize, options) {
     } else {
       TL_Orchestrator_updateRowFields_(item.rowNumber, {
         ai_summary: normalized.summary || TL_Orchestrator_value_(values, "ai_summary"),
+        capture_language: captureLanguage,
         notes: TL_Capture_appendNote_(values, [
           "boss_capture_state=queued",
           "boss_capture_items=" + String(packetItems.length),
@@ -1861,6 +1864,28 @@ function TL_Capture_getInputText_(values) {
   return "";
 }
 
+function TL_Capture_detectLanguage_(inputText, fallbackLanguage) {
+  const fallback = typeof TL_Language_NormalizeLanguage_ === "function"
+    ? TL_Language_NormalizeLanguage_(fallbackLanguage || TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "Hebrew")
+    : String(fallbackLanguage || TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "Hebrew").trim();
+  const detected = typeof TL_AI_detectMessageLanguage_ === "function"
+    ? TL_AI_detectMessageLanguage_(String(inputText || ""), fallback)
+    : fallback;
+  return typeof TL_Language_NormalizeLanguage_ === "function"
+    ? TL_Language_NormalizeLanguage_(detected)
+    : String(detected || fallback || "Hebrew").trim();
+}
+
+function TL_Capture_resolveLanguage_(values, captureText, fallbackLanguage) {
+  const existing = TL_Orchestrator_value_(values, "capture_language");
+  if (existing) {
+    return typeof TL_Language_NormalizeLanguage_ === "function"
+      ? TL_Language_NormalizeLanguage_(existing)
+      : String(existing).trim();
+  }
+  return TL_Capture_detectLanguage_(captureText, fallbackLanguage);
+}
+
 function TL_Capture_normalizeExtraction_(extraction, captureText) {
   const out = {
     summary: "",
@@ -2009,6 +2034,7 @@ function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, c
   const recipientDestination = String(item.recipient_destination || "").trim();
   const recipientContactId = String(item.recipient_contact_id || "").trim();
   const resolutionStatus = String(item.resolution_status || "").trim().toLowerCase() || (isOutboundComm ? "missing" : "");
+  const captureLanguage = TL_Capture_resolveLanguage_(sourceValues, TL_Capture_getInputText_(sourceValues), cfg && cfg.language);
   const receiver = isOutboundComm ? recipientDestination : bossPhone;
   const emailOwner = typeof TL_Email_ownerEmail_ === "function" ? TL_Email_ownerEmail_() : "";
   const effectiveSender = kind === "email" ? emailOwner : sender;
@@ -2141,7 +2167,8 @@ function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, c
     thread_subject: kind === "email" ? emailSubject : "",
     latest_message_at: kind === "email" ? new Date(now).toISOString() : "",
     external_url: "",
-    participants_json: kind === "email" ? JSON.stringify([effectiveSender, recipientDestination].filter(Boolean)) : ""
+    participants_json: kind === "email" ? JSON.stringify([effectiveSender, recipientDestination].filter(Boolean)) : "",
+    capture_language: captureLanguage
   };
 }
 
@@ -2220,7 +2247,8 @@ function TL_Capture_buildPacketItem_(childRow, rowNumber, sourceItem) {
     duePreview: dueInfo.preview,
     dueLabel: dueInfo.label,
     isUrgent: String(childRow.urgency_flag || "").toLowerCase() === "true" || String(childRow.needs_owner_now || "").toLowerCase() === "true",
-    isHigh: String(childRow.priority_level || "").toLowerCase() === "high" || String(childRow.importance_level || "").toLowerCase() === "high"
+    isHigh: String(childRow.priority_level || "").toLowerCase() === "high" || String(childRow.importance_level || "").toLowerCase() === "high",
+    captureLanguage: String(childRow.capture_language || "").trim()
   };
 }
 

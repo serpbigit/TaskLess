@@ -1,18 +1,18 @@
 /**
- * UTIL_Sheets_ExportSchema
+ * Helper_ExportSchema
  * - Exports spreadsheet tabs + headers as pasteable JSON
  *
  * Uses Script Property TL_SHEET_ID if set; otherwise uses active spreadsheet.
  */
 
-function TL_Sheets_GetSpreadsheet_() {
+function Helper_GetSpreadsheet_() {
   var id = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
   if (id) return SpreadsheetApp.openById(id);
   return SpreadsheetApp.getActiveSpreadsheet();
 }
 
-function TL_Sheets_ListTabsAndHeaders() {
-  var ss = TL_Sheets_GetSpreadsheet_();
+function Helper_ListTabsAndHeaders() {
+  var ss = Helper_GetSpreadsheet_();
   var sheets = ss.getSheets();
   var out = [];
   for (var i=0; i<sheets.length; i++) {
@@ -29,12 +29,12 @@ function TL_Sheets_ListTabsAndHeaders() {
   return out;
 }
 
-function TL_Sheets_ExportSchemaJson() {
+function Helper_ExportSchemaJson() {
   var schema = {
     version: "sheet-export-1",
     exported_iso: new Date().toISOString(),
     sheet_id: String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim(),
-    tabs: TL_Sheets_ListTabsAndHeaders()
+    tabs: Helper_ListTabsAndHeaders()
   };
   var json = JSON.stringify(schema, null, 2);
   try { Logger.log(json); } catch(e) {}

@@ -1,4 +1,4 @@
-function TL_WA_registerPhone() {
+function Onboarding_RegisterPhone() {
   const token = String(PropertiesService.getScriptProperties().getProperty("TL_SYSTEM_TOKEN") || "").trim();
   if (!token) throw new Error("Missing Script Property TL_SYSTEM_TOKEN");
 

@@ -1,22 +1,22 @@
 /**
- * TL_Onboarding
+ * Onboarding_TaskLessClientSetup
  *
  * Canonical client setup helpers for future commercial onboarding.
  * POC can still run these manually, but this file should remain the
  * single place to evolve spreadsheet/runtime bootstrapping.
  */
 
-const TL_ONBOARDING = {
+const ONBOARDING_TASKLESS = {
   SHEET_ID_PROP: "TL_SHEET_ID",
   DEFAULT_CONTACT_SYNC_MODE: "both_only"
 };
 
-function TL_Onboarding_SetClientSheet(sheetId) {
-  const normalizedId = TL_Onboarding_normalizeSpreadsheetId_(sheetId);
-  if (!normalizedId) throw new Error("TL_Onboarding_SetClientSheet: missing spreadsheet ID");
+function Onboarding_SetClientSheet(sheetId) {
+  const normalizedId = Onboarding_normalizeSpreadsheetId_(sheetId);
+  if (!normalizedId) throw new Error("Onboarding_SetClientSheet: missing spreadsheet ID");
 
   const ss = SpreadsheetApp.openById(normalizedId);
-  PropertiesService.getScriptProperties().setProperty(TL_ONBOARDING.SHEET_ID_PROP, normalizedId);
+  PropertiesService.getScriptProperties().setProperty(ONBOARDING_TASKLESS.SHEET_ID_PROP, normalizedId);
 
   return {
     ok: true,
@@ -26,17 +26,17 @@ function TL_Onboarding_SetClientSheet(sheetId) {
   };
 }
 
-function TL_Onboarding_ConnectAndBootstrap(sheetId) {
-  const connected = TL_Onboarding_SetClientSheet(sheetId);
+function Onboarding_ConnectAndBootstrap(sheetId) {
+  const connected = Onboarding_SetClientSheet(sheetId);
   TL_EnsureSchema();
-  const summary = TL_Onboarding_RuntimeSummary();
+  const summary = Onboarding_RuntimeSummary();
   summary.connected = connected;
   return summary;
 }
 
-function TL_Onboarding_RuntimeSummary() {
+function Onboarding_RuntimeSummary() {
   const props = PropertiesService.getScriptProperties();
-  const sheetId = String(props.getProperty(TL_ONBOARDING.SHEET_ID_PROP) || "").trim();
+  const sheetId = String(props.getProperty(ONBOARDING_TASKLESS.SHEET_ID_PROP) || "").trim();
   const out = {
     ok: true,
     sheet_id: sheetId,
@@ -52,8 +52,8 @@ function TL_Onboarding_RuntimeSummary() {
   if (!sheetId) {
     out.ok = false;
     out.recommended_next_steps = [
-      "Set TL_SHEET_ID via TL_Onboarding_SetClientSheet(sheetId)",
-      "Run TL_Onboarding_ConnectAndBootstrap(sheetId)"
+      "Set TL_SHEET_ID via Onboarding_SetClientSheet(sheetId)",
+      "Run Onboarding_ConnectAndBootstrap(sheetId)"
     ];
     return out;
   }
@@ -78,7 +78,7 @@ function TL_Onboarding_RuntimeSummary() {
   return out;
 }
 
-function TL_Onboarding_GetTemplateConfig() {
+function Onboarding_GetTemplateConfig() {
   return {
     script_properties: [
       "TL_SHEET_ID",
@@ -97,14 +97,14 @@ function TL_Onboarding_GetTemplateConfig() {
       "TL_WEBHOOK_URL",
       "TL_ONBOARDING_REDIRECT_URL"
     ],
-    default_contact_sync_mode: TL_ONBOARDING.DEFAULT_CONTACT_SYNC_MODE,
+    default_contact_sync_mode: ONBOARDING_TASKLESS.DEFAULT_CONTACT_SYNC_MODE,
     required_tabs: (typeof TL_SCHEMA !== "undefined" && TL_SCHEMA.ALLOWED_TABS)
       ? TL_SCHEMA.ALLOWED_TABS.slice()
       : []
   };
 }
 
-function TL_Onboarding_normalizeSpreadsheetId_(value) {
+function Onboarding_normalizeSpreadsheetId_(value) {
   const raw = String(value || "").trim();
   if (!raw) {
     const active = SpreadsheetApp.getActiveSpreadsheet();

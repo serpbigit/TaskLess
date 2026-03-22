@@ -1,14 +1,14 @@
 /**
- * TL_OnboardingCapture.gs
+ * Onboarding_MetaSignupCapture.gs
  * Paused as web-app entrypoint so TL_Webhook.gs remains the single canonical doGet/doPost.
  * Original logic preserved under named handlers.
  */
 
-const TL_SECRET_PROP = "TL_FORWARD_SECRET";
-const TARGET_SPREADSHEET_ID = "1uvsBjZd15X5tWmxQAsGUEBDeIP9rXOW52bDYPNlUJ5k";
-const TARGET_SHEET_NAME = "Sheet1";
-
-const HEADERS = [
+const ONBOARDING_META_SIGNUP = {
+  SECRET_PROP: "TL_FORWARD_SECRET",
+  TARGET_SPREADSHEET_ID: "1uvsBjZd15X5tWmxQAsGUEBDeIP9rXOW52bDYPNlUJ5k",
+  TARGET_SHEET_NAME: "Sheet1",
+  HEADERS: [
   "server_ts",
   "receivedAt",
   "ip",
@@ -39,37 +39,38 @@ const HEADERS = [
   "meta_error_message",
   "payload_json",
   "enrich_json"
-];
+  ]
+};
 
-function TL_OnboardingCapture_doGet(e) {
-  return jsonOut_({
+function Onboarding_MetaSignupCapture_doGet(e) {
+  return Onboarding_MetaSignupCapture_jsonOut_({
     ok: true,
-    service: "TL_OnboardingCapture",
+    service: "Onboarding_MetaSignupCapture",
     ts: new Date().toISOString()
   });
 }
 
-function TL_OnboardingCapture_doPost(e) {
+function Onboarding_MetaSignupCapture_doPost(e) {
   const got = e && e.parameter && e.parameter.tl_secret ? String(e.parameter.tl_secret) : "";
-  const expected = PropertiesService.getScriptProperties().getProperty(TL_SECRET_PROP);
+  const expected = PropertiesService.getScriptProperties().getProperty(ONBOARDING_META_SIGNUP.SECRET_PROP);
 
   if (!expected) {
-    return jsonOut_({
+    return Onboarding_MetaSignupCapture_jsonOut_({
       ok: false,
-      error: "Server not configured (missing script property: " + TL_SECRET_PROP + ")"
+      error: "Server not configured (missing script property: " + ONBOARDING_META_SIGNUP.SECRET_PROP + ")"
     });
   }
 
   if (!got || got !== expected) {
-    return jsonOut_({
+    return Onboarding_MetaSignupCapture_jsonOut_({
       ok: false,
       error: "Unauthorized"
     });
   }
 
-  const bodyText = safeGetBodyText_(e);
+  const bodyText = Onboarding_MetaSignupCapture_safeGetBodyText_(e);
   if (!bodyText) {
-    return jsonOut_({
+    return Onboarding_MetaSignupCapture_jsonOut_({
       ok: false,
       error: "Empty body"
     });
@@ -79,63 +80,63 @@ function TL_OnboardingCapture_doPost(e) {
   try {
     body = JSON.parse(bodyText);
   } catch (err) {
-    return jsonOut_({
+    return Onboarding_MetaSignupCapture_jsonOut_({
       ok: false,
       error: "Invalid JSON body"
     });
   }
 
-  const ss = SpreadsheetApp.openById(TARGET_SPREADSHEET_ID);
-  const sh = ss.getSheetByName(TARGET_SHEET_NAME) || ss.insertSheet(TARGET_SHEET_NAME);
-  ensureHeaders_(sh);
+  const ss = SpreadsheetApp.openById(ONBOARDING_META_SIGNUP.TARGET_SPREADSHEET_ID);
+  const sh = ss.getSheetByName(ONBOARDING_META_SIGNUP.TARGET_SHEET_NAME) || ss.insertSheet(ONBOARDING_META_SIGNUP.TARGET_SHEET_NAME);
+  Onboarding_MetaSignupCapture_ensureHeaders_(sh);
 
   const serverTs = new Date();
 
-  const receivedAt = safeStr_(body.receivedAt);
-  const ip = safeStr_(body.ip);
-  const origin = safeStr_(body.origin);
-  const ua = safeStr_(body.ua);
-  const path = safeStr_(body.path);
+  const receivedAt = Onboarding_MetaSignupCapture_safeStr_(body.receivedAt);
+  const ip = Onboarding_MetaSignupCapture_safeStr_(body.ip);
+  const origin = Onboarding_MetaSignupCapture_safeStr_(body.origin);
+  const ua = Onboarding_MetaSignupCapture_safeStr_(body.ua);
+  const path = Onboarding_MetaSignupCapture_safeStr_(body.path);
 
   const payloadObj = body && body.payload ? body.payload : {};
   const enrichObj = body && body.enrich ? body.enrich : {};
 
-  const source = safeStr_(payloadObj.source);
-  const page = safeStr_(payloadObj.page);
-  const state = safeStr_(payloadObj.state);
+  const source = Onboarding_MetaSignupCapture_safeStr_(payloadObj.source);
+  const page = Onboarding_MetaSignupCapture_safeStr_(payloadObj.page);
+  const state = Onboarding_MetaSignupCapture_safeStr_(payloadObj.state);
 
-  const workerStep = safeStr_(enrichObj.step);
+  const workerStep = Onboarding_MetaSignupCapture_safeStr_(enrichObj.step);
   const enrichOk = enrichObj && enrichObj.ok === true ? "TRUE" : "FALSE";
-  const businessesCount = toSafeNumberStr_(enrichObj.businesses_count);
+  const businessesCount = Onboarding_MetaSignupCapture_toSafeNumberStr_(enrichObj.businesses_count);
 
-  const extracted = extractIdsFromEnrich_(enrichObj);
+  const extracted = Onboarding_MetaSignupCapture_extractIdsFromEnrich_(enrichObj);
   const wabaIdsStr = extracted.wabaIds.join(",");
   const phoneIdsStr = extracted.phoneNumberIds.join(",");
   const displayPhoneNumbersStr = extracted.displayPhoneNumbers.join(",");
   const verifiedNamesStr = extracted.verifiedNames.join(",");
   const wabaCount = String(extracted.wabaIds.length);
 
-  const redirectUriUsed = safeStr_(enrichObj.redirect_uri_used);
-  const redirectUriFromClient = safeStr_(enrichObj.redirect_uri_from_client);
-  const payloadRedirectUri = safeStr_(payloadObj.redirect_uri);
+  const redirectUriUsed = Onboarding_MetaSignupCapture_safeStr_(enrichObj.redirect_uri_used);
+  const redirectUriFromClient = Onboarding_MetaSignupCapture_safeStr_(enrichObj.redirect_uri_from_client);
+  const payloadRedirectUri = Onboarding_MetaSignupCapture_safeStr_(payloadObj.redirect_uri);
 
-  const graphVersion = safeStr_(enrichObj.graph_version);
-  const clientIdUsed = safeStr_(enrichObj.client_id_used);
+  const graphVersion = Onboarding_MetaSignupCapture_safeStr_(enrichObj.graph_version);
+  const clientIdUsed = Onboarding_MetaSignupCapture_safeStr_(enrichObj.client_id_used);
 
   const tokenExchangeAttempted = enrichObj && enrichObj.token_exchange_attempted === true ? "TRUE" : "FALSE";
   const tokenPresent = enrichObj && enrichObj.token_present === true ? "TRUE" : "FALSE";
-  const tokenValue = safeStr_(enrichObj.token_value);
+  const tokenValue = Onboarding_MetaSignupCapture_safeStr_(enrichObj.token_value);
 
-  const metaErr = getMetaError_(enrichObj);
-  const metaErrorCode = safeStr_(metaErr.code);
-  const metaErrorSubcode = safeStr_(metaErr.error_subcode);
-  const metaErrorMessage = safeStr_(metaErr.message);
+  const metaErr = Onboarding_MetaSignupCapture_getMetaError_(enrichObj);
+  const metaErrorCode = Onboarding_MetaSignupCapture_safeStr_(metaErr.code);
+  const metaErrorSubcode = Onboarding_MetaSignupCapture_safeStr_(metaErr.error_subcode);
+  const metaErrorMessage = Onboarding_MetaSignupCapture_safeStr_(metaErr.message);
 
-  const payloadJson = safeJson_(payloadObj);
-  const enrichJson = safeJson_(enrichObj);
+  const payloadJson = Onboarding_MetaSignupCapture_safeJson_(payloadObj);
+  const enrichJson = Onboarding_MetaSignupCapture_safeJson_(enrichObj);
 
   sh.appendRow([
-    formatTs_(serverTs),
+    Onboarding_MetaSignupCapture_formatTs_(serverTs),
     receivedAt,
     ip,
     origin,
@@ -167,7 +168,7 @@ function TL_OnboardingCapture_doPost(e) {
     enrichJson
   ]);
 
-  return jsonOut_({
+  return Onboarding_MetaSignupCapture_jsonOut_({
     ok: true,
     appended: true,
     server_ts: serverTs.toISOString()
@@ -176,7 +177,7 @@ function TL_OnboardingCapture_doPost(e) {
 
 // ---------- helpers ----------
 
-function safeGetBodyText_(e) {
+function Onboarding_MetaSignupCapture_safeGetBodyText_(e) {
   try {
     return e && e.postData && e.postData.contents ? String(e.postData.contents) : "";
   } catch (err) {
@@ -184,35 +185,35 @@ function safeGetBodyText_(e) {
   }
 }
 
-function ensureHeaders_(sheet) {
-  const existingLastColumn = Math.max(sheet.getLastColumn(), HEADERS.length);
+function Onboarding_MetaSignupCapture_ensureHeaders_(sheet) {
+  const existingLastColumn = Math.max(sheet.getLastColumn(), ONBOARDING_META_SIGNUP.HEADERS.length);
   const currentHeaderRow = existingLastColumn > 0
     ? sheet.getRange(1, 1, 1, existingLastColumn).getValues()[0]
     : [];
 
-  const currentHeaders = currentHeaderRow.slice(0, HEADERS.length).map(function(v) {
+  const currentHeaders = currentHeaderRow.slice(0, ONBOARDING_META_SIGNUP.HEADERS.length).map(function(v) {
     return String(v || "").trim();
   });
 
-  const expectedSignature = HEADERS.join("||");
+  const expectedSignature = ONBOARDING_META_SIGNUP.HEADERS.join("||");
   const currentSignature = currentHeaders.join("||");
 
   if (currentSignature !== expectedSignature) {
-    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+    sheet.getRange(1, 1, 1, ONBOARDING_META_SIGNUP.HEADERS.length).setValues([ONBOARDING_META_SIGNUP.HEADERS]);
   }
 }
 
-function safeStr_(v) {
+function Onboarding_MetaSignupCapture_safeStr_(v) {
   if (v === null || v === undefined) return "";
   return String(v);
 }
 
-function toSafeNumberStr_(v) {
+function Onboarding_MetaSignupCapture_toSafeNumberStr_(v) {
   if (v === null || v === undefined || v === "") return "";
   return String(v);
 }
 
-function safeJson_(obj) {
+function Onboarding_MetaSignupCapture_safeJson_(obj) {
   try {
     return JSON.stringify(obj || {}, null, 0);
   } catch (e) {
@@ -223,7 +224,7 @@ function safeJson_(obj) {
   }
 }
 
-function extractIdsFromEnrich_(enrich) {
+function Onboarding_MetaSignupCapture_extractIdsFromEnrich_(enrich) {
   const out = {
     wabaIds: [],
     phoneNumberIds: [],
@@ -262,7 +263,7 @@ function extractIdsFromEnrich_(enrich) {
   return out;
 }
 
-function getMetaError_(enrich) {
+function Onboarding_MetaSignupCapture_getMetaError_(enrich) {
   const empty = { code: "", error_subcode: "", message: "" };
   if (!enrich || !enrich.body || !enrich.body.error) return empty;
 
@@ -274,12 +275,12 @@ function getMetaError_(enrich) {
   };
 }
 
-function jsonOut_(obj) {
+function Onboarding_MetaSignupCapture_jsonOut_(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function formatTs_(d) {
+function Onboarding_MetaSignupCapture_formatTs_(d) {
   return Utilities.formatDate(d, Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm:ss");
 }

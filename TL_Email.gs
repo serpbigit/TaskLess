@@ -364,7 +364,8 @@ function TL_Email_buildInboxRecord_(payload, nowIso) {
     thread_subject: String(data.subject || "").trim(),
     latest_message_at: latestAt,
     external_url: String(data.permalink || "").trim(),
-    participants_json: participantsJson
+    participants_json: participantsJson,
+    capture_language: ""
   };
 }
 

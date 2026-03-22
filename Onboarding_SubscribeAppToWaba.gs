@@ -1,5 +1,5 @@
 /**
- * TL_WA_SubscribeAppToWaba.gs
+ * Onboarding_SubscribeAppToWaba.gs
  *
  * Purpose:
  * Force-subscribe this app to the target WhatsApp Business Account so webhook events
@@ -13,7 +13,7 @@
  * - 1359984478739186
  */
 
-function TL_WA_SubscribeAppToWaba() {
+function Onboarding_SubscribeAppToWaba() {
   const token = String(PropertiesService.getScriptProperties().getProperty("TL_SYSTEM_TOKEN") || "").trim();
   if (!token) throw new Error("Missing Script Property TL_SYSTEM_TOKEN");
 
@@ -47,7 +47,7 @@ function TL_WA_SubscribeAppToWaba() {
   };
 }
 
-function TL_WA_ListSubscribedApps() {
+function Onboarding_ListSubscribedApps() {
   const token = String(PropertiesService.getScriptProperties().getProperty("TL_SYSTEM_TOKEN") || "").trim();
   if (!token) throw new Error("Missing Script Property TL_SYSTEM_TOKEN");
 

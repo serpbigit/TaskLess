@@ -1,5 +1,5 @@
 /**
- * UTIL_Sheets_RebuildSchema
+ * Helper_RebuildSchema
  * Applies a schema (tabs + headers) deterministically.
  *
  * Modes:
@@ -7,8 +7,8 @@
  * - "create_missing": create missing tabs and fix header row if mismatched
  */
 
-function TL_Sheets_ApplySchema(schemaJson, mode) {
-  var ss = TL_Sheets_GetSpreadsheet_();
+function Helper_ApplySchema(schemaJson, mode) {
+  var ss = Helper_GetSpreadsheet_();
   var m = String(mode || "verify_only").trim();
 
   var schema = schemaJson;

@@ -1,31 +1,39 @@
 {
   "version": "sheet-export-1",
-  "exported_iso": "2026-03-01T19:02:51.453Z",
+  "exported_iso": "2026-03-22T00:00:00.000Z",
   "sheet_id": "",
   "tabs": [
     {
-      "tab": "TASKS",
-      "headers": ["createdAt","updatedAt","taskId","batchId","userE164","channel","title","status","missingFieldsJson","proposalJson","actionJson","resultJson","lastPresentedAt","lastError"]
-    },
-    {
-      "tab": "OPEN",
-      "headers": ["createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel","status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"]
-    },
-    {
-      "tab": "REVISION",
-      "headers": ["createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel","status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"]
+      "tab": "INBOX",
+      "headers": ["timestamp","root_id","event_id","parent_event_id","record_id","record_version","record_class","channel","direction","phone_number_id","display_phone_number","sender","receiver","message_id","message_type","text","ai_summary","ai_proposal","approval_required","approval_status","execution_status","status_latest","status_timestamp","statuses_count","contact_id","raw_payload_ref","notes","task_due","task_status","task_priority","topic_id","topic_tagged_at","biz_stage","biz_stage_ts","payment_status","delivery_due","media_id","media_mime_type","media_sha256","media_caption","media_filename","media_is_voice","priority_level","importance_level","urgency_flag","needs_owner_now","suggested_action","thread_id","thread_subject","latest_message_at","external_url","participants_json","capture_language"]
     },
     {
       "tab": "ARCHIVE",
-      "headers": ["createdAt","updatedAt","userE164","refId","chunkId","title","kind","channel","status","askedAt","answeredAt","executedAt","draftOrPromptJson","lastAction","lastActionAt"]
+      "headers": ["timestamp","root_id","event_id","parent_event_id","record_id","record_version","record_class","channel","direction","phone_number_id","display_phone_number","sender","receiver","message_id","message_type","text","ai_summary","ai_proposal","approval_required","approval_status","execution_status","status_latest","status_timestamp","statuses_count","contact_id","raw_payload_ref","notes","task_due","task_status","task_priority","topic_id","topic_tagged_at","biz_stage","biz_stage_ts","payment_status","delivery_due","media_id","media_mime_type","media_sha256","media_caption","media_filename","media_is_voice","priority_level","importance_level","urgency_flag","needs_owner_now","suggested_action","thread_id","thread_subject","latest_message_at","external_url","participants_json","capture_language"]
     },
     {
       "tab": "CONTACTS",
-      "headers": ["createdAt","updatedAt","contactId","displayName","aliasesCsv","e164","email","notes"]
+      "headers": ["contact_id","name","alias","org","website","phone1","phone2","email","role","tags","last_note","last_enriched_at","source_system","source_id","phone1_normalized","phone2_normalized","email_normalized","labels","sync_status","last_synced_at","notes_internal"]
+    },
+    {
+      "tab": "CONTACT_ENRICHMENTS",
+      "headers": ["timestamp","contact_id","contact_name","note_type","note_text","source","linked_record_id","topic_id","notes"]
+    },
+    {
+      "tab": "TOPICS",
+      "headers": ["topic_id","contact_id","contact_name","topic_summary","last_used_at","usage_count","recent_examples_json","notes"]
     },
     {
       "tab": "SETTINGS",
-      "headers": ["key","value"]
+      "headers": ["key","value","description"]
+    },
+    {
+      "tab": "LOG",
+      "headers": ["timestamp","level","component","message","meta_json"]
+    },
+    {
+      "tab": "AI_Cost_Tracker",
+      "headers": ["Date","Model","Input_Tokens","Output_Tokens","Cost_ILS"]
     }
   ]
 }

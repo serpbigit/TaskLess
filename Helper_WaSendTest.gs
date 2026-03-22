@@ -1,4 +1,4 @@
-function TL_WA_sendTestMessage() {
+function Helper_WaSendTestMessage() {
 
   const phoneNumberId = "896133996927016";   // sender (your WA business line)
   const token = PropertiesService.getScriptProperties().getProperty("TL_SYSTEM_TOKEN");

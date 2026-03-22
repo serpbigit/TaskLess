@@ -77,6 +77,18 @@ Primary document roles:
 - `AGENT.md`: coding-agent operating rules
 - `WORKFLOW.md`: how Reuven, Robin, and the State Manager collaborate
 
+## 4.1. File Naming Discipline
+
+This repo can temporarily contain both TaskLess core work and Automatziot.com business-facing/demo work while the same coexist phone is being used for POC and potential-client exposure.
+
+Naming rule:
+- `TL_*.gs` = TaskLess core
+- `Onboarding_*.gs` = onboarding/setup-critical modules
+- `Helper_*.gs` = diagnostics and troubleshooting helpers
+- `Auto_*.gs` = Automatziot.com-facing business/demo modules
+
+When files are moved between these lanes, Robin should keep the prefixes aligned so the repo does not drift into ambiguous mixed-purpose naming.
+
 ## 5. Standard Delivery Flow
 
 This flow is single-lane by default.
@@ -142,6 +154,10 @@ When ready, Robin gives Reuven the exact PowerShell block for:
 - `clasp deploy --deploymentId AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo --description "<desc>"`
 
 Reason: this repo has had prior deployment friction, so deployment is handed off explicitly instead of being silently executed by an agent.
+
+Current personal runtime IDs:
+- Script ID: `1FlH23KHoQkKhLuKC-4k9bViZQcslXFe6LRnDcUQ_faIZpQdmAXjc1AXm`
+- Deployment ID: `AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo`
 
 ### Step 7: Post-deploy verification
 After Reuven confirms the deploy and the live change behaves correctly, Robin gives the final git command block for:

@@ -1,10 +1,10 @@
 /**
- * TL_Sheet_Probe
+ * Helper_SheetProbe
  * Hard-fail diagnostics for spreadsheet access and writes.
  * No silent catches.
  */
 
-function TL_PROBE_run() {
+function Helper_SheetProbe_Run() {
   const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
   if (!sheetId) throw new Error("Missing Script Property TL_SHEET_ID");
 

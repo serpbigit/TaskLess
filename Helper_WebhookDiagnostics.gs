@@ -1,5 +1,5 @@
 /**
- * TL_Webhook_Diagnostics
+ * Helper_WebhookDiagnostics
  *
  * Purpose:
  * - Prove the script can open the target spreadsheet
@@ -11,7 +11,7 @@
  * - TL_SHEET_ID
  */
 
-const TL_DIAG = {
+const HELPER_WEBHOOK_DIAG = {
   AUDIT_SHEET: "LOG",
   OPEN_SHEET: "OPEN",
   OPEN_HEADERS: [
@@ -20,7 +20,7 @@ const TL_DIAG = {
   ]
 };
 
-function TL_DIAG_runAll() {
+function Helper_WebhookDiagnostics_RunAll() {
   const nowIso = new Date().toISOString();
   const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
 
@@ -30,15 +30,15 @@ function TL_DIAG_runAll() {
 
   const ss = SpreadsheetApp.openById(sheetId);
 
-  TL_DIAG_appendAudit_(ss, "DIAG_START", {
+  Helper_WebhookDiagnostics_appendAudit_(ss, "DIAG_START", {
     nowIso: nowIso,
     spreadsheetId: ss.getId(),
     spreadsheetName: ss.getName()
   });
 
-  TL_DIAG_appendOpenSample_(ss, nowIso);
+  Helper_WebhookDiagnostics_appendOpenSample_(ss, nowIso);
 
-  TL_DIAG_appendAudit_(ss, "DIAG_DONE", {
+  Helper_WebhookDiagnostics_appendAudit_(ss, "DIAG_DONE", {
     nowIso: nowIso,
     result: "audit_and_open_written"
   });
@@ -53,9 +53,9 @@ function TL_DIAG_runAll() {
   };
 }
 
-function TL_DIAG_appendAudit_(ss, eventType, payloadObj) {
-  let sh = ss.getSheetByName(TL_DIAG.AUDIT_SHEET);
-  if (!sh) sh = ss.insertSheet(TL_DIAG.AUDIT_SHEET);
+function Helper_WebhookDiagnostics_appendAudit_(ss, eventType, payloadObj) {
+  let sh = ss.getSheetByName(HELPER_WEBHOOK_DIAG.AUDIT_SHEET);
+  if (!sh) sh = ss.insertSheet(HELPER_WEBHOOK_DIAG.AUDIT_SHEET);
 
   if (sh.getLastRow() === 0) {
     sh.appendRow(["timestamp","level","component","message","meta_json"]);
@@ -65,17 +65,17 @@ function TL_DIAG_appendAudit_(ss, eventType, payloadObj) {
   sh.appendRow([
     new Date().toISOString(),
     "INFO",
-    "TL_DIAG",
+    "Helper_WebhookDiagnostics",
     String(eventType || ""),
-    TL_DIAG_safeStringify_(payloadObj, 8000),
+    Helper_WebhookDiagnostics_safeStringify_(payloadObj, 8000),
   ]);
 }
 
-function TL_DIAG_appendOpenSample_(ss, nowIso) {
-  let sh = ss.getSheetByName(TL_DIAG.OPEN_SHEET);
-  if (!sh) sh = ss.insertSheet(TL_DIAG.OPEN_SHEET);
+function Helper_WebhookDiagnostics_appendOpenSample_(ss, nowIso) {
+  let sh = ss.getSheetByName(HELPER_WEBHOOK_DIAG.OPEN_SHEET);
+  if (!sh) sh = ss.insertSheet(HELPER_WEBHOOK_DIAG.OPEN_SHEET);
 
-  TL_DIAG_ensureOpenHeaders_(sh);
+  Helper_WebhookDiagnostics_ensureOpenHeaders_(sh);
 
   const sampleMessageId = "diag_" + nowIso.replace(/[:.]/g, "").replace(/-/g, "");
   const samplePayload = {
@@ -109,20 +109,20 @@ function TL_DIAG_appendOpenSample_(ss, nowIso) {
   ]);
 }
 
-function TL_DIAG_ensureOpenHeaders_(sh) {
-  const range = sh.getRange(1, 1, 1, TL_DIAG.OPEN_HEADERS.length);
+function Helper_WebhookDiagnostics_ensureOpenHeaders_(sh) {
+  const range = sh.getRange(1, 1, 1, HELPER_WEBHOOK_DIAG.OPEN_HEADERS.length);
   const existing = range.getValues()[0];
   const needs = existing.some(function(v, i) {
-    return String(v || "") !== String(TL_DIAG.OPEN_HEADERS[i] || "");
+    return String(v || "") !== String(HELPER_WEBHOOK_DIAG.OPEN_HEADERS[i] || "");
   });
 
   if (needs) {
-    range.setValues([TL_DIAG.OPEN_HEADERS]);
+    range.setValues([HELPER_WEBHOOK_DIAG.OPEN_HEADERS]);
     sh.setFrozenRows(1);
   }
 }
 
-function TL_DIAG_safeStringify_(obj, maxLen) {
+function Helper_WebhookDiagnostics_safeStringify_(obj, maxLen) {
   const lim = (typeof maxLen === "number" && isFinite(maxLen)) ? maxLen : 4000;
   let s = "";
   try {

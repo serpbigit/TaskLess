@@ -1,4 +1,4 @@
-function TL_PROBE_run() {
+function Helper_OpenSheetProbeLegacy_Run() {
 
   const sheetId = PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID");
   if (!sheetId) throw new Error("TL_SHEET_ID missing");

@@ -41,6 +41,9 @@ Never create a new deployment.
 
 Always reuse the existing deployment ID.
 
+Current personal Script ID:
+1FlH23KHoQkKhLuKC-4k9bViZQcslXFe6LRnDcUQ_faIZpQdmAXjc1AXm
+
 Deployment ID:
 AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo
 
@@ -53,6 +56,10 @@ Do not run `clasp deploy` without specifying the deploymentId.
 
 Creating a new deployment would change the webhook URL and break the system.
 
+`clasp push` uses the Script ID from `.clasp.json`.
+
+`clasp deploy` updates the fixed live deployment using the Deployment ID above.
+
 ### Codex shell note
 - In Codex, `clasp` may not resolve directly from PATH even when the repo working directory is correct.
 - Prefer the repo-local wrapper from the repo root:
@@ -63,7 +70,7 @@ Creating a new deployment would change the webhook URL and break the system.
 ## 8. Logging and Schema
 - All flows must log deterministically: inbound events, proposals, executions, successes, errors.
 - Schema snapshots live in SCHEMA.json; export and commit schema changes when they occur.
-- For sheet schema inspection, request TL_Sheets_ExportSchemaJson() output when needed.
+- For sheet schema inspection, request Helper_ExportSchemaJson() output when needed.
 - Every new channel, worker, or orchestration step should include a deterministic GAS test runner or smoke function so runtime behavior can be validated without relying only on ad hoc manual testing.
 
 ## 9. Response Style
@@ -77,3 +84,12 @@ Creating a new deployment would change the webhook URL and break the system.
 
 ## 10. File Locations
 - Keep AGENT.md at repo root; reference it from DEV_TASKS.md so it’s easy to find.
+
+## 11. Naming Lanes
+- This repo is primarily for TaskLess, but during development it may also host Automatziot.com business-facing flows on the same AI coexist phone used for POC and potential-client demos.
+- Keep naming lanes explicit so files do not blur together:
+  - `TL_*.gs` = TaskLess core runtime, orchestration, channels, ledger, AI, menu, and deterministic tests.
+  - `Onboarding_*.gs` = client onboarding/setup modules that are critical for bringing a client environment online.
+  - `Helper_*.gs` = diagnostics, probes, verification tools, schema tooling, and troubleshooting helpers that are not required for normal TaskLess runtime.
+  - `Auto_*.gs` = Automatziot.com business-facing/demo/customer modules that are not part of the reusable TaskLess core.
+- Prefer descriptive names after the prefix, for example `Auto_UserManual.gs`, `Onboarding_SubscribeAppToWaba.gs`, or `Helper_ExportSchema.gs`.

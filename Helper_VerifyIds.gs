@@ -1,4 +1,4 @@
-function TL_SimpleOwnerCheck() {
+function Helper_VerifyIds_SimpleOwnerCheck() {
   const props = PropertiesService.getScriptProperties();
   const token = props.getProperty('TL_SYSTEM_TOKEN');
   const phoneId = "1018098851384724";

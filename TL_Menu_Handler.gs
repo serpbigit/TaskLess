@@ -586,6 +586,10 @@ function TL_Menu_AnnotateBossCapture_(inboxRow, state, extraNote) {
   const loc = TL_AI_getInboxRow_(rowNumber);
   if (!loc) return false;
   let notes = TL_Capture_appendNote_(loc.values, marker);
+  const captureText = typeof TL_Capture_getInputText_ === "function" ? TL_Capture_getInputText_(loc.values) : "";
+  const captureLanguage = typeof TL_Capture_resolveLanguage_ === "function"
+    ? TL_Capture_resolveLanguage_(loc.values, captureText, TL_Menu_BossLanguage_())
+    : "";
   if (extraNote) {
     const extra = String(extraNote || "").trim();
     if (extra && String(notes || "").indexOf(extra) === -1) {
@@ -594,7 +598,8 @@ function TL_Menu_AnnotateBossCapture_(inboxRow, state, extraNote) {
   }
   TL_Orchestrator_updateRowFields_(rowNumber, {
     notes: notes,
-    task_status: "captured"
+    task_status: "captured",
+    capture_language: captureLanguage
   }, "menu_capture");
   return true;
 }
