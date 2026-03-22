@@ -42,12 +42,12 @@ Never create a new deployment.
 Always reuse the existing deployment ID.
 
 Deployment ID:
-AKfycbx1p8fg0eFua_9qLJ7tTk0P-cd_zLKxAHnc8KRfyIhgaPtwXANfEZ_QjG3a6pvfVefa
+AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo
 
 When deployment is required, the correct workflow is:
 
 1. clasp push
-2. clasp deploy --deploymentId AKfycbx1p8fg0eFua_9qLJ7tTk0P-cd_zLKxAHnc8KRfyIhgaPtwXANfEZ_QjG3a6pvfVefa --description "<short description>"
+2. clasp deploy --deploymentId AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo --description "<short description>"
 
 Do not run `clasp deploy` without specifying the deploymentId.
 
@@ -57,7 +57,7 @@ Creating a new deployment would change the webhook URL and break the system.
 - In Codex, `clasp` may not resolve directly from PATH even when the repo working directory is correct.
 - Prefer the repo-local wrapper from the repo root:
   - `.\scripts\clasp.ps1 push`
-  - `.\scripts\clasp.ps1 deploy --deploymentId AKfycbx1p8fg0eFua_9qLJ7tTk0P-cd_zLKxAHnc8KRfyIhgaPtwXANfEZ_QjG3a6pvfVefa --description "<short description>"`
+  - `.\scripts\clasp.ps1 deploy --deploymentId AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo --description "<short description>"`
 - If the desktop app shows an approval option such as "don't ask again" for the PowerShell command prefix, it is useful to approve it so future `git`/`clasp` runs are faster.
 
 ## 8. Logging and Schema

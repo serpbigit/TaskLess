@@ -139,7 +139,7 @@ Robin integrates implementation and test results, then chooses one of:
 ### Step 6: Manual deploy handoff
 When ready, Robin gives Reuven the exact PowerShell block for:
 - `clasp push`
-- `clasp deploy --deploymentId AKfycbx1p8fg0eFua_9qLJ7tTk0P-cd_zLKxAHnc8KRfyIhgaPtwXANfEZ_QjG3a6pvfVefa --description "<desc>"`
+- `clasp deploy --deploymentId AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo --description "<desc>"`
 
 Reason: this repo has had prior deployment friction, so deployment is handed off explicitly instead of being silently executed by an agent.
 

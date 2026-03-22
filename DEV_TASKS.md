@@ -248,7 +248,7 @@ Google Apps Script webhook deployed.
 
 Webhook endpoint:
 
-https://script.google.com/macros/s/AKfycbx1p8fg0eFua_9qLJ7tTk0P-cd_zLKxAHnc8KRfyIhgaPtwXANfEZ_QjG3a6pvfVefa/exec
+https://script.google.com/macros/s/AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo/exec
 
 Google Sheet logging infrastructure created.
 

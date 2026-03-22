@@ -9,6 +9,6 @@ Usage from `C:\dev\gas\TaskLess`:
 
 ```powershell
 .\scripts\clasp.ps1 push
-.\scripts\clasp.ps1 deploy --deploymentId AKfycbx1p8fg0eFua_9qLJ7tTk0P-cd_zLKxAHnc8KRfyIhgaPtwXANfEZ_QjG3a6pvfVefa --description "session-context-and-contact-sync"
+.\scripts\clasp.ps1 deploy --deploymentId AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo --description "session-context-and-contact-sync"
 ```
 
