@@ -10,7 +10,8 @@ function TL_TestContacts_RunAll() {
     preserve_manual_fields: TL_TestContacts_PreserveManualFieldsRun(),
     sync_mode_filter: TL_TestContacts_SyncModeFilterRun(),
     phone_candidate_split: TL_TestContacts_PhoneCandidateSplitRun(),
-    replace_error_phone: TL_TestContacts_ReplaceErrorPhoneRun()
+    replace_error_phone: TL_TestContacts_ReplaceErrorPhoneRun(),
+    resolve_search_queries: TL_TestContacts_ResolveSearchQueriesRun()
   };
 }
 
@@ -199,5 +200,61 @@ function TL_TestContacts_ReplaceErrorPhoneRun() {
   return {
     ok: merged.phone1 === "972546629996" && merged.phone1_normalized === "972546629996",
     merged: merged
+  };
+}
+
+function TL_TestContacts_ResolveSearchQueriesRun() {
+  const contacts = [
+    {
+      contactId: "GC_1",
+      name: "אופיר כהן",
+      alias: "Ofir Cohen",
+      org: "",
+      role: "",
+      tags: "",
+      email: "ofir@example.com",
+      phone1: "972509639111",
+      phone2: "",
+      phone1Norm: "972509639111",
+      phone2Norm: "",
+      emailNorm: "ofir@example.com"
+    },
+    {
+      contactId: "GC_2",
+      name: "אורי לוי",
+      alias: "Uri Levi",
+      org: "",
+      role: "",
+      tags: "",
+      email: "uri@example.com",
+      phone1: "972501112222",
+      phone2: "",
+      phone1Norm: "972501112222",
+      phone2Norm: "",
+      emailNorm: "uri@example.com"
+    }
+  ];
+
+  const result = TL_Contacts_resolveBySearchHints_({
+    rawText: "אני מחפש את אופיר בטלפון עם ספרות 963",
+    extraction: {
+      contact_query: "אופיר",
+      search_queries: [
+        { type: "name", value: "אופיר" },
+        { type: "name", value: "Ofir" },
+        { type: "name_prefix", value: "אופ" },
+        { type: "phone_fragment", value: "963" }
+      ]
+    }
+  }, contacts);
+
+  return {
+    ok: !!(result && result.contact && result.contact.contactId === "GC_1") &&
+      Array.isArray(result.candidates) &&
+      result.candidates.length > 0 &&
+      result.candidates[0].contactId === "GC_1",
+    resolved: result && result.contact ? result.contact.contactId : "",
+    firstCandidate: result && result.candidates && result.candidates[0] ? result.candidates[0].contactId : "",
+    queries: result && result.queries ? result.queries : []
   };
 }

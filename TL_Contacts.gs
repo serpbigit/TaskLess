@@ -569,6 +569,346 @@ function TL_Contacts_normalizeEmail_(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function TL_Contacts_normalizeSearchText_(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/["'׳״.,;:()_\-\/\\]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function TL_Contacts_stripNonDigits_(value) {
+  return String(value || "").replace(/[^\d]/g, "");
+}
+
+function TL_Contacts_normalizeStringArray_(value) {
+  if (Array.isArray(value)) {
+    return value.map(function(item) {
+      return String(item || "").trim();
+    }).filter(Boolean);
+  }
+  const single = String(value || "").trim();
+  return single ? [single] : [];
+}
+
+function TL_Contacts_readSearchContacts_() {
+  const out = [];
+  try {
+    const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+    if (!sheetId) return out;
+    const ss = SpreadsheetApp.openById(sheetId);
+    const sh = ss.getSheetByName("CONTACTS");
+    if (!sh || sh.getLastRow() < 2) return out;
+    const values = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
+    const headers = values[0];
+    const rows = values.slice(1);
+    const idx = {};
+    headers.forEach(function(header, index) { idx[String(header || "")] = index; });
+    rows.forEach(function(row) {
+      const contactId = String(row[idx.contact_id] || "").trim();
+      const name = String(row[idx.name] || "").trim();
+      if (!contactId || !name) return;
+      const alias = String(row[idx.alias] || "").trim();
+      const org = String(row[idx.org] || "").trim();
+      const role = String(row[idx.role] || "").trim();
+      const tags = String(row[idx.tags] || "").trim();
+      const email = String(row[idx.email] || "").trim();
+      const phone1 = String(row[idx.phone1] || "").trim();
+      const phone2 = String(row[idx.phone2] || "").trim();
+      out.push({
+        contactId: contactId,
+        name: name,
+        alias: alias,
+        org: org,
+        role: role,
+        tags: tags,
+        email: email,
+        phone1: phone1,
+        phone2: phone2,
+        phone1Norm: TL_Contacts_normalizePhoneField_(row[idx.phone1_normalized] || phone1 || ""),
+        phone2Norm: TL_Contacts_normalizePhoneField_(row[idx.phone2_normalized] || phone2 || ""),
+        emailNorm: TL_Contacts_normalizeEmail_(row[idx.email_normalized] || email || ""),
+        nameNorm: TL_Contacts_normalizeSearchText_(name),
+        aliasNorm: TL_Contacts_normalizeSearchText_(alias),
+        orgNorm: TL_Contacts_normalizeSearchText_(org),
+        roleNorm: TL_Contacts_normalizeSearchText_(role),
+        tagsNorm: TL_Contacts_normalizeSearchText_(tags)
+      });
+    });
+  } catch (err) {}
+  return out;
+}
+
+function TL_Contacts_buildSearchHints_(rawText, extraction) {
+  const raw = String(rawText || "").trim();
+  const data = extraction || {};
+  const query = String(data.contact_query || raw).trim();
+
+  const nameHints = [];
+  const phoneHints = [];
+  const emailHints = [];
+  const relationshipHints = [];
+  const orgHints = [];
+
+  TL_Contacts_normalizeStringArray_(data.name_hints).forEach(function(item) {
+    TL_Contacts_pushUniqueHint_(nameHints, item);
+  });
+  TL_Contacts_normalizeStringArray_(data.phone_hints).forEach(function(item) {
+    TL_Contacts_pushUniqueHint_(phoneHints, TL_Contacts_stripNonDigits_(item));
+  });
+  TL_Contacts_normalizeStringArray_(data.email_hints).forEach(function(item) {
+    TL_Contacts_pushUniqueHint_(emailHints, TL_Contacts_normalizeEmail_(item));
+  });
+  TL_Contacts_normalizeStringArray_(data.relationship_hints).forEach(function(item) {
+    TL_Contacts_pushUniqueHint_(relationshipHints, item);
+  });
+  TL_Contacts_normalizeStringArray_(data.org_hints).forEach(function(item) {
+    TL_Contacts_pushUniqueHint_(orgHints, item);
+  });
+
+  const emailMatches = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  emailMatches.forEach(function(item) {
+    TL_Contacts_pushUniqueHint_(emailHints, TL_Contacts_normalizeEmail_(item));
+  });
+
+  const phoneMatches = raw.match(/\d[\d\-\s().]{1,}\d/g) || [];
+  phoneMatches.forEach(function(item) {
+    const digits = TL_Contacts_stripNonDigits_(item);
+    if (digits.length >= 3) TL_Contacts_pushUniqueHint_(phoneHints, digits);
+  });
+
+  if (query) {
+    const queryEmail = TL_Contacts_normalizeEmail_(query);
+    if (queryEmail.indexOf("@") !== -1) {
+      TL_Contacts_pushUniqueHint_(emailHints, queryEmail);
+    } else {
+      const queryDigits = TL_Contacts_stripNonDigits_(query);
+      if (queryDigits.length >= 3) TL_Contacts_pushUniqueHint_(phoneHints, queryDigits);
+      const normalizedQuery = TL_Contacts_normalizeSearchText_(query);
+      if (normalizedQuery) {
+        TL_Contacts_pushUniqueHint_(nameHints, normalizedQuery);
+        normalizedQuery.split(" ").forEach(function(token) {
+          if (!token) return;
+          TL_Contacts_pushUniqueHint_(nameHints, token);
+          if (token.length >= 3) TL_Contacts_pushUniqueHint_(nameHints, token.slice(0, 3));
+        });
+      }
+    }
+  }
+
+  return {
+    query: query,
+    nameHints: nameHints,
+    phoneHints: phoneHints.filter(function(item) { return String(item || "").length >= 3; }),
+    emailHints: emailHints,
+    relationshipHints: relationshipHints.map(TL_Contacts_normalizeSearchText_).filter(Boolean),
+    orgHints: orgHints.map(TL_Contacts_normalizeSearchText_).filter(Boolean)
+  };
+}
+
+function TL_Contacts_normalizeSearchQueryType_(value) {
+  const v = String(value || "").trim().toLowerCase();
+  const allowed = ["name", "name_prefix", "phone_fragment", "email", "relationship", "org"];
+  return allowed.indexOf(v) !== -1 ? v : "";
+}
+
+function TL_Contacts_buildSearchQueries_(rawText, extraction) {
+  const data = extraction || {};
+  const out = [];
+
+  function pushQuery(type, value) {
+    const normalizedType = TL_Contacts_normalizeSearchQueryType_(type);
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedType || !normalizedValue) return;
+    const signature = normalizedType + "::" + normalizedValue.toLowerCase();
+    if (out.some(function(item) {
+      return (item.type + "::" + String(item.value || "").toLowerCase()) === signature;
+    })) return;
+    out.push({ type: normalizedType, value: normalizedValue });
+  }
+
+  const explicitQueries = Array.isArray(data.search_queries) ? data.search_queries : [];
+  explicitQueries.forEach(function(item) {
+    if (!item || typeof item !== "object") return;
+    pushQuery(item.type, item.value);
+  });
+
+  TL_Contacts_normalizeStringArray_(data.name_hints).forEach(function(item) { pushQuery("name", item); });
+  TL_Contacts_normalizeStringArray_(data.phone_hints).forEach(function(item) {
+    const digits = TL_Contacts_stripNonDigits_(item);
+    if (digits.length >= 3) pushQuery("phone_fragment", digits);
+  });
+  TL_Contacts_normalizeStringArray_(data.email_hints).forEach(function(item) { pushQuery("email", TL_Contacts_normalizeEmail_(item)); });
+  TL_Contacts_normalizeStringArray_(data.relationship_hints).forEach(function(item) { pushQuery("relationship", item); });
+  TL_Contacts_normalizeStringArray_(data.org_hints).forEach(function(item) { pushQuery("org", item); });
+
+  const hints = TL_Contacts_buildSearchHints_(rawText, extraction);
+  (hints.nameHints || []).forEach(function(item, idx) {
+    pushQuery(idx === 0 ? "name" : "name_prefix", item);
+  });
+  (hints.phoneHints || []).forEach(function(item) { pushQuery("phone_fragment", item); });
+  (hints.emailHints || []).forEach(function(item) { pushQuery("email", item); });
+  (hints.relationshipHints || []).forEach(function(item) { pushQuery("relationship", item); });
+  (hints.orgHints || []).forEach(function(item) { pushQuery("org", item); });
+
+  return out.slice(0, 12);
+}
+
+function TL_Contacts_pushUniqueHint_(target, value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return;
+  if (target.indexOf(normalized) === -1) target.push(normalized);
+}
+
+function TL_Contacts_resolveBySearchHints_(input, contactsOverride) {
+  const source = input || {};
+  const contacts = Array.isArray(contactsOverride) ? contactsOverride : TL_Contacts_readSearchContacts_();
+  const rawText = source.rawText || source.query || "";
+  const queries = TL_Contacts_buildSearchQueries_(rawText, source.extraction || source);
+  const scoredMap = {};
+
+  queries.forEach(function(query) {
+    (contacts || []).forEach(function(contact) {
+      const hit = TL_Contacts_scoreSearchCandidate_(contact, query);
+      if (hit.score <= 0) return;
+      const key = String(contact.contactId || "");
+      if (!scoredMap[key]) {
+        scoredMap[key] = {
+          contact: contact,
+          score: 0,
+          reasons: [],
+          matchedQueryTypes: {}
+        };
+      }
+      scoredMap[key].score += hit.score;
+      hit.reasons.forEach(function(reason) {
+        if (scoredMap[key].reasons.indexOf(reason) === -1) scoredMap[key].reasons.push(reason);
+      });
+      scoredMap[key].matchedQueryTypes[query.type] = true;
+    });
+  });
+
+  const scored = Object.keys(scoredMap).map(function(key) {
+    const item = scoredMap[key];
+    const queryTypeCount = Object.keys(item.matchedQueryTypes).length;
+    if (queryTypeCount > 1) item.score += (queryTypeCount - 1) * 25;
+    return item;
+  });
+
+  scored.sort(function(a, b) {
+    if (b.score !== a.score) return b.score - a.score;
+    return String(a.contact.name || "").localeCompare(String(b.contact.name || ""));
+  });
+
+  const candidates = scored.slice(0, 5).map(function(item) {
+    const enriched = Object.assign({}, item.contact);
+    enriched.matchScore = item.score;
+    enriched.matchReasons = item.reasons.slice();
+    return enriched;
+  });
+
+  const top = scored.length ? scored[0] : null;
+  const second = scored.length > 1 ? scored[1] : null;
+  let resolved = null;
+
+  if (scored.length === 1) {
+    resolved = candidates[0];
+  } else if (top && top.score >= 140 && (!second || (top.score - second.score) >= 35)) {
+    resolved = candidates[0];
+  }
+
+  return {
+    contact: resolved,
+    candidates: candidates,
+    queries: queries
+  };
+}
+
+function TL_Contacts_scoreSearchCandidate_(contact, query) {
+  const reasons = [];
+  let score = 0;
+  const phoneFields = [String(contact && contact.phone1Norm || ""), String(contact && contact.phone2Norm || "")].filter(Boolean);
+  const emailField = String(contact && contact.emailNorm || "").trim();
+  const nameFields = [
+    TL_Contacts_normalizeSearchText_(contact && contact.name || ""),
+    TL_Contacts_normalizeSearchText_(contact && contact.alias || "")
+  ].filter(Boolean);
+  const contextFields = [
+    TL_Contacts_normalizeSearchText_(contact && contact.org || ""),
+    TL_Contacts_normalizeSearchText_(contact && contact.role || ""),
+    TL_Contacts_normalizeSearchText_(contact && contact.tags || "")
+  ].filter(Boolean);
+  const kind = String(query && query.type || "").trim().toLowerCase();
+  const rawValue = String(query && query.value || "").trim();
+  const value = kind === "email" ? TL_Contacts_normalizeEmail_(rawValue)
+    : kind === "phone_fragment" ? TL_Contacts_stripNonDigits_(rawValue)
+    : TL_Contacts_normalizeSearchText_(rawValue);
+
+  if (!kind || !value) {
+    return { contact: contact, score: 0, reasons: [] };
+  }
+
+  if (kind === "phone_fragment") {
+    phoneFields.forEach(function(phone) {
+      if (phone === value) {
+        score += 150;
+        reasons.push("exact_phone:" + value);
+      } else if (value.length >= 3 && phone.indexOf(value) !== -1) {
+        score += 60;
+        reasons.push("partial_phone:" + value);
+      }
+    });
+  } else if (kind === "email") {
+    if (emailField === value) {
+      score += 150;
+      reasons.push("exact_email:" + value);
+    } else if (emailField && emailField.indexOf(value) !== -1) {
+      score += 70;
+      reasons.push("partial_email:" + value);
+    }
+  } else if (kind === "relationship" || kind === "org") {
+    contextFields.forEach(function(field) {
+      if (!field) return;
+      if (field === value) {
+        score += 60;
+        reasons.push("exact_context:" + value);
+      } else if (field.indexOf(value) !== -1) {
+        score += 35;
+        reasons.push("partial_context:" + value);
+      }
+    });
+  } else {
+    nameFields.forEach(function(field) {
+      const tokens = field.split(" ").filter(Boolean);
+      if (field === value) {
+        score += 120;
+        reasons.push("exact_name:" + value);
+        return;
+      }
+      if (tokens.indexOf(value) !== -1) {
+        score += 105;
+        reasons.push("token_name:" + value);
+        return;
+      }
+      if (kind === "name_prefix" && (field.indexOf(value) === 0 || tokens.some(function(token) { return token.indexOf(value) === 0; }))) {
+        score += 80;
+        reasons.push("prefix_name:" + value);
+        return;
+      }
+      if (field.indexOf(value) !== -1) {
+        score += kind === "name_prefix" ? 45 : 55;
+        reasons.push("partial_name:" + value);
+      }
+    });
+  }
+
+  return {
+    contact: contact,
+    score: score,
+    reasons: reasons
+  };
+}
+
 function TL_Contacts_sanitizeStoredText_(value) {
   const text = String(value == null ? "" : value).trim();
   if (/^#(?:ERROR|REF|VALUE|NAME|N\/A|DIV\/0)!?$/i.test(text)) return "";

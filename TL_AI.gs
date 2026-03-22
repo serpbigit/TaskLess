@@ -238,16 +238,21 @@ function TL_AI_buildContactEnrichmentPrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Required JSON shape:",
-    '{"contact_query":"...","note_type":"personal_context|family_event|business_context|followup_context|preference|relationship_signal|general","note_text":"...","summary":"...","proposal":"..."}',
+    '{"contact_query":"...","search_queries":[{"type":"name|name_prefix|phone_fragment|email|relationship|org","value":"..."}],"note_type":"personal_context|family_event|business_context|followup_context|preference|relationship_signal|general","note_text":"...","summary":"...","proposal":"..."}',
     "Rules:",
     "contact_query should be the person name, phone, or email mentioned by the Boss.",
+    "search_queries should be an ordered list of separate CONTACTS searches to try.",
+    "Prefer including both Hebrew and English spellings when useful, plus a short prefix and any phone fragment.",
+    "Do not combine name and phone into one search string. Return separate query objects.",
+    "Valid search query types are: name, name_prefix, phone_fragment, email, relationship, org.",
     "note_text should contain only the durable fact/context worth saving for future drafts.",
     "summary should be concise and mention the contact plus the saved context.",
     "proposal should be phrased as an approval sentence for adding contact memory/enrichment.",
     "If the Boss message does not clearly contain a contact enrichment request, return empty strings and note_type=general.",
     "Examples:",
-    '{"contact_query":"David","note_type":"family_event","note_text":"I met David and his son has a wedding next week.","summary":"דוד: לבן שלו יש חתונה בשבוע הבא.","proposal":"להוסיף לדוד הערת קשר: לבן שלו יש חתונה בשבוע הבא."}',
-    '{"contact_query":"Sarah","note_type":"business_context","note_text":"Waiting on the quote sent last week.","summary":"שרה: ממתינה להצעת המחיר שנשלחה בשבוע שעבר.","proposal":"להוסיף לשרה הקשר עסקי: ממתינה להצעת המחיר שנשלחה בשבוע שעבר."}',
+    '{"contact_query":"David","search_queries":[{"type":"name","value":"David"},{"type":"name_prefix","value":"Dav"}],"note_type":"family_event","note_text":"I met David and his son has a wedding next week.","summary":"דוד: לבן שלו יש חתונה בשבוע הבא.","proposal":"להוסיף לדוד הערת קשר: לבן שלו יש חתונה בשבוע הבא."}',
+    '{"contact_query":"Sarah","search_queries":[{"type":"name","value":"Sarah"},{"type":"name_prefix","value":"Sar"}],"note_type":"business_context","note_text":"Waiting on the quote sent last week.","summary":"שרה: ממתינה להצעת המחיר שנשלחה בשבוע שעבר.","proposal":"להוסיף לשרה הקשר עסקי: ממתינה להצעת המחיר שנשלחה בשבוע שעבר."}',
+    '{"contact_query":"אופיר","search_queries":[{"type":"name","value":"אופיר"},{"type":"name","value":"Ofir"},{"type":"name_prefix","value":"אופ"},{"type":"phone_fragment","value":"963"}],"note_type":"general","note_text":"לחזור לאופיר לגבי הסיכום.","summary":"אופיר: לחזור לגבי הסיכום.","proposal":"להוסיף לאופיר תזכורת קשר: לחזור לגבי הסיכום."}',
     "Boss message:",
     String(inputText || "")
   ].join("\n");
@@ -521,10 +526,17 @@ function TL_AI_ExtractContactEnrichment_(inputText) {
   const prompt = TL_AI_buildContactEnrichmentPrompt_(String(inputText || ""), cfg.language, cfg.bossName);
   const result = TL_AI_callPrompt_(prompt);
   const raw = result.raw_json || {};
+  const searchQueries = TL_AI_normalizeSearchQueries_(raw.search_queries);
   return {
     ok: true,
     status: result.status,
     contact_query: String(raw.contact_query || "").trim(),
+    search_queries: searchQueries,
+    name_hints: TL_AI_normalizeStringArray_(raw.name_hints),
+    phone_hints: TL_AI_normalizeStringArray_(raw.phone_hints),
+    email_hints: TL_AI_normalizeStringArray_(raw.email_hints),
+    relationship_hints: TL_AI_normalizeStringArray_(raw.relationship_hints),
+    org_hints: TL_AI_normalizeStringArray_(raw.org_hints),
     note_type: TL_AI_normalizeContactEnrichmentType_(raw.note_type),
     note_text: String(raw.note_text || result.summary || "").trim(),
     summary: String(raw.summary || result.summary || "").trim(),
@@ -1085,6 +1097,42 @@ function TL_AI_normalizeContactEnrichmentType_(value) {
     "general"
   ];
   return allowed.indexOf(v) !== -1 ? v : "general";
+}
+
+function TL_AI_normalizeStringArray_(value) {
+  const raw = Array.isArray(value) ? value : [value];
+  const out = [];
+  raw.forEach(function(item) {
+    const text = String(item || "").trim();
+    if (!text) return;
+    if (out.indexOf(text) === -1) out.push(text);
+  });
+  return out.slice(0, 8);
+}
+
+function TL_AI_normalizeSearchQueryType_(value) {
+  const v = String(value || "").trim().toLowerCase();
+  const allowed = ["name", "name_prefix", "phone_fragment", "email", "relationship", "org"];
+  return allowed.indexOf(v) !== -1 ? v : "name";
+}
+
+function TL_AI_normalizeSearchQueries_(value) {
+  const out = [];
+  const raw = Array.isArray(value) ? value : [];
+  raw.forEach(function(item) {
+    const query = item && typeof item === "object" ? item : {};
+    const normalized = {
+      type: TL_AI_normalizeSearchQueryType_(query.type),
+      value: String(query.value || "").trim()
+    };
+    if (!normalized.value) return;
+    const signature = normalized.type + "::" + normalized.value.toLowerCase();
+    if (out.some(function(existing) {
+      return (existing.type + "::" + String(existing.value || "").toLowerCase()) === signature;
+    })) return;
+    out.push(normalized);
+  });
+  return out.slice(0, 12);
 }
 
 function TL_AI_normalizeBossConfidence_(value) {

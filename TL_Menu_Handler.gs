@@ -905,91 +905,26 @@ function TL_Menu_BuildContactEnrichmentProposalRow_(sourceValues, sourceRowNumbe
 }
 
 function TL_Menu_ResolveContactForEnrichment_(captureText, extraction) {
-  const contacts = TL_Menu_ReadContacts_();
-  const rawText = String(captureText || "").trim();
-  const query = String((extraction && extraction.contact_query) || "").trim();
-  const phoneMatch = rawText.match(/(\+?\d[\d\-\s().]{6,}\d)/);
-  const emailMatch = rawText.match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
-  const phone = phoneMatch ? TL_Contacts_normalizePhoneField_(phoneMatch[1]) : "";
-  const email = emailMatch ? String(emailMatch[1] || "").trim().toLowerCase() : "";
-
-  if (phone) {
-    const byPhone = contacts.filter(function(contact) {
-      return contact.phone1Norm === phone || contact.phone2Norm === phone;
-    });
-    if (byPhone.length === 1) return { contact: byPhone[0], candidates: byPhone };
-    if (byPhone.length > 1) return { contact: null, candidates: byPhone };
+  if (typeof TL_Contacts_resolveBySearchHints_ !== "function") {
+    return { contact: null, candidates: [] };
   }
-
-  if (email) {
-    const byEmail = contacts.filter(function(contact) {
-      return contact.emailNorm === email;
-    });
-    if (byEmail.length === 1) return { contact: byEmail[0], candidates: byEmail };
-    if (byEmail.length > 1) return { contact: null, candidates: byEmail };
-  }
-
-  const candidates = TL_Menu_FindContactCandidatesByName_(query || rawText, contacts);
-  if (candidates.length === 1) return { contact: candidates[0], candidates: candidates };
-  return { contact: null, candidates: candidates };
+  return TL_Contacts_resolveBySearchHints_({
+    rawText: String(captureText || "").trim(),
+    extraction: extraction || {}
+  });
 }
 
 function TL_Menu_ReadContacts_() {
-  const out = [];
-  try {
-    const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
-    if (!sheetId) return out;
-    const ss = SpreadsheetApp.openById(sheetId);
-    const sh = ss.getSheetByName("CONTACTS");
-    if (!sh || sh.getLastRow() < 2) return out;
-    const values = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
-    const headers = values[0];
-    const rows = values.slice(1);
-    const idx = {};
-    headers.forEach(function(header, index) { idx[String(header || "")] = index; });
-    rows.forEach(function(row) {
-      const contactId = String(row[idx.contact_id] || "").trim();
-      const name = String(row[idx.name] || "").trim();
-      if (!contactId || !name) return;
-      out.push({
-        contactId: contactId,
-        name: name,
-        alias: String(row[idx.alias] || "").trim(),
-        phone1: String(row[idx.phone1] || "").trim(),
-        phone2: String(row[idx.phone2] || "").trim(),
-        email: String(row[idx.email] || "").trim(),
-        phone1Norm: TL_Contacts_normalizePhoneField_(row[idx.phone1_normalized] || row[idx.phone1] || ""),
-        phone2Norm: TL_Contacts_normalizePhoneField_(row[idx.phone2_normalized] || row[idx.phone2] || ""),
-        emailNorm: String(row[idx.email_normalized] || row[idx.email] || "").trim().toLowerCase()
-      });
-    });
-  } catch (err) {}
-  return out;
+  return typeof TL_Contacts_readSearchContacts_ === "function" ? TL_Contacts_readSearchContacts_() : [];
 }
 
 function TL_Menu_FindContactCandidatesByName_(query, contacts) {
-  const normalizedQuery = TL_Menu_NormalizeContactSearchText_(query);
-  if (!normalizedQuery) return [];
-  const queryTokens = normalizedQuery.split(" ").filter(Boolean);
-  return (contacts || []).map(function(contact) {
-    const haystack = TL_Menu_NormalizeContactSearchText_([
-      contact.name,
-      contact.alias,
-      contact.email
-    ].filter(Boolean).join(" "));
-    if (!haystack) return null;
-    let score = 0;
-    if (haystack === normalizedQuery) score += 100;
-    if (haystack.indexOf(normalizedQuery) !== -1) score += 60;
-    queryTokens.forEach(function(token) {
-      if (token && haystack.indexOf(token) !== -1) score += 15;
-    });
-    return score > 0 ? { contact: contact, score: score } : null;
-  }).filter(Boolean).sort(function(a, b) {
-    return b.score - a.score;
-  }).slice(0, 5).map(function(item) {
-    return item.contact;
-  });
+  if (typeof TL_Contacts_resolveBySearchHints_ !== "function") return [];
+  const result = TL_Contacts_resolveBySearchHints_({
+    query: String(query || "").trim(),
+    name_hints: [String(query || "").trim()]
+  }, contacts || []);
+  return result && result.candidates ? result.candidates : [];
 }
 
 function TL_Menu_NormalizeContactSearchText_(value) {
