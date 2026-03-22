@@ -19,15 +19,13 @@ const TL_DRAFT_CONTEXT = {
 };
 
 function TL_DraftContext_BuildForInboxRowValues_(values, options) {
-  const direction = String(TL_Orchestrator_value_(values, "direction") || "").trim().toLowerCase();
-  const actorPhone = direction === "incoming"
-    ? TL_Orchestrator_value_(values, "sender")
-    : (TL_Orchestrator_value_(values, "receiver") || TL_Orchestrator_value_(values, "sender"));
-  const identity = {
-    contactId: TL_Orchestrator_value_(values, "contact_id"),
-    phone: actorPhone,
-    email: ""
-  };
+  const identity = TL_DraftContext_buildIdentity_(
+    String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase(),
+    String(TL_Orchestrator_value_(values, "direction") || "").trim().toLowerCase(),
+    TL_Orchestrator_value_(values, "contact_id"),
+    TL_Orchestrator_value_(values, "sender"),
+    TL_Orchestrator_value_(values, "receiver")
+  );
   const mergedOptions = Object.assign({}, options || {}, {
     excludeWhatsAppSourceId: String(TL_Orchestrator_value_(values, "record_id") || TL_Orchestrator_value_(values, "message_id") || "").trim()
   });
@@ -59,8 +57,32 @@ function TL_DraftContext_build_(identity, options) {
     enrichments: enrichments,
     emails: emails,
     whatsapps: whatsapps,
-    promptBrief: TL_DraftContext_renderPromptBrief_(resolved, enrichments, emails, whatsapps)
+    promptBrief: TL_DraftContext_renderPromptBrief_(resolved, enrichments, emails, whatsapps),
+    reviewBrief: TL_DraftContext_renderReviewBrief_(resolved, enrichments, emails, whatsapps)
   };
+}
+
+function TL_DraftContext_buildIdentity_(channel, direction, contactId, sender, receiver) {
+  const normalizedChannel = String(channel || "").trim().toLowerCase();
+  const normalizedDirection = String(direction || "").trim().toLowerCase();
+  const actor = normalizedDirection === "incoming"
+    ? sender
+    : (receiver || sender);
+  const emailSource = normalizedChannel === "email"
+    ? (actor || sender || receiver)
+    : "";
+  return {
+    contactId: String(contactId || "").trim(),
+    phone: normalizedChannel === "email" ? "" : TL_Contacts_normalizePhoneField_(actor || ""),
+    email: TL_DraftContext_extractEmailAddress_(emailSource)
+  };
+}
+
+function TL_DraftContext_extractEmailAddress_(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  const match = raw.match(/[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}/i);
+  return match ? String(match[0] || "").trim().toLowerCase() : raw;
 }
 
 function TL_DraftContext_resolveContact_(identity) {
@@ -270,6 +292,59 @@ function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsa
   }
 
   return lines.join("\n");
+}
+
+function TL_DraftContext_renderReviewBrief_(contact, enrichments, emails, whatsapps) {
+  const lines = [];
+  const contactBits = [];
+  const contactName = String(contact && contact.name || "").trim();
+  const contactPhone = String(contact && contact.phone || "").trim();
+  const contactEmail = String(contact && contact.email || "").trim();
+
+  if (contactName) contactBits.push(contactName);
+  if (contactPhone) contactBits.push("phone=" + contactPhone);
+  if (contactEmail) contactBits.push("email=" + contactEmail);
+
+  lines.push(contactBits.length ? ("איש קשר: " + contactBits.join(" | ")) : "איש קשר: לא זוהה");
+
+  const enrichLines = TL_DraftContext_renderReviewSection_(enrichments, 2, function(item) {
+    const noteType = String(item && item.noteType || "").trim();
+    const noteText = String(item && item.noteText || "").trim();
+    return [noteType, noteText].filter(Boolean).join(" | ");
+  });
+  if (enrichLines.length) lines.push("זיכרון: " + enrichLines.join(" ; "));
+
+  const emailLines = TL_DraftContext_renderReviewSection_(emails, 1, function(item) {
+    const subject = String(item && item.subject || "").trim();
+    const summary = String(item && item.summary || "").trim();
+    const parts = [];
+    if (subject) parts.push(subject);
+    if (summary) parts.push(summary);
+    return parts.join(" | ");
+  });
+  if (emailLines.length) lines.push("אימייל: " + emailLines.join(" ; "));
+
+  const whatsappLines = TL_DraftContext_renderReviewSection_(whatsapps, 1, function(item) {
+    const direction = String(item && item.direction || "").trim();
+    const summary = String(item && item.summary || "").trim();
+    const parts = [];
+    if (direction) parts.push(direction);
+    if (summary) parts.push(summary);
+    return parts.join(" | ");
+  });
+  if (whatsappLines.length) lines.push("וואטסאפ: " + whatsappLines.join(" ; "));
+
+  return lines.join("\n");
+}
+
+function TL_DraftContext_renderReviewSection_(items, limit, formatter) {
+  const out = [];
+  const max = Number(limit || 0);
+  (items || []).slice(0, max > 0 ? max : (items || []).length).forEach(function(item) {
+    const text = String(formatter ? formatter(item) : "").trim();
+    if (text) out.push(text);
+  });
+  return out;
 }
 
 function TL_DraftContext_preview_(text, limit) {
