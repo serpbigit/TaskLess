@@ -157,7 +157,15 @@ function TL_Menu_GetState_(waId) {
 }
 
 function TL_Menu_IsNumericChoice_(text) {
-  return /^\d+$/.test(String(text || "").trim());
+  return !!TL_Menu_ParseChoice_(text);
+}
+
+function TL_Menu_ParseChoice_(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return "";
+  const match = normalized.match(/^(\d{1,2})(?:\s|[).,:-]|$)/);
+  if (match && match[1]) return String(match[1]).trim();
+  return /^\d+$/.test(normalized) ? normalized : "";
 }
 
 function TL_Menu_IsCaptureState_(state) {
@@ -166,7 +174,8 @@ function TL_Menu_IsCaptureState_(state) {
 
 function TL_Menu_HandleMenuChoice_(waId, state, choice) {
   const current = String(state || TL_MENU_STATES.ROOT);
-  const value = String(choice || "").trim();
+  const value = TL_Menu_ParseChoice_(choice);
+  if (!value) return null;
   switch (current) {
     case TL_MENU_STATES.ROOT: return TL_Menu_HandleRootChoice_(waId, value);
     case TL_MENU_STATES.REMINDERS: return TL_Menu_HandleRemindersChoice_(waId, value);
@@ -1125,7 +1134,7 @@ function TL_Menu_HandleDecisionPacketReply_(waId, text) {
   const packet = TL_Menu_GetDecisionPacket_(waId);
   if (!packet) return null;
 
-  const choice = String(text || "").trim();
+  const choice = TL_Menu_ParseChoice_(text) || String(text || "").trim();
   if (!choice) {
     if (packet.stage === "edit") return TL_Menu_BuildDecisionPacketEditReply_(packet);
     return TL_Menu_BuildDecisionPacketReply_(packet);
