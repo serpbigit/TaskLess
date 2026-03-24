@@ -62,7 +62,15 @@ function TL_TestBossTurn_PacketRun() {
       packet_kind: "decision",
       packet_stage: "one_by_one",
       packet_cursor: 1,
-      packet_size: 3
+      packet_size: 3,
+      has_active_item: true
+    },
+    activeItem: {
+      item_id: "AI_PACKET_1",
+      kind: "contact_lookup",
+      status: "active",
+      contact_query: "John",
+      resolved_contact_name: "John Cohen"
     },
     contactsIndex: {
       byContactId: {
@@ -81,7 +89,7 @@ function TL_TestBossTurn_PacketRun() {
         stateless_ai_assumption: true,
         approval_required_for_external_execution: true,
         retrieval_budget_max: 2,
-        active_item_state_supported: false
+        active_item_state_supported: true
       },
       summary: {
         available: ["QUERY_CONTACTS_SEARCH","SEND_APPROVED_EMAIL"],
@@ -101,7 +109,8 @@ function TL_TestBossTurn_PacketRun() {
       packet.recent_memory.recent_records.length === 2 &&
       packet.recent_memory.recent_threads.length === 1 &&
       packet.policy.retrieval_budget_max === 2 &&
-      packet.active_item.item_id === null,
+      packet.active_item.item_id === "AI_PACKET_1" &&
+      packet.current_state.has_active_item === true,
     packet: packet
   };
 }
@@ -129,7 +138,13 @@ function TL_TestBossTurn_PromptBriefRun() {
       }
     },
     policy: {
-      active_item_state_supported: false
+      active_item_state_supported: true
+    },
+    active_item: {
+      item_id: "AI_TEST_2",
+      kind: "context_lookup",
+      status: "active",
+      resolved_contact_name: "Dana Banker"
     }
   });
 
@@ -137,7 +152,8 @@ function TL_TestBossTurn_PromptBriefRun() {
     ok: brief.indexOf("Current Boss turn packet:") !== -1 &&
       brief.indexOf("message=show me my approvals") !== -1 &&
       brief.indexOf("recent_contacts=Dana Banker") !== -1 &&
-      brief.indexOf("available_capabilities=QUERY_CONTACTS_SEARCH, SEND_APPROVED_EMAIL") !== -1,
+      brief.indexOf("available_capabilities=QUERY_CONTACTS_SEARCH, SEND_APPROVED_EMAIL") !== -1 &&
+      brief.indexOf("active_item=context_lookup") !== -1,
     brief: brief
   };
 }

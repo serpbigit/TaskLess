@@ -158,6 +158,8 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
   }
 
   const intent = TL_Menu_PopCachedIntent_(bossWaId, rawText) || TL_Menu_RecognizeBossIntent_(rawText, options);
+  const continued = TL_Menu_TryContinueActiveItem_(bossWaId, rawText, intent, options);
+  if (continued) return continued;
   const routed = TL_Menu_HandleBossIntent_(ev, inboxRow, intent, options);
   if (routed) return routed;
 
@@ -201,6 +203,7 @@ function TL_Menu_ClearState_(waId) {
 function TL_Menu_ResetSession_(waId) {
   TL_Menu_ClearDecisionPacket_(waId);
   TL_Menu_ClearState_(waId);
+  if (typeof TL_ActiveItem_Clear_ === "function") TL_ActiveItem_Clear_(waId);
   return true;
 }
 
@@ -1169,6 +1172,36 @@ function TL_Menu_HandleSummaryIntent_(intent, waId, ev, options) {
   return rendered;
 }
 
+function TL_Menu_TryContinueActiveItem_(waId, rawText, intent, options) {
+  if (typeof TL_ActiveItem_Get_ !== "function") return null;
+  const active = TL_ActiveItem_Get_(waId);
+  if (!active || !active.item_id) return null;
+  const normalizedIntent = typeof TL_AI_normalizeBossIntent_ === "function"
+    ? TL_AI_normalizeBossIntent_(intent || {})
+    : { intent: "unknown", route: "none" };
+  const intentName = String(normalizedIntent && normalizedIntent.intent || "").trim().toLowerCase();
+  if (intentName && intentName !== "unknown" && intentName !== "out_of_scope") return null;
+  const kind = String(active.kind || "").trim().toLowerCase();
+  if (kind !== "contact_lookup" && kind !== "context_lookup") return null;
+
+  return TL_Menu_BuildContextLookupSummary_({
+    intent: "find_context",
+    route: "summary",
+    summary_kind: "context_lookup",
+    parameters: {
+      query: String(rawText || "").trim()
+    }
+  }, {
+    from: String(waId || "").trim(),
+    text: String(rawText || "").trim()
+  }, {
+    summary_kind: "context_lookup",
+    reply_preamble: TL_Menu_T_("ממשיכה את הבדיקה הקודמת.", "Continuing the previous lookup.")
+  }, Object.assign({}, options || {}, {
+    activeItem: active
+  }));
+}
+
 function TL_Menu_RenderSummaryKind_(summaryKind, waId) {
   switch (summaryKind) {
     case "ai_cost": return TL_AI_BuildMonthToDateSpendReport_();
@@ -1279,9 +1312,22 @@ function TL_Menu_BuildContactLookupSummary_(intent, ev, analysis, options) {
   const status = String(resolved && resolved.status || "").trim().toLowerCase();
   const candidates = Array.isArray(resolved && resolved.candidates) ? resolved.candidates : [];
   const queries = Array.isArray(resolved && resolved.queries) ? resolved.queries : [];
+  const waId = String(ev && ev.from || "").trim();
 
   if (status === "resolved" && resolved.contact) {
     const contact = resolved.contact;
+    if (waId && typeof TL_ActiveItem_Set_ === "function") {
+      TL_ActiveItem_Set_(waId, {
+        kind: "contact_lookup",
+        status: "active",
+        source_text: sourceText,
+        contact_query: String(lookup.contact_query || sourceText).trim(),
+        search_queries: Array.isArray(lookup.search_queries) ? lookup.search_queries.slice() : [],
+        reply_preamble: preamble,
+        resolved_contact_id: String(contact.contactId || contact.contact_id || "").trim(),
+        resolved_contact_name: String(contact.name || "").trim()
+      });
+    }
     const bits = [
       String(contact.name || "").trim(),
       String(contact.org || "").trim(),
@@ -1298,6 +1344,16 @@ function TL_Menu_BuildContactLookupSummary_(intent, ev, analysis, options) {
   }
 
   if (status === "ambiguous" && candidates.length) {
+    if (waId && typeof TL_ActiveItem_Set_ === "function") {
+      TL_ActiveItem_Set_(waId, {
+        kind: "contact_lookup",
+        status: "active",
+        source_text: sourceText,
+        contact_query: String(lookup.contact_query || sourceText).trim(),
+        search_queries: Array.isArray(lookup.search_queries) ? lookup.search_queries.slice() : [],
+        reply_preamble: preamble
+      });
+    }
     return [
       preamble,
       "",
@@ -1308,6 +1364,16 @@ function TL_Menu_BuildContactLookupSummary_(intent, ev, analysis, options) {
     ].join("\n");
   }
 
+  if (waId && typeof TL_ActiveItem_Set_ === "function") {
+    TL_ActiveItem_Set_(waId, {
+      kind: "contact_lookup",
+      status: "active",
+      source_text: sourceText,
+      contact_query: String(lookup.contact_query || sourceText).trim(),
+      search_queries: Array.isArray(lookup.search_queries) ? lookup.search_queries.slice() : [],
+      reply_preamble: preamble
+    });
+  }
   return [
     preamble,
     "",
@@ -1321,6 +1387,7 @@ function TL_Menu_BuildContactLookupSummary_(intent, ev, analysis, options) {
 function TL_Menu_BuildContextLookupSummary_(intent, ev, analysis, options) {
   const opts = options || {};
   const sourceText = String(ev && ev.text || intent && intent.parameters && intent.parameters.query || "").trim();
+  const active = opts.activeItem && typeof opts.activeItem === "object" ? opts.activeItem : null;
   const lookup = typeof TL_AI_ExtractBossContextLookup_ === "function"
     ? TL_AI_ExtractBossContextLookup_(sourceText, {
         contextLookupFn: opts.contextLookupFn
@@ -1332,25 +1399,40 @@ function TL_Menu_BuildContextLookupSummary_(intent, ev, analysis, options) {
         topic_id: "",
         reply_preamble: ""
       };
+  const mergedLookup = {
+    contact_query: String(lookup.contact_query || active && active.contact_query || "").trim(),
+    search_queries: Array.isArray(lookup.search_queries) && lookup.search_queries.length
+      ? lookup.search_queries.slice()
+      : (Array.isArray(active && active.search_queries) ? active.search_queries.slice() : []),
+    topic_query: String(
+      lookup.topic_query ||
+      active && active.topic_query ||
+      ((active && String(active.kind || "").trim().toLowerCase() === "contact_lookup" && sourceText && !lookup.contact_query && !lookup.topic_query && !lookup.topic_id)
+        ? sourceText
+        : "")
+    ).trim(),
+    topic_id: String(lookup.topic_id || active && active.topic_id || "").trim(),
+    reply_preamble: String(lookup.reply_preamble || "").trim()
+  };
 
   const resolveFn = opts.resolveContactFn || TL_Contacts_ResolveRequest_;
-  const contactResult = (lookup.contact_query || (lookup.search_queries && lookup.search_queries.length)) && typeof resolveFn === "function"
+  const contactResult = (mergedLookup.contact_query || (mergedLookup.search_queries && mergedLookup.search_queries.length)) && typeof resolveFn === "function"
     ? resolveFn({
         rawText: sourceText,
-        query: String(lookup.contact_query || sourceText).trim(),
-        contact_query: String(lookup.contact_query || "").trim(),
-        search_queries: Array.isArray(lookup.search_queries) ? lookup.search_queries.slice() : []
+        query: String(mergedLookup.contact_query || sourceText).trim(),
+        contact_query: String(mergedLookup.contact_query || "").trim(),
+        search_queries: Array.isArray(mergedLookup.search_queries) ? mergedLookup.search_queries.slice() : []
       }, { channel: "" }, opts.contacts || null)
     : { status: "missing", contact: null, candidates: [], queries: [] };
 
   const topicResult = TL_Menu_ResolveTopicLookup_({
-    topic_id: lookup.topic_id,
-    topic_query: lookup.topic_query
+    topic_id: mergedLookup.topic_id,
+    topic_query: mergedLookup.topic_query
   }, opts);
 
   const rows = TL_Menu_FindRecentContextRows_(contactResult, topicResult, opts);
   const preamble = String(
-    lookup.reply_preamble ||
+    mergedLookup.reply_preamble ||
     analysis && analysis.reply_preamble ||
     TL_Menu_T_("אוספת את ההקשר האחרון שביקשת.", "Gathering the recent context you asked for.")
   ).trim();
@@ -1365,6 +1447,24 @@ function TL_Menu_BuildContextLookupSummary_(intent, ev, analysis, options) {
   const title = scopeBits.length
     ? (TL_Menu_T_("הקשר אחרון עבור: ", "Recent context for: ") + scopeBits.join(" | "))
     : TL_Menu_T_("הקשר אחרון", "Recent context");
+  const waId = String(ev && ev.from || "").trim();
+
+  if (waId && typeof TL_ActiveItem_Set_ === "function") {
+    TL_ActiveItem_Set_(waId, {
+      item_id: active && active.item_id || "",
+      kind: "context_lookup",
+      status: "active",
+      source_text: sourceText,
+      contact_query: mergedLookup.contact_query,
+      search_queries: mergedLookup.search_queries,
+      topic_query: mergedLookup.topic_query,
+      topic_id: String(topicResult && topicResult.topicId || mergedLookup.topic_id || "").trim(),
+      reply_preamble: preamble,
+      resolved_contact_id: String(contactResult && contactResult.contact && (contactResult.contact.contactId || contactResult.contact.contact_id) || active && active.resolved_contact_id || "").trim(),
+      resolved_contact_name: String(contactResult && contactResult.contact && contactResult.contact.name || active && active.resolved_contact_name || "").trim(),
+      resolved_topic_summary: String(topicResult && topicResult.topicSummary || active && active.resolved_topic_summary || "").trim()
+    });
+  }
 
   if (!rows.length) {
     return [

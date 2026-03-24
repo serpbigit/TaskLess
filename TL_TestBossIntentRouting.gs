@@ -10,12 +10,87 @@ function TL_TestBossIntentRouting_RunAll() {
     capabilities_route: TL_TestBossIntentRouting_CapabilitiesRouteRun(),
     contact_lookup_route: TL_TestBossIntentRouting_ContactLookupRouteRun(),
     context_lookup_route: TL_TestBossIntentRouting_ContextLookupRouteRun(),
+    active_item_continuation: TL_TestBossIntentRouting_ActiveItemContinuationRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
     reminders_route: TL_TestBossIntentRouting_ListRemindersRouteRun(),
     out_of_scope: TL_TestBossIntentRouting_OutOfScopeRun()
   };
+}
+
+function TL_TestBossIntentRouting_ActiveItemContinuationRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  try {
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_CONT_1",
+      kind: "contact_lookup",
+      status: "active",
+      contact_query: "Dana",
+      search_queries: [{ type: "name", value: "Dana" }],
+      resolved_contact_id: "CI_1",
+      resolved_contact_name: "Dana Banker"
+    });
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "about documents"
+    }, null, {
+      intentFn: function() {
+        return {
+          intent: "unknown",
+          route: "none",
+          summary_kind: "none",
+          capture_state: "",
+          confidence: 0.2,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: "",
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      },
+      contextLookupFn: function() {
+        return {
+          contact_query: "",
+          search_queries: [],
+          topic_query: "",
+          topic_id: "",
+          reply_preamble: ""
+        };
+      },
+      resolveContactFn: function() {
+        return {
+          status: "resolved",
+          contact: {
+            contactId: "CI_1",
+            name: "Dana Banker",
+            phone1: "972501112233",
+            email: "dana@bank.example"
+          },
+          candidates: [],
+          queries: [{ type: "name", value: "Dana" }]
+        };
+      },
+      topicLimit: 10
+    });
+
+    const current = TL_ActiveItem_Get_(waId);
+    return {
+      ok: String(reply || "").indexOf("ממשיכה את הבדיקה הקודמת") !== -1 &&
+        !!current &&
+        current.kind === "context_lookup" &&
+        current.topic_query === "about documents",
+      reply: reply,
+      current: current
+    };
+  } finally {
+    TL_ActiveItem_Clear_(waId);
+  }
 }
 
 function TL_TestBossIntentRouting_ContextLookupRouteRun() {

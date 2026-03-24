@@ -1,8 +1,8 @@
 /**
  * TL_BossTurn
  *
- * First-step machine-readable Boss turn packet.
- * This does not execute or maintain durable active-item state yet.
+ * Machine-readable Boss turn packet.
+ * Current scope includes a lightweight durable active-item layer.
  */
 
 const TL_BOSS_TURN = {
@@ -33,6 +33,7 @@ function TL_BossTurn_BuildPacket_(bossTurn, options) {
       : null
   );
   const currentState = TL_BossTurn_currentState_(waId, opts);
+  const activeItem = TL_BossTurn_activeItem_(waId, opts);
 
   return {
     contract: "BossTurnPacket",
@@ -44,10 +45,7 @@ function TL_BossTurn_BuildPacket_(bossTurn, options) {
       message_text: String(turn.message_text || turn.messageText || "").trim()
     },
     current_state: currentState,
-    active_item: {
-      item_id: null,
-      status: null
-    },
+    active_item: activeItem,
     pending_items_summary: TL_BossTurn_pendingItems_(latestRows, opts),
     recent_memory: {
       recent_contacts: TL_BossTurn_recentContacts_(latestRows, opts),
@@ -59,7 +57,7 @@ function TL_BossTurn_BuildPacket_(bossTurn, options) {
       stateless_ai_assumption: true,
       approval_required_for_external_execution: true,
       retrieval_budget_max: 2,
-      active_item_state_supported: false
+      active_item_state_supported: true
     }
   };
 }
@@ -77,6 +75,15 @@ function TL_BossTurn_BuildPromptBrief_(packet) {
       "state: menu_state=" + String(data.current_state.menu_state || "").trim() +
       " | has_open_packet=" + String(!!data.current_state.has_open_packet) +
       " | active_item_supported=" + String(!!(data.policy && data.policy.active_item_state_supported))
+    );
+  }
+  if (data.active_item && data.active_item.item_id) {
+    lines.push(
+      "active_item=" +
+      String(data.active_item.kind || "").trim() +
+      " | status=" + String(data.active_item.status || "").trim() +
+      " | contact=" + String(data.active_item.resolved_contact_name || data.active_item.contact_query || "").trim() +
+      " | topic=" + String(data.active_item.resolved_topic_summary || data.active_item.topic_id || data.active_item.topic_query || "").trim()
     );
   }
   if (data.pending_items_summary && data.pending_items_summary.length) {
@@ -111,7 +118,8 @@ function TL_BossTurn_currentState_(waId, options) {
       packet_kind: "",
       packet_stage: "",
       packet_cursor: 0,
-      packet_size: 0
+      packet_size: 0,
+      has_active_item: false
     }, opts.currentState);
   }
 
@@ -128,7 +136,29 @@ function TL_BossTurn_currentState_(waId, options) {
     packet_kind: String(packet && packet.kind || "").trim(),
     packet_stage: String(packet && packet.stage || "").trim(),
     packet_cursor: Number(packet && packet.cursor || 0),
-    packet_size: Array.isArray(packet && packet.items) ? packet.items.length : 0
+    packet_size: Array.isArray(packet && packet.items) ? packet.items.length : 0,
+    has_active_item: !!(waId && typeof TL_ActiveItem_Get_ === "function" && TL_ActiveItem_Get_(waId))
+  };
+}
+
+function TL_BossTurn_activeItem_(waId, options) {
+  const opts = options || {};
+  if (opts.activeItem && typeof opts.activeItem === "object") {
+    return Object.assign({
+      item_id: null,
+      status: null
+    }, opts.activeItem);
+  }
+  if (!waId || typeof TL_ActiveItem_Get_ !== "function") {
+    return {
+      item_id: null,
+      status: null
+    };
+  }
+  const active = TL_ActiveItem_Get_(waId);
+  return active || {
+    item_id: null,
+    status: null
   };
 }
 

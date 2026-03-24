@@ -27,7 +27,7 @@ function TL_Capabilities_BuildBossPacket_(options) {
       stateless_ai_assumption: true,
       approval_required_for_external_execution: true,
       retrieval_budget_max: TL_Capabilities_retrievalBudget_(),
-      active_item_state_supported: false
+      active_item_state_supported: true
     },
     capabilities: capabilities,
     summary: {
@@ -68,7 +68,7 @@ function TL_Capabilities_BuildPromptBrief_() {
 
   const lines = [
     "Current TaskLess capability packet:",
-    "policy: stateless_ai_assumption=true | approval_required_for_external_execution=true | retrieval_budget_max=" + packet.policy.retrieval_budget_max + " | active_item_state_supported=false"
+    "policy: stateless_ai_assumption=true | approval_required_for_external_execution=true | retrieval_budget_max=" + packet.policy.retrieval_budget_max + " | active_item_state_supported=true"
   ];
 
   ["query","draft","persist","execute","system"].forEach(function(category) {
@@ -289,14 +289,13 @@ function TL_Capabilities_registryDefs_() {
     {
       id: "ACTIVE_ITEM_STATE",
       category: "system",
-      fn: "",
+      fn: "TL_ActiveItem_Get_",
       approval_required: false,
-      reads: [],
-      writes: [],
+      reads: ["SCRIPT_PROPERTIES"],
+      writes: ["SCRIPT_PROPERTIES"],
       channels: [],
       description: "Durable active-item continuity layer for Boss turns.",
-      phase: "planned",
-      status: "planned"
+      phase: "current"
     },
     {
       id: "PAUSE_AND_RESUME_ITEMS",
