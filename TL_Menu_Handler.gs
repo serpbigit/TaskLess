@@ -376,7 +376,7 @@ function TL_Menu_HandleManageWorkChoice_(waId, choice) {
   if (choice === "7") return TL_Menu_BuildFollowupsSummary_();
   if (choice === "8") return TL_Menu_BuildOpenTasksSummary_();
   if (choice === "9") return TL_Menu_BuildBlockedTasksSummary_();
-  if (choice === "10") return TL_Menu_BuildTopicCandidatesSummary_();
+  if (choice === "10") return TL_Menu_BuildTopicCandidatesSummary_(waId);
   if (choice === "11") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
   if (choice === "12") return TL_Menu_BuildMenuReply_();
   return TL_Menu_BuildManageWorkMenu_();
@@ -1146,7 +1146,7 @@ function TL_Menu_HandleSummaryIntent_(intent, waId) {
     case "attention": return TL_Menu_BuildUrgentSummary_();
     case "approvals": return TL_Menu_BuildAwaitingApprovalSummary_(waId);
     case "next_steps": return TL_Menu_BuildSuggestedNextSteps_();
-    case "topic_candidates": return TL_Menu_BuildTopicCandidatesSummary_();
+    case "topic_candidates": return TL_Menu_BuildTopicCandidatesSummary_(waId);
     case "draft_replies": return TL_Menu_BuildDraftRepliesSummary_(waId);
     case "waiting_on_others": return TL_Menu_BuildWaitingOnOthersSummary_();
     case "followups": return TL_Menu_BuildFollowupsSummary_();
@@ -1245,6 +1245,7 @@ function TL_Menu_SetDecisionPacket_(waId, packet) {
         recordClass: String(item.recordClass || ""),
         summary: String(item.summary || ""),
         proposal: String(item.proposal || ""),
+        rawSnippet: String(item.rawSnippet || ""),
         sender: String(item.sender || ""),
         senderLabel: String(item.senderLabel || ""),
         receiver: String(item.receiver || ""),
@@ -1252,6 +1253,7 @@ function TL_Menu_SetDecisionPacket_(waId, packet) {
         channelLabel: String(item.channelLabel || ""),
         messageType: String(item.messageType || ""),
         subject: String(item.subject || ""),
+        suggestedAction: String(item.suggestedAction || ""),
         recipientQuery: String(item.recipientQuery || ""),
         recipientName: String(item.recipientName || ""),
         recipientDestination: String(item.recipientDestination || ""),
@@ -1274,6 +1276,12 @@ function TL_Menu_SetDecisionPacket_(waId, packet) {
         taskStatus: String(item.taskStatus || ""),
         captureKind: String(item.captureKind || ""),
         captureTitle: String(item.captureTitle || ""),
+        topicCandidate: String(item.topicCandidate || ""),
+        topicSummary: String(item.topicSummary || ""),
+        topicLatestAt: String(item.topicLatestAt || ""),
+        topicExistingId: String(item.topicExistingId || ""),
+        topicCandidateCount: Number(item.topicCandidateCount || 0),
+        topicSamples: Array.isArray(item.topicSamples) ? item.topicSamples.slice(0, 3) : [],
         duePreview: String(item.duePreview || ""),
         dueLabel: String(item.dueLabel || ""),
         isUrgent: !!item.isUrgent,
@@ -1301,6 +1309,7 @@ function TL_Menu_StoreDecisionPacket_(waId, kind, items) {
       recordClass: item.recordClass,
       summary: item.summary,
       proposal: item.proposal,
+      rawSnippet: item.rawSnippet,
       sender: item.sender,
       senderLabel: item.senderLabel,
       receiver: item.receiver,
@@ -1308,6 +1317,7 @@ function TL_Menu_StoreDecisionPacket_(waId, kind, items) {
       channelLabel: item.channelLabel,
       messageType: item.messageType,
       subject: item.subject,
+      suggestedAction: item.suggestedAction,
       recipientQuery: item.recipientQuery,
       recipientName: item.recipientName,
       recipientDestination: item.recipientDestination,
@@ -1320,6 +1330,12 @@ function TL_Menu_StoreDecisionPacket_(waId, kind, items) {
       taskStatus: item.taskStatus,
       captureKind: item.captureKind,
       captureTitle: item.captureTitle,
+      topicCandidate: item.topicCandidate,
+      topicSummary: item.topicSummary,
+      topicLatestAt: item.topicLatestAt,
+      topicExistingId: item.topicExistingId,
+      topicCandidateCount: item.topicCandidateCount,
+      topicSamples: item.topicSamples,
       duePreview: item.duePreview,
       dueLabel: item.dueLabel,
       isUrgent: item.isUrgent,
@@ -1493,6 +1509,11 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
     return TL_Menu_T_("סיימנו את הסקירה אחד-אחד.");
   }
 
+  const actionSpec = TL_Menu_GetDecisionPacketActionSpec_(current);
+  if (actionSpec.actionKind === "promote_topic_candidate") {
+    return TL_Menu_HandleTopicCandidatePacketReply_(waId, packet, choice, current);
+  }
+
   if (TL_Menu_ItemNeedsRecipientResolution_(current)) {
     return TL_Menu_HandleDecisionPacketRecipientReply_(waId, packet, choice);
   }
@@ -1542,6 +1563,70 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
   if (!packet.items[packet.cursor || 0]) {
     TL_Menu_ClearDecisionPacket_(waId);
     return TL_Menu_T_("סיימנו את הסקירה. אין עוד פריטים בחבילה.");
+  }
+
+  TL_Menu_SetDecisionPacket_(waId, packet);
+  return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
+}
+
+function TL_Menu_HandleTopicCandidatePacketReply_(waId, packet, choice, current) {
+  const item = current || packet.items[packet.cursor || 0];
+  if (!item) {
+    TL_Menu_ClearDecisionPacket_(waId);
+    return TL_Menu_T_("אין כרגע מועמד נושא פתוח.");
+  }
+
+  if (choice === "1") {
+    const result = typeof TL_Topics_PromoteCandidate_ === "function"
+      ? TL_Topics_PromoteCandidate_(item.topicCandidate, { topicSummary: item.topicSummary })
+      : { ok: false, receiptText: TL_Menu_T_("קידום מועמד הנושא לא זמין כרגע.") };
+    packet.cursor = Number(packet.cursor || 0) + 1;
+    const receiptText = result && result.ok
+      ? (result.receiptText || (TL_Menu_T_("קידמתי את מועמד הנושא ") + String(item.topicCandidate || "").trim() + "."))
+      : String(result && result.receiptText || TL_Menu_T_("לא הצלחתי לקדם את מועמד הנושא.")).trim();
+    if (!packet.items[packet.cursor || 0]) {
+      TL_Menu_ClearDecisionPacket_(waId);
+      return [
+        receiptText,
+        TL_Menu_T_("אין כרגע עוד מועמדי נושא שממתינים להחלטה.")
+      ].filter(Boolean).join("\n\n");
+    }
+    TL_Menu_SetDecisionPacket_(waId, packet);
+    return [
+      receiptText,
+      TL_Menu_BuildDecisionPacketOneByOneReply_(packet)
+    ].filter(Boolean).join("\n\n");
+  }
+
+  if (choice === "2") {
+    packet.cursor = Number(packet.cursor || 0) + 1;
+  } else if (choice === "3") {
+    const dismissed = typeof TL_Topics_DismissCandidate_ === "function"
+      ? TL_Topics_DismissCandidate_(item.topicCandidate)
+      : { ok: false, receiptText: TL_Menu_T_("דחיית מועמד הנושא לא זמינה כרגע.") };
+    packet.cursor = Number(packet.cursor || 0) + 1;
+    const receiptText = dismissed && dismissed.ok
+      ? String(dismissed.receiptText || TL_Menu_T_("דחיתי את מועמד הנושא.")).trim()
+      : String(dismissed && dismissed.receiptText || TL_Menu_T_("לא הצלחתי לדחות את מועמד הנושא.")).trim();
+    if (!packet.items[packet.cursor || 0]) {
+      TL_Menu_ClearDecisionPacket_(waId);
+      return [
+        receiptText,
+        TL_Menu_T_("אין כרגע עוד מועמדי נושא שממתינים להחלטה.")
+      ].filter(Boolean).join("\n\n");
+    }
+    TL_Menu_SetDecisionPacket_(waId, packet);
+    return [
+      receiptText,
+      TL_Menu_BuildDecisionPacketOneByOneReply_(packet)
+    ].filter(Boolean).join("\n\n");
+  } else {
+    return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
+  }
+
+  if (!packet.items[packet.cursor || 0]) {
+    TL_Menu_ClearDecisionPacket_(waId);
+    return TL_Menu_T_("סיימנו את הסקירה. אין עוד מועמדי נושא פתוחים.");
   }
 
   TL_Menu_SetDecisionPacket_(waId, packet);
@@ -2186,6 +2271,10 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const reminderMessage = TL_Menu_Preview_(current.reminderMessage || summary, 220);
   const isReminder = String(current.captureKind || "").trim().toLowerCase() === "reminder";
   const isSchedule = String(current.captureKind || "").trim().toLowerCase() === "schedule";
+  const option1Label = String(actionSpec.primaryLabel || TL_Menu_T_("אשר")).trim();
+  const option2Label = String(actionSpec.option2Label || TL_Menu_T_("ערוך")).trim();
+  const option3Label = String(actionSpec.option3Label || TL_Menu_T_("אח\"כ")).trim();
+  const option4Label = String(actionSpec.option4Label || TL_Menu_T_("ארכב")).trim();
   const meta = [];
   if (current.isUrgent) meta.push("דחוף");
   else if (current.isHigh) meta.push("חשוב");
@@ -2203,10 +2292,10 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     proposalBody ? (actionSpec.proposalHeading + "\n" + proposalBody) : "",
     isReminder && dueLabel ? (TL_Menu_T_("זמן הפעלת תזכורת: ") + dueLabel) : (isSchedule && dueLabel ? (TL_Menu_T_("זמן האירוע: ") + dueLabel) : (duePreview ? (TL_Menu_T_("יעד: ") + duePreview) : "")),
     "",
-    "1. " + TL_Menu_T_("אשר"),
-    "2. " + TL_Menu_T_("ערוך"),
-    "3. " + TL_Menu_T_("אח\"כ"),
-    "4. " + TL_Menu_T_("ארכב"),
+    "1. " + option1Label,
+    option2Label ? ("2. " + option2Label) : "",
+    option3Label ? ("3. " + option3Label) : "",
+    option4Label ? ("4. " + option4Label) : "",
     TL_Menu_T_("שלח את הספרה של בחירתך")
   ];
   if (arguments.length > 1 && arguments[1]) {
@@ -2402,28 +2491,92 @@ function TL_Menu_BuildDraftRepliesSummary_(waId) {
   return TL_Menu_attachApprovalPacketHint_(waId, TL_Menu_BuildSummaryBlock_("טיוטות לתגובה", rows, "אין כרגע טיוטות תגובה פתוחות."), "drafts");
 }
 
-function TL_Menu_BuildTopicCandidatesSummary_() {
-  if (typeof TL_Topics_BuildCandidateReviewText_ !== "function") {
+function TL_Menu_BuildTopicCandidatesSummary_(waId) {
+  if (typeof TL_Topics_BuildCandidateReviewText_ !== "function" || typeof TL_Topics_ListCandidateGroups_ !== "function") {
     return TL_Menu_T_(
       "סקירת מועמדי נושא עוד לא זמינה.",
       "Topic-candidate review is not available yet."
     );
   }
-  const review = String(TL_Topics_BuildCandidateReviewText_() || "").trim();
+  const groups = TL_Topics_ListCandidateGroups_();
+  const review = String(TL_Topics_renderCandidateSummary_(groups) || "").trim();
   if (!review) {
     return TL_Menu_T_(
       "אין כרגע מועמדי נושא פתוחים לקידום.",
       "There are no open topic candidates to promote right now."
     );
   }
+  if (!waId) return review;
+  const items = TL_Menu_CollectTopicCandidatePacketItems_(groups);
+  if (!items.length) return review;
+  TL_Menu_StoreDecisionPacket_(waId, "decision", items);
+  const packet = TL_Menu_GetDecisionPacket_(waId);
+  if (packet) {
+    packet.stage = "one_by_one";
+    packet.cursor = 0;
+    TL_Menu_SetDecisionPacket_(waId, packet);
+  }
+  const livePacket = packet || TL_Menu_GetDecisionPacket_(waId);
+  const intro = items.length === 1
+    ? TL_Menu_T_("פותח עכשיו את מועמד הנושא היחיד לסקירה.")
+    : (TL_Menu_T_("פותח עכשיו מועמד נושא 1 מתוך ") + items.length + ".");
   return [
     review,
     "",
-    TL_Menu_T_(
-      "לקידום בפועל השתמש בפונקציית האדמין TL_Topics_PromoteCandidate_(\"topic_slug\").",
-      "To promote one, use the admin function TL_Topics_PromoteCandidate_(\"topic_slug\")."
-    )
-  ].join("\n");
+    intro,
+    livePacket ? TL_Menu_BuildDecisionPacketOneByOneReply_(livePacket) : TL_Menu_T_("לא הצלחתי לפתוח את מועמדי הנושא לסקירה.")
+  ].join("\n\n");
+}
+
+function TL_Menu_CollectTopicCandidatePacketItems_(groups) {
+  return (groups || []).map(function(group, index) {
+    const sample = (group.samples || [])[0] || (group.rowRefs || [])[0] || {};
+    const sampleLines = (group.samples || []).slice(0, 2).map(function(item) {
+      return [item.channel, item.direction, item.summary].filter(Boolean).join(" | ");
+    }).filter(Boolean);
+    return {
+      key: "topic_candidate:" + String(group.candidate || "").trim(),
+      rowNumber: Number(sample.rowNumber || 0),
+      recordId: String(sample.recordId || "").trim(),
+      rootId: "",
+      recordClass: "topic_candidate",
+      summary: String(group.summary || group.candidate || "").trim(),
+      proposal: TL_Menu_T_("מועמד נושא: ") + String(group.candidate || "").trim(),
+      rawSnippet: sampleLines.join("\n"),
+      sender: "",
+      senderLabel: TL_Menu_T_("מועמד נושא"),
+      receiver: "",
+      channel: "",
+      channelLabel: TL_Menu_T_("קיבוץ פנימי"),
+      messageType: "topic_candidate",
+      subject: "",
+      suggestedAction: "review_manually",
+      recipientQuery: "",
+      recipientName: "",
+      recipientDestination: "",
+      recipientCandidates: [],
+      resolutionStatus: "",
+      searchQueries: [],
+      contactId: "",
+      approvalStatus: "candidate",
+      executionStatus: "",
+      taskStatus: "",
+      captureKind: "topic_candidate",
+      captureTitle: String(group.candidate || "").trim(),
+      topicCandidate: String(group.candidate || "").trim(),
+      topicSummary: String(group.summary || "").trim(),
+      topicLatestAt: String(group.latestAt || "").trim(),
+      topicExistingId: String(group.existingTopicId || "").trim(),
+      topicCandidateCount: Number(group.count || 0),
+      topicSamples: sampleLines,
+      duePreview: "",
+      dueLabel: "",
+      isUrgent: Number(group.count || 0) >= 3,
+      isHigh: index === 0
+    };
+  }).filter(function(item) {
+    return !!item.rowNumber && !!item.topicCandidate;
+  });
 }
 
 function TL_Menu_attachApprovalPacketHint_(waId, text, mode) {
@@ -2667,6 +2820,16 @@ function TL_Menu_GetDecisionPacketActionSpec_(item) {
   const channel = String(item && item.channel || "").trim().toLowerCase();
   const captureKind = String(item && item.captureKind || "").trim().toLowerCase();
   const suggested = String(item && item.suggestedAction || "").trim().toLowerCase();
+  if (captureKind === "topic_candidate") {
+    return {
+      actionKind: "promote_topic_candidate",
+      primaryLabel: TL_Menu_T_("קדם כנושא"),
+      option2Label: TL_Menu_T_("אח\"כ"),
+      option3Label: TL_Menu_T_("דחה"),
+      option4Label: "",
+      proposalHeading: TL_Menu_T_("הקידום המוצע:")
+    };
+  }
   if (captureKind === "whatsapp") {
     return {
       actionKind: "send_whatsapp",
@@ -2753,6 +2916,17 @@ function TL_Menu_BuildDecisionPacketProposalBody_(item, actionSpec) {
   const captureTitle = String(item && item.captureTitle || "").trim();
   const recipientLabel = TL_Menu_OutboundDestinationLabel_(item);
   const subject = String(item && item.subject || "").trim();
+  if (captureKind === "topic_candidate") {
+    const lines = [
+      TL_Menu_T_("מזהה מוצע: ") + String(item.topicCandidate || captureTitle || "").trim(),
+      item.topicSummary ? (TL_Menu_T_("סיכום: ") + String(item.topicSummary || "").trim()) : "",
+      item.topicCandidateCount ? (TL_Menu_T_("מספר מופעים: ") + Number(item.topicCandidateCount || 0)) : "",
+      item.topicLatestAt ? (TL_Menu_T_("הופעה אחרונה: ") + String(item.topicLatestAt || "").trim()) : "",
+      item.topicExistingId ? (TL_Menu_T_("דומה לנושא קיים: ") + String(item.topicExistingId || "").trim()) : "",
+      Array.isArray(item.topicSamples) && item.topicSamples.length ? (TL_Menu_T_("דוגמאות:\n") + item.topicSamples.join("\n")) : ""
+    ];
+    return lines.filter(Boolean).join("\n");
+  }
   if (captureKind === "whatsapp") {
     return TL_Menu_T_("טיוטת WhatsApp אל ") + recipientLabel + ': "' + proposal + '"';
   }

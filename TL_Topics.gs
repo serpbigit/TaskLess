@@ -72,6 +72,35 @@ function TL_Topics_PromoteCandidate_(candidateSlug, options) {
   };
 }
 
+function TL_Topics_DismissCandidate_(candidateSlug, options) {
+  const candidate = TL_AI_normalizeTopicSlug_(candidateSlug);
+  if (!candidate) throw new Error("TL_Topics_DismissCandidate_: candidate slug is required");
+
+  const opts = options || {};
+  const rows = typeof TL_Orchestrator_readRecentRows_ === "function"
+    ? TL_Orchestrator_readRecentRows_(Number(opts.scanRows || TL_TOPICS.DEFAULT_SCAN_ROWS))
+    : [];
+  const topics = typeof TL_DraftContext_fetchTopics_ === "function"
+    ? TL_DraftContext_fetchTopics_(null, { topicLimit: 200 })
+    : [];
+  const groups = TL_Topics_groupCandidatesFromRows_(rows, topics, opts);
+  const target = groups.find(function(item) {
+    return String(item && item.candidate || "").trim() === candidate;
+  });
+  if (!target) throw new Error("TL_Topics_DismissCandidate_: candidate not found: " + candidate);
+
+  const nowIso = String(opts.nowIso || new Date().toISOString()).trim() || new Date().toISOString();
+  const dryRun = !!opts.dryRun;
+  const inboxWrite = TL_Topics_clearCandidateFromInboxRows_(target, nowIso, dryRun, "topic_candidate_dismissed");
+
+  return {
+    ok: true,
+    candidate: candidate,
+    inbox: inboxWrite,
+    receiptText: "הסרתי את מועמד הנושא מהפריטים שסומנו."
+  };
+}
+
 function TL_Topics_groupCandidatesFromRows_(rows, topics, options) {
   const opts = options || {};
   const sampleLimit = Number(opts.sampleLimit || TL_TOPICS.DEFAULT_SAMPLE_LIMIT);
@@ -328,6 +357,48 @@ function TL_Topics_applyPromotionToInboxRows_(group, topicId, nowIso, dryRun) {
       rowNumber: ref.rowNumber,
       updated: true,
       conflict: false
+    });
+  });
+  return result;
+}
+
+function TL_Topics_clearCandidateFromInboxRows_(group, nowIso, dryRun, bumpReason) {
+  const result = {
+    ok: true,
+    matched: 0,
+    updated: 0,
+    rows: []
+  };
+  const rowRefs = group && Array.isArray(group.rowRefs) ? group.rowRefs : [];
+  rowRefs.forEach(function(ref) {
+    result.matched++;
+    if (dryRun) {
+      result.rows.push({
+        rowNumber: ref.rowNumber,
+        updated: true,
+        conflict: false
+      });
+      return;
+    }
+
+    const loc = typeof TL_AI_getInboxRow_ === "function" ? TL_AI_getInboxRow_(ref.rowNumber) : null;
+    if (!loc || !loc.sh) return;
+    const currentNotes = String(loc.values[TLW_colIndex_("notes") - 1] || "").trim();
+    const nextNotes = typeof TL_AI_removeNoteKey_ === "function"
+      ? TL_AI_removeNoteKey_(TL_AI_removeNoteKey_(currentNotes, "topic_candidate"), "topic_candidate_summary")
+      : currentNotes;
+
+    loc.sh.getRange(loc.row, TLW_colIndex_("notes")).setValue(nextNotes);
+    if (typeof TLW_applyVersionBump_ === "function") {
+      TLW_applyVersionBump_(loc.row, String(bumpReason || "topic_candidate_cleared"));
+    }
+
+    result.updated++;
+    result.rows.push({
+      rowNumber: ref.rowNumber,
+      updated: true,
+      conflict: false,
+      at: nowIso
     });
   });
   return result;

@@ -2,7 +2,8 @@ function TL_TestTopics_RunAll() {
   return {
     extract_candidate: TL_TestTopics_ExtractCandidateRun(),
     group_candidates: TL_TestTopics_GroupCandidatesRun(),
-    promote_candidate_dry_run: TL_TestTopics_PromoteCandidateDryRun()
+    promote_candidate_dry_run: TL_TestTopics_PromoteCandidateDryRun(),
+    dismiss_candidate_dry_run: TL_TestTopics_DismissCandidateDryRun()
   };
 }
 
@@ -92,6 +93,24 @@ function TL_TestTopics_PromoteCandidateDryRun() {
       result.rows[0].updated === true &&
       result.rows[1].updated === true &&
       result.rows[2].conflict === true,
+    result: result
+  };
+}
+
+function TL_TestTopics_DismissCandidateDryRun() {
+  const result = TL_Topics_clearCandidateFromInboxRows_({
+    rowRefs: [
+      { rowNumber: 2 },
+      { rowNumber: 3 }
+    ]
+  }, "2026-03-24T12:00:00.000Z", true, "topic_candidate_dismissed");
+
+  return {
+    ok: result.matched === 2 &&
+      result.updated === 0 &&
+      result.rows.length === 2 &&
+      result.rows[0].updated === true &&
+      result.rows[1].updated === true,
     result: result
   };
 }
