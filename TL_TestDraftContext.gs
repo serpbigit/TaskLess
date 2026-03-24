@@ -3,7 +3,8 @@ function TL_TestDraftContext_RunAll() {
     render_prompt_brief: TL_TestDraftContext_RenderPromptBriefRun(),
     preview_truncation: TL_TestDraftContext_PreviewTruncationRun(),
     topic_existing_selection: TL_TestDraftContext_TopicExistingSelectionRun(),
-    topic_candidate_notes: TL_TestDraftContext_TopicCandidateNotesRun()
+    topic_candidate_notes: TL_TestDraftContext_TopicCandidateNotesRun(),
+    topic_examples_retrieval: TL_TestDraftContext_TopicExamplesRetrievalRun()
   };
 }
 
@@ -106,4 +107,116 @@ function TL_TestDraftContext_TopicCandidateNotesRun() {
       hasRegistryWrite: !!writeback.registryWrite
     }
   };
+}
+
+function TL_TestDraftContext_TopicExamplesRetrievalRun() {
+  const originalReadRecentRows = typeof TL_Orchestrator_readRecentRows_ === "function"
+    ? TL_Orchestrator_readRecentRows_
+    : null;
+  try {
+    TL_Orchestrator_readRecentRows_ = function() {
+      return [
+        {
+          rowNumber: 2,
+          values: TL_TestDraftContext_buildTopicExampleValues_({
+            record_id: "REC_CURRENT",
+            message_id: "MSG_CURRENT",
+            topic_id: "topic_documents_needed",
+            channel: "whatsapp",
+            direction: "incoming",
+            text: "I sent the documents today",
+            timestamp: "2026-03-24T10:00:00.000Z"
+          })
+        },
+        {
+          rowNumber: 3,
+          values: TL_TestDraftContext_buildTopicExampleValues_({
+            record_id: "REC_1",
+            message_id: "MSG_1",
+            topic_id: "topic_documents_needed",
+            channel: "whatsapp",
+            direction: "outgoing",
+            ai_proposal: "Please send the missing payslips and bank statements.",
+            ai_summary: "Asked for missing mortgage documents.",
+            approval_status: "approved",
+            execution_status: "sent",
+            timestamp: "2026-03-23T10:00:00.000Z"
+          })
+        },
+        {
+          rowNumber: 4,
+          values: TL_TestDraftContext_buildTopicExampleValues_({
+            record_id: "REC_2",
+            message_id: "MSG_2",
+            topic_id: "topic_documents_needed",
+            channel: "email",
+            direction: "outgoing",
+            ai_proposal: "Thanks, I received the documents and will review them.",
+            ai_summary: "Confirmed document receipt.",
+            approval_status: "approved",
+            execution_status: "executed",
+            timestamp: "2026-03-22T10:00:00.000Z"
+          })
+        },
+        {
+          rowNumber: 5,
+          values: TL_TestDraftContext_buildTopicExampleValues_({
+            record_id: "REC_3",
+            message_id: "MSG_3",
+            topic_id: "topic_documents_needed",
+            channel: "whatsapp",
+            direction: "incoming",
+            ai_summary: "Client says only the ID copy is still missing.",
+            text: "Only the ID copy is still missing",
+            timestamp: "2026-03-21T10:00:00.000Z"
+          })
+        },
+        {
+          rowNumber: 6,
+          values: TL_TestDraftContext_buildTopicExampleValues_({
+            record_id: "REC_4",
+            message_id: "MSG_4",
+            topic_id: "topic_bank_response",
+            channel: "whatsapp",
+            direction: "outgoing",
+            ai_proposal: "We are still waiting for the bank response.",
+            timestamp: "2026-03-23T10:00:00.000Z"
+          })
+        }
+      ];
+    };
+
+    const examples = TL_DraftContext_fetchTopicExamples_("topic_documents_needed", {
+      excludeTopicRecordId: "REC_CURRENT",
+      excludeTopicMessageId: "MSG_CURRENT",
+      topicExampleLimit: 3,
+      topicExampleWindowDays: 30
+    });
+    const rendered = TL_DraftContext_renderTopicExampleSection_(examples);
+
+    return {
+      ok: examples.length === 3 &&
+        examples[0].direction === "outgoing" &&
+        examples[0].executionStatus === "sent" &&
+        rendered.length === 3 &&
+        rendered[0].indexOf("reply=Please send the missing payslips") !== -1,
+      examples: examples,
+      rendered: rendered
+    };
+  } finally {
+    TL_Orchestrator_readRecentRows_ = originalReadRecentRows;
+  }
+}
+
+function TL_TestDraftContext_buildTopicExampleValues_(overrides) {
+  const base = {};
+  (TL_WEBHOOK.INBOX_HEADERS || []).forEach(function(header) {
+    base[header] = "";
+  });
+  Object.keys(overrides || {}).forEach(function(key) {
+    base[key] = overrides[key];
+  });
+  return (TL_WEBHOOK.INBOX_HEADERS || []).map(function(header) {
+    return base[header];
+  });
 }

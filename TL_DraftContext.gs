@@ -17,7 +17,9 @@ const TL_DRAFT_CONTEXT = {
   WHATSAPP_LIMIT: 5,
   EMAIL_SCAN_ROWS: 120,
   INBOX_SCAN_ROWS: 250,
-  TOPIC_LIMIT: 25
+  TOPIC_LIMIT: 25,
+  TOPIC_EXAMPLE_LIMIT: 3,
+  TOPIC_EXAMPLE_WINDOW_DAYS: 60
 };
 
 function TL_DraftContext_BuildForInboxRowValues_(values, options) {
@@ -29,7 +31,10 @@ function TL_DraftContext_BuildForInboxRowValues_(values, options) {
     TL_Orchestrator_value_(values, "receiver")
   );
   const mergedOptions = Object.assign({}, options || {}, {
-    excludeWhatsAppSourceId: String(TL_Orchestrator_value_(values, "record_id") || TL_Orchestrator_value_(values, "message_id") || "").trim()
+    excludeWhatsAppSourceId: String(TL_Orchestrator_value_(values, "record_id") || TL_Orchestrator_value_(values, "message_id") || "").trim(),
+    excludeTopicRecordId: String(TL_Orchestrator_value_(values, "record_id") || "").trim(),
+    excludeTopicMessageId: String(TL_Orchestrator_value_(values, "message_id") || "").trim(),
+    currentTopicId: String(TL_Orchestrator_value_(values, "topic_id") || "").trim()
   });
   return TL_DraftContext_build_(identity, mergedOptions);
 }
@@ -42,7 +47,10 @@ function TL_DraftContext_BuildForEmailSnapshot_(snapshot, options) {
     email: String(payload.senderEmail || snapshot && snapshot.senderEmail || "").trim().toLowerCase()
   };
   const mergedOptions = Object.assign({}, options || {}, {
-    excludeEmailRefId: String(snapshot && snapshot.refId || payload.refId || "").trim()
+    excludeEmailRefId: String(snapshot && snapshot.refId || payload.refId || "").trim(),
+    excludeTopicRecordId: String(snapshot && snapshot.refId || payload.refId || "").trim(),
+    excludeTopicMessageId: String(payload.latestMsgId || snapshot && snapshot.chunkId || "").trim(),
+    currentTopicId: String(TL_Orchestrator_value_(snapshot && snapshot.values || [], "topic_id") || "").trim()
   });
   return TL_DraftContext_build_(identity, mergedOptions);
 }
@@ -53,6 +61,7 @@ function TL_DraftContext_build_(identity, options) {
   const emails = TL_DraftContext_fetchEmails_(resolved, options);
   const whatsapps = TL_DraftContext_fetchWhatsApps_(resolved, options);
   const topics = TL_DraftContext_fetchTopics_(resolved, options);
+  const topicExamples = TL_DraftContext_fetchTopicExamples_(String(options && options.currentTopicId || "").trim(), options);
 
   return {
     ok: true,
@@ -61,8 +70,9 @@ function TL_DraftContext_build_(identity, options) {
     emails: emails,
     whatsapps: whatsapps,
     topics: topics,
-    promptBrief: TL_DraftContext_renderPromptBrief_(resolved, enrichments, emails, whatsapps, topics),
-    reviewBrief: TL_DraftContext_renderReviewBrief_(resolved, enrichments, emails, whatsapps)
+    topicExamples: topicExamples,
+    promptBrief: TL_DraftContext_renderPromptBrief_(resolved, enrichments, emails, whatsapps, topics, topicExamples),
+    reviewBrief: TL_DraftContext_renderReviewBrief_(resolved, enrichments, emails, whatsapps, topicExamples)
   };
 }
 
@@ -252,7 +262,7 @@ function TL_DraftContext_fetchWhatsApps_(contact, options) {
   return out;
 }
 
-function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsapps, topics) {
+function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsapps, topics, topicExamples) {
   const lines = [
     "Draft context brief:"
   ];
@@ -305,7 +315,117 @@ function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsa
     lines.push("none");
   }
 
+  lines.push("Similar topic examples:");
+  if (topicExamples && topicExamples.length) {
+    TL_DraftContext_renderTopicExampleSection_(topicExamples).forEach(function(line) {
+      lines.push(line);
+    });
+  } else {
+    lines.push("none");
+  }
+
   return lines.join("\n");
+}
+
+function TL_DraftContext_fetchTopicExamples_(topicId, options) {
+  const out = [];
+  const normalizedTopicId = String(topicId || "").trim();
+  if (!normalizedTopicId || typeof TL_Orchestrator_readRecentRows_ !== "function") return out;
+
+  const scanRows = Number((options && options.inboxScanRows) || TL_DRAFT_CONTEXT.INBOX_SCAN_ROWS);
+  const limit = Number((options && options.topicExampleLimit) || TL_DRAFT_CONTEXT.TOPIC_EXAMPLE_LIMIT);
+  const windowDays = Number((options && options.topicExampleWindowDays) || TL_DRAFT_CONTEXT.TOPIC_EXAMPLE_WINDOW_DAYS);
+  const excludeRecordId = String(options && options.excludeTopicRecordId || "").trim();
+  const excludeMessageId = String(options && options.excludeTopicMessageId || "").trim();
+  const cutoffMs = Date.now() - (Math.max(windowDays, 1) * 24 * 60 * 60 * 1000);
+
+  const rows = TL_Orchestrator_readRecentRows_(scanRows);
+  (rows || []).forEach(function(item) {
+    const values = item && item.values ? item.values : [];
+    if (String(TL_Orchestrator_value_(values, "record_class") || "").trim().toLowerCase() !== "communication") return;
+    if (String(TL_Orchestrator_value_(values, "topic_id") || "").trim() !== normalizedTopicId) return;
+
+    const recordId = String(TL_Orchestrator_value_(values, "record_id") || "").trim();
+    const messageId = String(TL_Orchestrator_value_(values, "message_id") || "").trim();
+    if ((excludeRecordId && recordId === excludeRecordId) || (excludeMessageId && messageId === excludeMessageId)) return;
+
+    const at = TL_DraftContext_safeDate_(TL_Orchestrator_value_(values, "latest_message_at") || TL_Orchestrator_value_(values, "timestamp"));
+    if (at.getTime() < cutoffMs) return;
+
+    const example = TL_DraftContext_topicExampleFromValues_(values, at);
+    if (!example) return;
+    out.push(example);
+  });
+
+  out.sort(function(a, b) {
+    if (b.rankScore !== a.rankScore) return b.rankScore - a.rankScore;
+    return TL_DraftContext_safeDate_(b.at).getTime() - TL_DraftContext_safeDate_(a.at).getTime();
+  });
+
+  return out.slice(0, limit > 0 ? limit : TL_DRAFT_CONTEXT.TOPIC_EXAMPLE_LIMIT);
+}
+
+function TL_DraftContext_topicExampleFromValues_(values, at) {
+  const direction = String(TL_Orchestrator_value_(values, "direction") || "").trim().toLowerCase();
+  const channel = String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase();
+  const approvalStatus = String(TL_Orchestrator_value_(values, "approval_status") || "").trim().toLowerCase();
+  const executionStatus = String(TL_Orchestrator_value_(values, "execution_status") || "").trim().toLowerCase();
+  const aiProposal = String(TL_Orchestrator_value_(values, "ai_proposal") || "").trim();
+  const aiSummary = String(TL_Orchestrator_value_(values, "ai_summary") || "").trim();
+  const text = String(TL_Orchestrator_value_(values, "text") || "").trim();
+  const subject = String(TL_Orchestrator_value_(values, "thread_subject") || "").trim();
+  const messageType = String(TL_Orchestrator_value_(values, "message_type") || "").trim().toLowerCase();
+
+  if (messageType === "status") return null;
+
+  const strongCompleted = direction === "outgoing" && (
+    approvalStatus === "approved" ||
+    executionStatus.indexOf("sent") !== -1 ||
+    executionStatus.indexOf("executed") !== -1 ||
+    executionStatus.indexOf("delivered") !== -1
+  );
+  const usableOutgoingDraft = direction === "outgoing" && !!aiProposal;
+  const summaryText = TL_DraftContext_preview_(aiSummary || text || aiProposal || subject, 140);
+  const replyText = TL_DraftContext_preview_(aiProposal || text, 140);
+  const hasUsefulText = !!(summaryText || replyText);
+  if (!hasUsefulText) return null;
+
+  let rankScore = 0;
+  if (strongCompleted) rankScore += 300;
+  else if (usableOutgoingDraft) rankScore += 200;
+  else if (direction === "outgoing") rankScore += 120;
+  else rankScore += 80;
+  if (channel === "whatsapp") rankScore += 10;
+  if (approvalStatus) rankScore += 5;
+  if (executionStatus) rankScore += 5;
+
+  return {
+    at: (at instanceof Date ? at : TL_DraftContext_safeDate_(at)).toISOString(),
+    channel: channel,
+    direction: direction || "unknown",
+    approvalStatus: approvalStatus,
+    executionStatus: executionStatus,
+    summary: summaryText,
+    reply: replyText,
+    rankScore: rankScore
+  };
+}
+
+function TL_DraftContext_renderTopicExampleSection_(topicExamples) {
+  const out = [];
+  (topicExamples || []).forEach(function(item, idx) {
+    const bits = [];
+    bits.push("[" + (idx + 1) + "]");
+    if (item.at) bits.push(item.at);
+    if (item.channel) bits.push(item.channel);
+    if (item.direction) bits.push(item.direction);
+    if (item.executionStatus) bits.push("execution=" + item.executionStatus);
+    else if (item.approvalStatus) bits.push("approval=" + item.approvalStatus);
+    if (item.summary) bits.push("summary=" + item.summary);
+    if (item.reply && item.reply !== item.summary) bits.push("reply=" + item.reply);
+    out.push(bits.join(" | "));
+  });
+  return out;
 }
 
 function TL_DraftContext_fetchTopics_(contact, options) {
@@ -397,7 +517,7 @@ function TL_DraftContext_renderTopicSection_(topics) {
   return out;
 }
 
-function TL_DraftContext_renderReviewBrief_(contact, enrichments, emails, whatsapps) {
+function TL_DraftContext_renderReviewBrief_(contact, enrichments, emails, whatsapps, topicExamples) {
   const lines = [];
   const contactBits = [];
   const contactName = String(contact && contact.name || "").trim();
@@ -436,6 +556,15 @@ function TL_DraftContext_renderReviewBrief_(contact, enrichments, emails, whatsa
     return parts.join(" | ");
   });
   if (whatsappLines.length) lines.push("וואטסאפ: " + whatsappLines.join(" ; "));
+
+  const topicExampleLines = TL_DraftContext_renderReviewSection_(topicExamples, 2, function(item) {
+    const parts = [];
+    if (item && item.direction) parts.push(item.direction);
+    if (item && item.summary) parts.push(item.summary);
+    if (item && item.reply && item.reply !== item.summary) parts.push("reply=" + item.reply);
+    return parts.join(" | ");
+  });
+  if (topicExampleLines.length) lines.push("נושא דומה: " + topicExampleLines.join(" ; "));
 
   return lines.join("\n");
 }
