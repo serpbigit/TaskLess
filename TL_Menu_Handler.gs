@@ -1243,6 +1243,12 @@ function TL_Menu_ContinueOutboundDraft_(waId, rawText, options) {
   if (TL_Menu_ItemNeedsRecipientResolution_(current)) {
     return TL_Menu_TryContinueOutboundRecipientResolution_(waId, packet, current, text, options);
   }
+  if (TL_Menu_IsApproveAndSendCommand_(text)) {
+    const approveAndSendFn = options && typeof options.approveAndSendFn === "function"
+      ? options.approveAndSendFn
+      : TL_Menu_HandleDecisionPacketOneByOneReply_;
+    return approveAndSendFn(waId, packet, "1");
+  }
   const styleCommand = TL_Menu_ParseDraftStyleCommand_(text);
   if (styleCommand) {
     const refined = TL_Menu_RefineOutboundDraftStyle_(current, styleCommand, options);
@@ -1263,6 +1269,24 @@ function TL_Menu_ContinueOutboundDraft_(waId, rawText, options) {
   current.proposal = revised.proposal;
   TL_Menu_SetDecisionPacket_(waId, packet);
   return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדכנתי את הנוסח. אפשר לאשר או לערוך שוב."));
+}
+
+function TL_Menu_IsApproveAndSendCommand_(rawText) {
+  const text = String(rawText || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!text) return false;
+  return [
+    "approve and send",
+    "approve and send now",
+    "send now",
+    "send it now",
+    "approve now",
+    "אשר ושלח",
+    "אשר ושלחי",
+    "אשר ושלח עכשיו",
+    "שלח עכשיו",
+    "שלחי עכשיו",
+    "אשר עכשיו"
+  ].indexOf(text) !== -1;
 }
 
 function TL_Menu_ParseDraftStyleCommand_(rawText) {
@@ -3269,7 +3293,7 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const option3Label = String(actionSpec.option3Label || TL_Menu_T_("אח\"כ")).trim();
   const option4Label = String(actionSpec.option4Label || TL_Menu_T_("ארכב")).trim();
   const styleShortcutLine = TL_Menu_IsOutboundCommunicationItem_(current) && !TL_Menu_ItemNeedsRecipientResolution_(current)
-    ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש", "Style shortcuts: shorter | warmer | more formal | rewrite")
+    ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש | אשר ושלח עכשיו", "Style shortcuts: shorter | warmer | more formal | rewrite | approve and send now")
     : (TL_Menu_IsContinuableCaptureItem_(current)
       ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר ברור | נסח מחדש", "Style shortcuts: shorter | clearer | rewrite")
       : "")
