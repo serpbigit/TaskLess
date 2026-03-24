@@ -9,12 +9,86 @@ function TL_TestBossIntentRouting_RunAll() {
     recognition: TL_TestBossIntentRouting_RecognitionRun(),
     capabilities_route: TL_TestBossIntentRouting_CapabilitiesRouteRun(),
     contact_lookup_route: TL_TestBossIntentRouting_ContactLookupRouteRun(),
+    context_lookup_route: TL_TestBossIntentRouting_ContextLookupRouteRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
     reminders_route: TL_TestBossIntentRouting_ListRemindersRouteRun(),
     out_of_scope: TL_TestBossIntentRouting_OutOfScopeRun()
   };
+}
+
+function TL_TestBossIntentRouting_ContextLookupRouteRun() {
+  const reply = TL_Menu_HandleBossMessage_({
+    from: TL_TestBossIntentRouting_getBossPhone_(),
+    text: "show recent messages with Dana about documents"
+  }, null, {
+    intentFn: function(text) {
+      return {
+        intent: "find_context",
+        route: "summary",
+        summary_kind: "context_lookup",
+        capture_state: "",
+        confidence: 0.95,
+        needs_clarification: "false",
+        reply: "",
+        parameters: {
+          query: text,
+          capture_kind: "",
+          capture_mode: "",
+          time_hint: "",
+          target: "Dana"
+        }
+      };
+    },
+    contextLookupFn: function() {
+      return {
+        contact_query: "Dana",
+        search_queries: [
+          { type: "name", value: "Dana" }
+        ],
+        topic_query: "documents",
+        topic_id: "topic_documents_needed",
+        reply_preamble: "אוספת את ההקשר האחרון שביקשת."
+      };
+    },
+    resolveContactFn: function() {
+      return {
+        status: "resolved",
+        contact: {
+          contactId: "CI_1",
+          name: "Dana Banker",
+          phone1: "972501112233",
+          email: "dana@bank.example"
+        },
+        candidates: [],
+        queries: [{ type: "name", value: "Dana" }]
+      };
+    },
+    packetFn: function(turn) {
+      return {
+        boss_turn: { message_text: turn.message_text },
+        policy: { retrieval_budget_max: 2 }
+      };
+    },
+    analysisFn: function() {
+      return {
+        summary_kind: "context_lookup",
+        retrieval_focus: ["recent_records"],
+        reply_preamble: "אוספת את ההקשר האחרון שביקשת.",
+        confidence: 0.95
+      };
+    },
+    topicLimit: 10
+  });
+
+  const output = {
+    ok: String(reply || "").indexOf("הקשר אחרון עבור") !== -1 &&
+      String(reply || "").indexOf("לא מצאתי עדיין פריטים מתאימים") !== -1,
+    reply: reply
+  };
+  Logger.log("TL_TestBossIntentRouting_ContextLookupRouteRun: %s", JSON.stringify(output, null, 2));
+  return output;
 }
 
 function TL_TestBossIntentRouting_ContactLookupRouteRun() {

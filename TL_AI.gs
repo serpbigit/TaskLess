@@ -298,6 +298,31 @@ function TL_AI_buildBossContactLookupPrompt_(inputText, language, bossName) {
   ].join("\n");
 }
 
+function TL_AI_buildBossContextLookupPrompt_(inputText, language, bossName) {
+  return [
+    "You are TaskLess.",
+    "Extract one recent-context lookup request from a Boss message.",
+    "Return strict JSON only.",
+    "Language preference: " + String(language || "Hebrew"),
+    "The Boss's name is: " + String(bossName || "Boss"),
+    "Required JSON shape:",
+    '{"contact_query":"...","search_queries":[{"type":"name|name_prefix|phone_fragment|email|relationship|org","value":"..."}],"topic_query":"...","topic_id":"...","reply_preamble":"..."}',
+    "Rules:",
+    "Use contact_query and search_queries when the Boss asks about a person or contact.",
+    "Use topic_query and optional topic_id when the Boss asks about an issue/topic such as documents, approval, meeting, payment, etc.",
+    "You may return both contact_query and topic_query when both are relevant.",
+    "topic_id should be a concrete topic slug only when the message clearly implies one. Otherwise leave it empty and use topic_query.",
+    "reply_preamble should be one short sentence in the Boss UI language describing that TaskLess is gathering recent context.",
+    "Do not invent facts.",
+    "Examples:",
+    '{"contact_query":"Dana","search_queries":[{"type":"name","value":"Dana"},{"type":"name_prefix","value":"Dan"}],"topic_query":"","topic_id":"","reply_preamble":"אוספת את ההקשר האחרון עם דנה."}',
+    '{"contact_query":"","search_queries":[],"topic_query":"missing documents","topic_id":"topic_documents_needed","reply_preamble":"אוספת את ההודעות האחרונות בנושא המסמכים."}',
+    '{"contact_query":"David","search_queries":[{"type":"name","value":"David"},{"type":"name","value":"דוד"}],"topic_query":"bank approval","topic_id":"","reply_preamble":"אוספת את ההודעות האחרונות עם דוד על אישור הבנק."}',
+    "Boss message:",
+    String(inputText || "")
+  ].join("\n");
+}
+
 function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
   const capabilityBrief = typeof TL_Capabilities_BuildPromptBrief_ === "function"
     ? TL_Capabilities_BuildPromptBrief_()
@@ -308,9 +333,9 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Supported intents:",
-    "show_menu, help, show_capabilities, show_ai_cost, find_contact, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, list_topic_candidates, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, create_contact_enrichment, out_of_scope, unknown",
+    "show_menu, help, show_capabilities, show_ai_cost, find_contact, find_context, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, list_topic_candidates, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, create_contact_enrichment, out_of_scope, unknown",
     "Return exactly one JSON object with this shape:",
-    '{"intent":"supported_intent_name","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|topic_candidates|contact_lookup|menu|help|verticals|settings|reminders|tasks|ai_cost|none","capture_state":"TL_MENU_STATES value or empty string","menu_target":"main|capabilities|reminders|notes|schedule|tasks|manage_work|settings|verticals|help|none|","confidence":0.0,"needs_clarification":"true|false","reply":"string","parameters":{"query":"string","capture_kind":"string","capture_mode":"string","time_hint":"string","target":"string"}}',
+    '{"intent":"supported_intent_name","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|topic_candidates|contact_lookup|context_lookup|menu|help|verticals|settings|reminders|tasks|ai_cost|none","capture_state":"TL_MENU_STATES value or empty string","menu_target":"main|capabilities|reminders|notes|schedule|tasks|manage_work|settings|verticals|help|none|","confidence":0.0,"needs_clarification":"true|false","reply":"string","parameters":{"query":"string","capture_kind":"string","capture_mode":"string","time_hint":"string","target":"string"}}',
     "Field definitions:",
     "intent: choose exactly one supported intent name.",
     "route: menu for explicit menu/help navigation, summary for status/list views, capture for create/log/remind/enrich flows, none for out_of_scope or unknown.",
@@ -336,6 +361,7 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     '{"intent":"show_menu","route":"menu","summary_kind":"menu","capture_state":"","menu_target":"main","confidence":0.98,"needs_clarification":"false","reply":"פותח את התפריט הראשי.","parameters":{"query":"menu","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"show_capabilities","route":"menu","summary_kind":"none","capture_state":"","menu_target":"capabilities","confidence":0.98,"needs_clarification":"false","reply":"מראה לך מה אני יכולה לעשות.","parameters":{"query":"what can you do","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"find_contact","route":"summary","summary_kind":"contact_lookup","capture_state":"","menu_target":"","confidence":0.94,"needs_clarification":"false","reply":"בודקת את איש הקשר שביקשת.","parameters":{"query":"find Dana","capture_kind":"","capture_mode":"","time_hint":"","target":"Dana"}}',
+    '{"intent":"find_context","route":"summary","summary_kind":"context_lookup","capture_state":"","menu_target":"","confidence":0.94,"needs_clarification":"false","reply":"אוספת את ההקשר האחרון שביקשת.","parameters":{"query":"show recent messages with Dana","capture_kind":"","capture_mode":"","time_hint":"","target":"Dana"}}',
     '{"intent":"list_reminders","route":"menu","summary_kind":"reminders","capture_state":"","menu_target":"reminders","confidence":0.97,"needs_clarification":"false","reply":"פותח את אפשרויות התזכורות.","parameters":{"query":"reminders","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_tasks","route":"menu","summary_kind":"tasks","capture_state":"","menu_target":"tasks","confidence":0.97,"needs_clarification":"false","reply":"פותח את אפשרויות המשימות.","parameters":{"query":"tasks","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_approvals","route":"summary","summary_kind":"approvals","capture_state":"","menu_target":"manage_work","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את מה שממתין לאישור.","parameters":{"query":"approvals","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
@@ -692,6 +718,42 @@ function TL_AI_ExtractBossContactLookup_(inputText, options) {
     status: result.status,
     contact_query: String(raw.contact_query || "").trim(),
     search_queries: TL_AI_normalizeSearchQueries_(raw.search_queries),
+    reply_preamble: String(raw.reply_preamble || "").trim(),
+    raw_text: result.raw_text,
+    raw_json: raw,
+    response_body: result.response_body
+  };
+}
+
+function TL_AI_ExtractBossContextLookup_(inputText, options) {
+  const opts = options || {};
+  if (opts && typeof opts.contextLookupFn === "function") {
+    const raw = opts.contextLookupFn(String(inputText || ""), opts) || {};
+    return {
+      ok: true,
+      status: 200,
+      contact_query: String(raw.contact_query || "").trim(),
+      search_queries: TL_AI_normalizeSearchQueries_(raw.search_queries),
+      topic_query: String(raw.topic_query || "").trim(),
+      topic_id: TL_AI_normalizeTopicSlug_(raw.topic_id || ""),
+      reply_preamble: String(raw.reply_preamble || "").trim(),
+      raw_text: JSON.stringify(raw),
+      raw_json: raw,
+      response_body: ""
+    };
+  }
+
+  const cfg = TL_AI_getConfig_();
+  const prompt = TL_AI_buildBossContextLookupPrompt_(String(inputText || ""), cfg.language, cfg.bossName);
+  const result = TL_AI_callPrompt_(prompt);
+  const raw = result.raw_json || {};
+  return {
+    ok: true,
+    status: result.status,
+    contact_query: String(raw.contact_query || "").trim(),
+    search_queries: TL_AI_normalizeSearchQueries_(raw.search_queries),
+    topic_query: String(raw.topic_query || "").trim(),
+    topic_id: TL_AI_normalizeTopicSlug_(raw.topic_id || ""),
     reply_preamble: String(raw.reply_preamble || "").trim(),
     raw_text: result.raw_text,
     raw_json: raw,
@@ -1454,7 +1516,7 @@ function TL_AI_normalizeBossReadOnlyTurn_(item) {
 function TL_AI_bossRouteFromIntent_(intent) {
   const v = String(intent || "").trim().toLowerCase();
   if (v === "show_menu" || v === "help" || v === "show_capabilities" || v === "show_settings" || v === "show_verticals") return "menu";
-  if (v === "show_ai_cost" || v === "find_contact") return "summary";
+  if (v === "show_ai_cost" || v === "find_contact" || v === "find_context") return "summary";
   if (v.indexOf("list_") === 0) return "summary";
   if (v.indexOf("create_") === 0) return "capture";
   return "none";
@@ -1465,6 +1527,7 @@ function TL_AI_bossSummaryKindFromIntent_(intent) {
   const map = {
     show_capabilities: "none",
     find_contact: "contact_lookup",
+    find_context: "context_lookup",
     list_reminders: "reminders",
     list_tasks: "tasks",
     list_approvals: "approvals",
@@ -1526,7 +1589,7 @@ function TL_AI_bossMenuTargetFromIntent_(intent, summaryKind) {
 function TL_AI_normalizeBossIntentName_(value) {
   const v = String(value || "").trim().toLowerCase();
   const allowed = [
-    "show_menu","help","show_capabilities","show_ai_cost","find_contact","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_attention","list_next_steps","list_topic_candidates",
+    "show_menu","help","show_capabilities","show_ai_cost","find_contact","find_context","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_attention","list_next_steps","list_topic_candidates",
     "list_draft_replies","list_waiting_on_others","list_followups","list_open_tasks","list_blocked_tasks",
     "show_settings","show_verticals",
     "create_reminder_relative","create_reminder_datetime","create_reminder_recurring",
@@ -1548,7 +1611,7 @@ function TL_AI_normalizeBossIntentRoute_(value) {
 function TL_AI_normalizeBossSummaryKind_(value) {
   const v = String(value || "").trim().toLowerCase();
   if (v === "urgent") return "attention";
-  const allowed = ["pending","attention","approvals","next_steps","topic_candidates","contact_lookup","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","ai_cost","none"];
+  const allowed = ["pending","attention","approvals","next_steps","topic_candidates","contact_lookup","context_lookup","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","ai_cost","none"];
   return allowed.indexOf(v) !== -1 ? v : "none";
 }
 

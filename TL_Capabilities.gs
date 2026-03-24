@@ -190,6 +190,15 @@ function TL_Capabilities_registryDefs_() {
       description: "Resolve contacts using name, alias, phone, email, relationship, and org hints."
     },
     {
+      id: "QUERY_RECENT_CONTEXT",
+      category: "query",
+      fn: "TL_Menu_FindRecentContextRows_",
+      approval_required: false,
+      reads: ["INBOX"],
+      channels: ["whatsapp","email"],
+      description: "Fetch recent local context by resolved contact and/or topic."
+    },
+    {
       id: "DRAFT_CONTEXT_FOR_INBOX_ROW",
       category: "draft",
       fn: "TL_DraftContext_BuildForInboxRowValues_",

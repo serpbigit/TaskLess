@@ -1160,6 +1160,9 @@ function TL_Menu_HandleSummaryIntent_(intent, waId, ev, options) {
   if (summaryKind === "contact_lookup") {
     return TL_Menu_BuildContactLookupSummary_(intent, ev, analysis, options);
   }
+  if (summaryKind === "context_lookup") {
+    return TL_Menu_BuildContextLookupSummary_(intent, ev, analysis, options);
+  }
   const rendered = TL_Menu_RenderSummaryKind_(summaryKind, waId);
   const preamble = String(analysis && analysis.reply_preamble || "").trim();
   if (preamble && rendered) return [preamble, "", rendered].join("\n\n");
@@ -1313,6 +1316,140 @@ function TL_Menu_BuildContactLookupSummary_(intent, ev, analysis, options) {
       return String(item.type || "") + "=" + String(item.value || "");
     }).join(", ")) : ""
   ].filter(Boolean).join("\n");
+}
+
+function TL_Menu_BuildContextLookupSummary_(intent, ev, analysis, options) {
+  const opts = options || {};
+  const sourceText = String(ev && ev.text || intent && intent.parameters && intent.parameters.query || "").trim();
+  const lookup = typeof TL_AI_ExtractBossContextLookup_ === "function"
+    ? TL_AI_ExtractBossContextLookup_(sourceText, {
+        contextLookupFn: opts.contextLookupFn
+      })
+    : {
+        contact_query: sourceText,
+        search_queries: [],
+        topic_query: "",
+        topic_id: "",
+        reply_preamble: ""
+      };
+
+  const resolveFn = opts.resolveContactFn || TL_Contacts_ResolveRequest_;
+  const contactResult = (lookup.contact_query || (lookup.search_queries && lookup.search_queries.length)) && typeof resolveFn === "function"
+    ? resolveFn({
+        rawText: sourceText,
+        query: String(lookup.contact_query || sourceText).trim(),
+        contact_query: String(lookup.contact_query || "").trim(),
+        search_queries: Array.isArray(lookup.search_queries) ? lookup.search_queries.slice() : []
+      }, { channel: "" }, opts.contacts || null)
+    : { status: "missing", contact: null, candidates: [], queries: [] };
+
+  const topicResult = TL_Menu_ResolveTopicLookup_({
+    topic_id: lookup.topic_id,
+    topic_query: lookup.topic_query
+  }, opts);
+
+  const rows = TL_Menu_FindRecentContextRows_(contactResult, topicResult, opts);
+  const preamble = String(
+    lookup.reply_preamble ||
+    analysis && analysis.reply_preamble ||
+    TL_Menu_T_("אוספת את ההקשר האחרון שביקשת.", "Gathering the recent context you asked for.")
+  ).trim();
+
+  const scopeBits = [];
+  if (contactResult && contactResult.contact) {
+    scopeBits.push(String(contactResult.contact.name || contactResult.contact.email || contactResult.contact.phone1 || "").trim());
+  }
+  if (topicResult && topicResult.topicId) {
+    scopeBits.push(String(topicResult.topicSummary || topicResult.topicId || "").trim());
+  }
+  const title = scopeBits.length
+    ? (TL_Menu_T_("הקשר אחרון עבור: ", "Recent context for: ") + scopeBits.join(" | "))
+    : TL_Menu_T_("הקשר אחרון", "Recent context");
+
+  if (!rows.length) {
+    return [
+      preamble,
+      "",
+      title,
+      TL_Menu_T_("לא מצאתי עדיין פריטים מתאימים בהיסטוריה המקומית.", "I couldn't find matching items in the local history yet.")
+    ].join("\n");
+  }
+
+  return [
+    preamble,
+    "",
+    TL_Menu_BuildSummaryBlock_(title, rows, "")
+  ].join("\n");
+}
+
+function TL_Menu_ResolveTopicLookup_(lookup, options) {
+  const data = lookup || {};
+  const exactTopicId = String(data.topic_id || "").trim();
+  const query = String(data.topic_query || "").trim().toLowerCase();
+  const topics = typeof TL_DraftContext_fetchTopics_ === "function"
+    ? TL_DraftContext_fetchTopics_(null, { topicLimit: Number(options && options.topicLimit || 50) })
+    : [];
+  const candidates = (topics || []).map(function(item) {
+    return {
+      topicId: String(item && item.topicId || item && item.topic_id || "").trim(),
+      topicSummary: String(item && item.topicSummary || item && item.topic_summary || "").trim()
+    };
+  }).filter(function(item) {
+    return !!item.topicId;
+  });
+
+  if (exactTopicId) {
+    for (let i = 0; i < candidates.length; i++) {
+      if (String(candidates[i].topicId || "").trim().toLowerCase() === exactTopicId.toLowerCase()) {
+        return {
+          status: "resolved",
+          topicId: candidates[i].topicId,
+          topicSummary: candidates[i].topicSummary
+        };
+      }
+    }
+  }
+
+  if (query) {
+    for (let j = 0; j < candidates.length; j++) {
+      const topicId = String(candidates[j].topicId || "").trim().toLowerCase();
+      const summary = String(candidates[j].topicSummary || "").trim().toLowerCase();
+      if (topicId.indexOf(query) !== -1 || summary.indexOf(query) !== -1 || query.indexOf(topicId.replace(/^topic_/, "")) !== -1) {
+        return {
+          status: "resolved",
+          topicId: candidates[j].topicId,
+          topicSummary: candidates[j].topicSummary
+        };
+      }
+    }
+  }
+
+  return {
+    status: exactTopicId || query ? "missing" : "none",
+    topicId: "",
+    topicSummary: ""
+  };
+}
+
+function TL_Menu_FindRecentContextRows_(contactResult, topicResult, options) {
+  const limit = Number(options && options.contextLimit || TL_MENU.MAX_PENDING_SUMMARY);
+  const resolvedContact = contactResult && contactResult.contact ? contactResult.contact : null;
+  const resolvedContactId = String(resolvedContact && (resolvedContact.contactId || resolvedContact.contact_id) || "").trim();
+  const resolvedTopicId = String(topicResult && topicResult.topicId || "").trim();
+
+  return TL_Menu_FilterRecentRows_(function(item) {
+    const values = item && item.values ? item.values : [];
+    const recordClass = String(TL_Orchestrator_value_(values, "record_class") || "").trim().toLowerCase();
+    if (recordClass === "status") return false;
+
+    const rowContactId = String(TL_Orchestrator_value_(values, "contact_id") || "").trim();
+    const rowTopicId = String(TL_Orchestrator_value_(values, "topic_id") || "").trim();
+
+    if (resolvedContactId && rowContactId !== resolvedContactId) return false;
+    if (resolvedTopicId && rowTopicId !== resolvedTopicId) return false;
+    if (!resolvedContactId && !resolvedTopicId) return false;
+    return true;
+  }, limit);
 }
 
 function TL_Menu_IsAiCostQuery_(text) {
