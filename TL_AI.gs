@@ -282,9 +282,9 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Supported intents:",
-    "show_menu, help, show_ai_cost, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, list_topic_candidates, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, create_contact_enrichment, out_of_scope, unknown",
+    "show_menu, help, show_capabilities, show_ai_cost, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, list_topic_candidates, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, create_contact_enrichment, out_of_scope, unknown",
     "Return exactly one JSON object with this shape:",
-    '{"intent":"supported_intent_name","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|topic_candidates|menu|help|verticals|settings|reminders|tasks|ai_cost|none","capture_state":"TL_MENU_STATES value or empty string","menu_target":"main|reminders|notes|schedule|tasks|manage_work|settings|verticals|help|none|","confidence":0.0,"needs_clarification":"true|false","reply":"string","parameters":{"query":"string","capture_kind":"string","capture_mode":"string","time_hint":"string","target":"string"}}',
+    '{"intent":"supported_intent_name","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|topic_candidates|menu|help|verticals|settings|reminders|tasks|ai_cost|none","capture_state":"TL_MENU_STATES value or empty string","menu_target":"main|capabilities|reminders|notes|schedule|tasks|manage_work|settings|verticals|help|none|","confidence":0.0,"needs_clarification":"true|false","reply":"string","parameters":{"query":"string","capture_kind":"string","capture_mode":"string","time_hint":"string","target":"string"}}',
     "Field definitions:",
     "intent: choose exactly one supported intent name.",
     "route: menu for explicit menu/help navigation, summary for status/list views, capture for create/log/remind/enrich flows, none for out_of_scope or unknown.",
@@ -308,6 +308,7 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Do not wrap the JSON in markdown fences.",
     "Examples:",
     '{"intent":"show_menu","route":"menu","summary_kind":"menu","capture_state":"","menu_target":"main","confidence":0.98,"needs_clarification":"false","reply":"פותח את התפריט הראשי.","parameters":{"query":"menu","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"show_capabilities","route":"menu","summary_kind":"none","capture_state":"","menu_target":"capabilities","confidence":0.98,"needs_clarification":"false","reply":"מראה לך מה אני יכולה לעשות.","parameters":{"query":"what can you do","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_reminders","route":"menu","summary_kind":"reminders","capture_state":"","menu_target":"reminders","confidence":0.97,"needs_clarification":"false","reply":"פותח את אפשרויות התזכורות.","parameters":{"query":"reminders","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_tasks","route":"menu","summary_kind":"tasks","capture_state":"","menu_target":"tasks","confidence":0.97,"needs_clarification":"false","reply":"פותח את אפשרויות המשימות.","parameters":{"query":"tasks","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_approvals","route":"summary","summary_kind":"approvals","capture_state":"","menu_target":"manage_work","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את מה שממתין לאישור.","parameters":{"query":"approvals","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
@@ -1393,7 +1394,7 @@ function TL_AI_normalizeBossReadOnlyTurn_(item) {
 
 function TL_AI_bossRouteFromIntent_(intent) {
   const v = String(intent || "").trim().toLowerCase();
-  if (v === "show_menu" || v === "help" || v === "show_settings" || v === "show_verticals") return "menu";
+  if (v === "show_menu" || v === "help" || v === "show_capabilities" || v === "show_settings" || v === "show_verticals") return "menu";
   if (v === "show_ai_cost") return "summary";
   if (v.indexOf("list_") === 0) return "summary";
   if (v.indexOf("create_") === 0) return "capture";
@@ -1403,6 +1404,7 @@ function TL_AI_bossRouteFromIntent_(intent) {
 function TL_AI_bossSummaryKindFromIntent_(intent) {
   const v = String(intent || "").trim().toLowerCase();
   const map = {
+    show_capabilities: "none",
     list_reminders: "reminders",
     list_tasks: "tasks",
     list_approvals: "approvals",
@@ -1452,6 +1454,7 @@ function TL_AI_bossMenuTargetFromIntent_(intent, summaryKind) {
   const v = String(intent || "").trim().toLowerCase();
   const summary = String(summaryKind || "").trim().toLowerCase();
   if (v === "show_menu" || v === "help") return "main";
+  if (v === "show_capabilities") return "capabilities";
   if (v === "show_settings") return "settings";
   if (v === "show_verticals") return "verticals";
   if (summary === "reminders") return "reminders";
@@ -1463,7 +1466,7 @@ function TL_AI_bossMenuTargetFromIntent_(intent, summaryKind) {
 function TL_AI_normalizeBossIntentName_(value) {
   const v = String(value || "").trim().toLowerCase();
   const allowed = [
-    "show_menu","help","show_ai_cost","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_attention","list_next_steps","list_topic_candidates",
+    "show_menu","help","show_capabilities","show_ai_cost","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_attention","list_next_steps","list_topic_candidates",
     "list_draft_replies","list_waiting_on_others","list_followups","list_open_tasks","list_blocked_tasks",
     "show_settings","show_verticals",
     "create_reminder_relative","create_reminder_datetime","create_reminder_recurring",
@@ -1504,7 +1507,7 @@ function TL_AI_normalizeBossRetrievalFocus_(value) {
 
 function TL_AI_normalizeBossMenuTarget_(value) {
   const v = String(value || "").trim().toLowerCase();
-  const allowed = ["main","reminders","notes","schedule","tasks","manage_work","settings","verticals","help","none",""];
+  const allowed = ["main","capabilities","reminders","notes","schedule","tasks","manage_work","settings","verticals","help","none",""];
   return allowed.indexOf(v) !== -1 ? v : "";
 }
 

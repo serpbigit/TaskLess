@@ -113,6 +113,26 @@ function TL_Capabilities_BuildHumanSummary_() {
   return lines.join("\n").trim();
 }
 
+function TL_Capabilities_BuildBossFacingSummary_() {
+  const lines = [
+    TL_Language_UiText_("מה אני יכולה לעזור לך לעשות כרגע:", "What I can help you do right now:"),
+    "",
+    "1. " + TL_Language_UiText_("לפתוח ולנהל משימות", "Open and manage tasks"),
+    "2. " + TL_Language_UiText_("ליצור ולסקור תזכורות", "Create and review reminders"),
+    "3. " + TL_Language_UiText_("לתאם פגישות ואירועים", "Coordinate meetings and events"),
+    "4. " + TL_Language_UiText_("להכין הודעות וטיוטות לאישור", "Prepare messages and drafts for approval"),
+    "5. " + TL_Language_UiText_("לרכז מה פתוח, מה דחוף ומה ממתין לאישור", "Show what is open, urgent, or waiting for approval"),
+    "6. " + TL_Language_UiText_("לשמור מידע חשוב על אנשי קשר", "Save important contact memory"),
+    "7. " + TL_Language_UiText_("לרכז מועמדי נושא ולשפר הקשר לתשובות עתידיות", "Review topic candidates and improve future reply context"),
+    "",
+    TL_Language_UiText_("אפשר פשוט לכתוב חופשי, למשל:", "You can also just ask naturally, for example:"),
+    TL_Language_UiText_("\"תפתחי לי משימה להתקשר לדנה מחר\"", "\"Create a task to call Dana tomorrow\""),
+    TL_Language_UiText_("\"מה ממתין לאישור שלי?\"", "\"What is waiting for my approval?\""),
+    TL_Language_UiText_("\"תכיני הודעה ללקוח שאני מאחר בעשר דקות\"", "\"Draft a message telling the client I'm 10 minutes late\"")
+  ];
+  return lines.join("\n");
+}
+
 function TL_Capabilities_registryDefs_() {
   return [
     {

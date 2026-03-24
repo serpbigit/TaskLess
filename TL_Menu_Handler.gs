@@ -14,8 +14,9 @@
  */
 
 const TL_MENU = {
-  TRIGGERS: ["תפריט","menu","/menu","עזרה","help","מה אפשר לעשות","what can i do","what can i say"],
+  TRIGGERS: ["תפריט","menu","/menu","עזרה","help","מה אפשר לעשות","מה את יכולה לעשות","מה אתה יכול לעשות","what can i do","what can you do","what can i say"],
   HELP_TRIGGERS: ["עזרה","help","מה אפשר לעשות","what can i do","what can i say"],
+  CAPABILITY_TRIGGERS: ["מה את יכולה לעשות","מה אתה יכול לעשות","מה אפשר לעשות","what can you do","what can i do"],
   COST_TRIGGERS: ["עלות","cost","ai cost","עלות ai","עלות ה-ai","עלות של ai"],
   EXIT_TRIGGERS: ["יציאה","איפוס","בטל","cancel","exit","reset","stop"],
   STATE_KEY_PREFIX: "MENU_STATE_", // + wa_id
@@ -118,7 +119,9 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
 
   // Check triggers
   if (TL_MENU.TRIGGERS.some(t => text === t)) {
-    const targetState = TL_MENU.HELP_TRIGGERS.some(t => text === t) ? TL_MENU_STATES.HELP : TL_MENU_STATES.ROOT;
+    const targetState = TL_MENU.CAPABILITY_TRIGGERS.some(t => text === t)
+      ? TL_MENU_STATES.CAPABILITIES
+      : (TL_MENU.HELP_TRIGGERS.some(t => text === t) ? TL_MENU_STATES.HELP : TL_MENU_STATES.ROOT);
     TL_Menu_SetState_(bossWaId, targetState);
     return TL_Menu_BuildMenuForState_(targetState);
   }
@@ -617,6 +620,8 @@ function TL_Menu_BuildHelpMenu_() {
     "4. תקבעי לי פגישה עם רותי ביום חמישי",
     "5. מה על הצלחת שלי עכשיו?",
     "6. מה דחוף כרגע?",
+    "",
+    "כדי לראות מה אני יכולה לעשות: כתוב \"מה את יכולה לעשות\"",
     "7. חזרה לתפריט קודם",
     "8. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
@@ -638,25 +643,27 @@ function TL_Menu_BuildVerticalsMenu_() {
 }
 
 function TL_Menu_BuildCapabilitiesMenu_() {
+  const summary = typeof TL_Capabilities_BuildBossFacingSummary_ === "function"
+    ? TL_Capabilities_BuildBossFacingSummary_()
+    : "";
   return TL_Menu_HebrewBlock_([
-    "☰ כל היכולות של העוזר האישי",
+    "☰ מה אני יכולה לעשות עבורך",
+    summary || "אפשר לבקש ממני משימות, תזכורות, תיאום, טיוטות, סקירת עבודה ושמירת מידע חשוב.",
     "",
-    "שימושים נפוצים:",
+    "מסלולים ישירים:",
     "1. ✅ ניהול משימות",
     "2. ⏰ תזכורות",
-    "3. 📅 ניהול יומן",
+    "3. 📅 יומן ותיאום",
     "4. 📧 אימיילים",
     "5. 💬 הודעות ווטסאפ",
-    "6. 👤 הוספת מידע על איש קשר",
-    "",
-    "יכולות נוספות:",
+    "6. 👤 זיכרון על אנשי קשר",
     "7. 📝 רישום ומעקב",
-    "8. 🏃 אימון ספורט 10 דק",
+    "8. 🏃 אימוני ספורט",
     "9. 💊 יומן תרופות",
     "10. ⚙️ הגדרות",
     "11. ❓ עזרה ודוגמאות",
     "",
-    "שלח את הספרה של היכולת שתרצה לראות"
+    "או פשוט כתוב חופשי מה שצריך."
   ]);
 }
 
@@ -1107,6 +1114,10 @@ function TL_Menu_OpenMenuTarget_(waId, intent) {
   if (target === "main") {
     TL_Menu_SetState_(waId, TL_MENU_STATES.ROOT);
     return TL_Menu_BuildMenuReply_();
+  }
+  if (target === "capabilities") {
+    TL_Menu_SetState_(waId, TL_MENU_STATES.CAPABILITIES);
+    return TL_Menu_BuildCapabilitiesMenu_();
   }
   if (target === "help") {
     TL_Menu_SetState_(waId, TL_MENU_STATES.HELP);

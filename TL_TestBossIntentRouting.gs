@@ -7,12 +7,48 @@
 function TL_TestBossIntentRouting_RunAll() {
   return {
     recognition: TL_TestBossIntentRouting_RecognitionRun(),
+    capabilities_route: TL_TestBossIntentRouting_CapabilitiesRouteRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
     reminders_route: TL_TestBossIntentRouting_ListRemindersRouteRun(),
     out_of_scope: TL_TestBossIntentRouting_OutOfScopeRun()
   };
+}
+
+function TL_TestBossIntentRouting_CapabilitiesRouteRun() {
+  const reply = TL_Menu_HandleBossMessage_({
+    from: TL_TestBossIntentRouting_getBossPhone_(),
+    text: "what can you do"
+  }, null, {
+    intentFn: function(text) {
+      return {
+        intent: "show_capabilities",
+        route: "menu",
+        summary_kind: "none",
+        capture_state: "",
+        menu_target: "capabilities",
+        confidence: 0.98,
+        needs_clarification: "false",
+        reply: "",
+        parameters: {
+          query: text,
+          capture_kind: "",
+          capture_mode: "",
+          time_hint: "",
+          target: ""
+        }
+      };
+    }
+  });
+
+  const output = {
+    ok: String(reply || "").indexOf("מה אני יכולה לעשות עבורך") !== -1 &&
+      String(reply || "").indexOf("ניהול משימות") !== -1,
+    reply: reply
+  };
+  Logger.log("TL_TestBossIntentRouting_CapabilitiesRouteRun: %s", JSON.stringify(output, null, 2));
+  return output;
 }
 
 function TL_TestBossIntentRouting_RecognitionRun() {
