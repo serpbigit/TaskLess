@@ -1243,11 +1243,128 @@ function TL_Menu_ContinueOutboundDraft_(waId, rawText, options) {
   if (TL_Menu_ItemNeedsRecipientResolution_(current)) {
     return TL_Menu_TryContinueOutboundRecipientResolution_(waId, packet, current, text, options);
   }
+  const styleCommand = TL_Menu_ParseDraftStyleCommand_(text);
+  if (styleCommand) {
+    const refined = TL_Menu_RefineOutboundDraftStyle_(current, styleCommand, options);
+    const revisedText = String(refined && refined.proposal || "").trim();
+    if (revisedText) {
+      const revised = TL_Menu_ReviseDecisionRow_(current.rowNumber, revisedText);
+      current.summary = revised.summary;
+      current.proposal = revised.proposal;
+      if (String(current.channel || "").trim().toLowerCase() === "email" && refined && refined.subject) {
+        current.subject = String(refined.subject || current.subject || "").trim();
+      }
+      TL_Menu_SetDecisionPacket_(waId, packet);
+      return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_DraftStyleAppliedMessage_(styleCommand));
+    }
+  }
   const revised = TL_Menu_ReviseDecisionRow_(current.rowNumber, text);
   current.summary = revised.summary;
   current.proposal = revised.proposal;
   TL_Menu_SetDecisionPacket_(waId, packet);
   return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדכנתי את הנוסח. אפשר לאשר או לערוך שוב."));
+}
+
+function TL_Menu_ParseDraftStyleCommand_(rawText) {
+  const text = String(rawText || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!text) return "";
+  if ([
+    "shorter",
+    "make it shorter",
+    "make this shorter",
+    "shorten",
+    "קצר יותר",
+    "תקצר",
+    "לקצר",
+    "תעשה קצר יותר",
+    "תעשי קצר יותר"
+  ].indexOf(text) !== -1) return "shorter";
+  if ([
+    "warmer",
+    "make it warmer",
+    "make this warmer",
+    "more warm",
+    "יותר חם",
+    "יותר אישי",
+    "תעשה יותר אישי",
+    "תעשי יותר אישי",
+    "תחמם"
+  ].indexOf(text) !== -1) return "warmer";
+  if ([
+    "more formal",
+    "formal",
+    "make it more formal",
+    "make this more formal",
+    "יותר פורמלי",
+    "פורמלי יותר",
+    "תעשה יותר פורמלי",
+    "תעשי יותר פורמלי"
+  ].indexOf(text) !== -1) return "formal";
+  if ([
+    "rewrite",
+    "rewrite it",
+    "rewrite this",
+    "rephrase",
+    "נסח מחדש",
+    "תנסח מחדש",
+    "ניסוח מחדש",
+    "תכתוב מחדש",
+    "תכתבי מחדש"
+  ].indexOf(text) !== -1) return "rewrite";
+  return "";
+}
+
+function TL_Menu_RefineOutboundDraftStyle_(current, styleCommand, options) {
+  const item = current && typeof current === "object" ? current : {};
+  const refineFn = options && typeof options.refineOutboundFn === "function"
+    ? options.refineOutboundFn
+    : (typeof TL_AI_RefineOutboundDraft_ === "function" ? TL_AI_RefineOutboundDraft_ : null);
+  if (typeof refineFn !== "function") {
+    return {
+      proposal: String(item.proposal || item.summary || "").trim(),
+      subject: String(item.subject || "").trim()
+    };
+  }
+  const instruction = TL_Menu_DraftStyleInstruction_(styleCommand);
+  const similarReplies = Array.isArray(item.similarReplies) ? item.similarReplies.slice(0, 3) : [];
+  const result = refineFn(instruction, String(item.proposal || item.summary || "").trim(), {
+    channel: String(item.channel || item.captureKind || "").trim(),
+    recipientName: String(item.recipientName || item.senderLabel || "").trim(),
+    subject: String(item.subject || "").trim(),
+    similarReplies: similarReplies
+  }) || {};
+  return {
+    proposal: String(result.proposal || item.proposal || item.summary || "").trim(),
+    subject: String(result.subject || item.subject || "").trim()
+  };
+}
+
+function TL_Menu_DraftStyleInstruction_(styleCommand) {
+  const key = String(styleCommand || "").trim().toLowerCase();
+  if (key === "shorter") {
+    return "Rewrite this draft to be shorter while keeping the same intent and meaning.";
+  }
+  if (key === "warmer") {
+    return "Rewrite this draft to sound warmer and a bit more personal while keeping the same intent.";
+  }
+  if (key === "formal") {
+    return "Rewrite this draft to sound more formal and professional while keeping the same intent.";
+  }
+  return "Rewrite this draft while keeping the same intent and core meaning.";
+}
+
+function TL_Menu_DraftStyleAppliedMessage_(styleCommand) {
+  const key = String(styleCommand || "").trim().toLowerCase();
+  if (key === "shorter") {
+    return TL_Menu_T_("קיצרתי את הנוסח. אפשר לאשר או לערוך שוב.", "I made the draft shorter. You can approve it or revise it again.");
+  }
+  if (key === "warmer") {
+    return TL_Menu_T_("עדכנתי את הנוסח לטון חם יותר. אפשר לאשר או לערוך שוב.", "I made the draft warmer. You can approve it or revise it again.");
+  }
+  if (key === "formal") {
+    return TL_Menu_T_("עדכנתי את הנוסח לטון פורמלי יותר. אפשר לאשר או לערוך שוב.", "I made the draft more formal. You can approve it or revise it again.");
+  }
+  return TL_Menu_T_("ניסחתי מחדש את הטיוטה. אפשר לאשר או לערוך שוב.", "I rewrote the draft. You can approve it or revise it again.");
 }
 
 function TL_Menu_ContinueCaptureItem_(waId, rawText) {
@@ -3074,6 +3191,9 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const option2Label = String(actionSpec.option2Label || TL_Menu_T_("ערוך")).trim();
   const option3Label = String(actionSpec.option3Label || TL_Menu_T_("אח\"כ")).trim();
   const option4Label = String(actionSpec.option4Label || TL_Menu_T_("ארכב")).trim();
+  const styleShortcutLine = TL_Menu_IsOutboundCommunicationItem_(current) && !TL_Menu_ItemNeedsRecipientResolution_(current)
+    ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש", "Style shortcuts: shorter | warmer | more formal | rewrite")
+    : "";
   const meta = [];
   if (current.isUrgent) meta.push("דחוף");
   else if (current.isHigh) meta.push("חשוב");
@@ -3095,6 +3215,8 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     option2Label ? ("2. " + option2Label) : "",
     option3Label ? ("3. " + option3Label) : "",
     option4Label ? ("4. " + option4Label) : "",
+    styleShortcutLine ? "" : "",
+    styleShortcutLine ? styleShortcutLine : "",
     TL_Menu_T_("שלח את הספרה של בחירתך")
   ];
   if (arguments.length > 1 && arguments[1]) {
