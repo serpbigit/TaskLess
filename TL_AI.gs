@@ -273,6 +273,9 @@ function TL_AI_buildContactEnrichmentPrompt_(inputText, language, bossName) {
 }
 
 function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
+  const capabilityBrief = typeof TL_Capabilities_BuildPromptBrief_ === "function"
+    ? TL_Capabilities_BuildPromptBrief_()
+    : "";
   return [
     "You are TaskLess's Boss intent router.",
     "Classify one Boss message into a single intent and return strict JSON only.",
@@ -316,6 +319,7 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     '{"intent":"create_log_journal","route":"capture","summary_kind":"none","capture_state":"CAPTURE_LOG_JOURNAL","menu_target":"notes","confidence":0.96,"needs_clarification":"false","reply":"נרשם, אכין מזה פריט יומן.","parameters":{"query":"met with Dana","capture_kind":"journal","capture_mode":"journal","time_hint":"","target":""}}',
     '{"intent":"create_contact_enrichment","route":"capture","summary_kind":"none","capture_state":"CAPTURE_CONTACT_ENRICH","menu_target":"notes","confidence":0.96,"needs_clarification":"false","reply":"קיבלתי, אכין הצעת העשרה לאיש קשר.","parameters":{"query":"make note that I met David and his son has a wedding next week","capture_kind":"contact_enrichment","capture_mode":"contact_enrichment","time_hint":"","target":"David"}}',
     '{"intent":"out_of_scope","route":"none","summary_kind":"none","capture_state":"","menu_target":"","confidence":0.99,"needs_clarification":"false","reply":"מחוץ לתחום","parameters":{"query":"weather","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    capabilityBrief ? capabilityBrief : "",
     "Message:",
     String(inputText || "")
   ].join("\n");
