@@ -21,6 +21,7 @@ function TL_TestBossIntentRouting_RunAll() {
     outbound_draft_style_shortcut: TL_TestBossIntentRouting_OutboundDraftStyleShortcutRun(),
     outbound_recipient_continuation: TL_TestBossIntentRouting_OutboundRecipientContinuationRun(),
     capture_item_continuation: TL_TestBossIntentRouting_CaptureItemContinuationRun(),
+    capture_item_style_shortcut: TL_TestBossIntentRouting_CaptureItemStyleShortcutRun(),
     draft_explanation_block: TL_TestBossIntentRouting_DraftExplanationBlockRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
@@ -638,6 +639,82 @@ function TL_TestBossIntentRouting_CaptureItemContinuationRun() {
       ok: String(reply || "").indexOf("עדכנתי את הזמן") !== -1 &&
         !!current &&
         String(current.duePreview || "").trim() !== "",
+      reply: reply,
+      current: current
+    };
+  } finally {
+    TL_Menu_ClearDecisionPacket_(waId);
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
+function TL_TestBossIntentRouting_CaptureItemStyleShortcutRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ClearDecisionPacket_(waId);
+  try {
+    const seeded = typeof TL_TestBossDecision_seedDecisionItem_ === "function"
+      ? TL_TestBossDecision_seedDecisionItem_({
+          root_id: "root_capture_style_" + Utilities.getUuid(),
+          approval_status: "awaiting_approval",
+          execution_status: "proposal_ready",
+          ai_summary: "Remind me to send the signed form to Dana tomorrow morning.",
+          ai_proposal: "Send the signed form to Dana tomorrow morning."
+        })
+      : null;
+    if (!seeded) return { ok: false, reason: "missing_seed_helper" };
+    const item = Object.assign({}, seeded.item, {
+      channel: "whatsapp",
+      channelLabel: "WhatsApp",
+      captureKind: "reminder",
+      proposal: "Send the signed form to Dana tomorrow morning.",
+      summary: "Send the signed form to Dana tomorrow morning.",
+      reminderMessage: "Send the signed form to Dana tomorrow morning."
+    });
+    TL_Menu_StoreDecisionPacket_(waId, "capture", [item]);
+    const livePacket = TL_Menu_GetDecisionPacket_(waId);
+    const preview = TL_Menu_BuildDecisionPacketOneByOneReply_(livePacket);
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "clearer"
+    }, null, {
+      intentFn: function() {
+        return {
+          intent: "unknown",
+          route: "none",
+          summary_kind: "none",
+          capture_state: "",
+          confidence: 0.2,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: "",
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      },
+      refineOutboundFn: function(inputText, currentProposal) {
+        return {
+          proposal: "Reminder: send Dana the signed form tomorrow morning.",
+          inputText: inputText,
+          currentProposal: currentProposal
+        };
+      }
+    });
+
+    const packetAfter = TL_Menu_GetDecisionPacket_(waId);
+    const current = packetAfter && packetAfter.items ? packetAfter.items[0] : null;
+    return {
+      ok: String(preview || "").indexOf("יותר ברור") !== -1 &&
+        String(reply || "").indexOf("הבהרתי את הנוסח") !== -1 &&
+        !!current &&
+        String(current.proposal || "") === "Reminder: send Dana the signed form tomorrow morning." &&
+        String(current.reminderMessage || "") === "Reminder: send Dana the signed form tomorrow morning.",
+      preview: preview,
       reply: reply,
       current: current
     };

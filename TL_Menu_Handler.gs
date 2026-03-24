@@ -1311,6 +1311,17 @@ function TL_Menu_ParseDraftStyleCommand_(rawText) {
     "תכתוב מחדש",
     "תכתבי מחדש"
   ].indexOf(text) !== -1) return "rewrite";
+  if ([
+    "clearer",
+    "make it clearer",
+    "make this clearer",
+    "more clear",
+    "יותר ברור",
+    "ברור יותר",
+    "תבהיר",
+    "תבהירי",
+    "ניסוח ברור יותר"
+  ].indexOf(text) !== -1) return "clearer";
   return "";
 }
 
@@ -1382,6 +1393,22 @@ function TL_Menu_ContinueCaptureItem_(waId, rawText) {
     return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדכנתי את הזמן לפריט הנוכחי."));
   }
 
+  const styleCommand = TL_Menu_ParseDraftStyleCommand_(text);
+  if (styleCommand) {
+    const refined = TL_Menu_RefineCaptureItemStyle_(current, styleCommand, options);
+    const revisedText = String(refined && refined.proposal || "").trim();
+    if (revisedText) {
+      const revised = TL_Menu_ReviseDecisionRow_(current.rowNumber, revisedText);
+      current.summary = revised.summary;
+      current.proposal = revised.proposal;
+      if (String(current.captureKind || "").trim().toLowerCase() === "reminder") {
+        current.reminderMessage = revised.summary;
+      }
+      TL_Menu_SetDecisionPacket_(waId, packet);
+      return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_CaptureStyleAppliedMessage_(styleCommand));
+    }
+  }
+
   const revised = TL_Menu_ReviseDecisionRow_(current.rowNumber, text);
   current.summary = revised.summary;
   current.proposal = revised.proposal;
@@ -1390,6 +1417,56 @@ function TL_Menu_ContinueCaptureItem_(waId, rawText) {
   }
   TL_Menu_SetDecisionPacket_(waId, packet);
   return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדכנתי את הנוסח. אפשר לאשר או לערוך שוב."));
+}
+
+function TL_Menu_RefineCaptureItemStyle_(current, styleCommand, options) {
+  const item = current && typeof current === "object" ? current : {};
+  const refineFn = options && typeof options.refineOutboundFn === "function"
+    ? options.refineOutboundFn
+    : (typeof TL_AI_RefineOutboundDraft_ === "function" ? TL_AI_RefineOutboundDraft_ : null);
+  if (typeof refineFn !== "function") {
+    return {
+      proposal: String(item.proposal || item.summary || item.reminderMessage || "").trim()
+    };
+  }
+  const instruction = TL_Menu_CaptureStyleInstruction_(styleCommand, item);
+  const result = refineFn(
+    instruction,
+    String(item.proposal || item.summary || item.reminderMessage || "").trim(),
+    {
+      channel: String(item.captureKind || "").trim(),
+      recipientName: "",
+      subject: "",
+      similarReplies: []
+    }
+  ) || {};
+  return {
+    proposal: String(result.proposal || item.proposal || item.summary || item.reminderMessage || "").trim()
+  };
+}
+
+function TL_Menu_CaptureStyleInstruction_(styleCommand, item) {
+  const kind = String(item && item.captureKind || "").trim().toLowerCase();
+  const noun = kind === "reminder" ? "reminder text" : "task wording";
+  const key = String(styleCommand || "").trim().toLowerCase();
+  if (key === "shorter") {
+    return "Rewrite this " + noun + " to be shorter while keeping the same intent and details.";
+  }
+  if (key === "clearer") {
+    return "Rewrite this " + noun + " to be clearer and easier to understand while keeping the same intent.";
+  }
+  return "Rewrite this " + noun + " while keeping the same intent and core meaning.";
+}
+
+function TL_Menu_CaptureStyleAppliedMessage_(styleCommand) {
+  const key = String(styleCommand || "").trim().toLowerCase();
+  if (key === "shorter") {
+    return TL_Menu_T_("קיצרתי את הנוסח של הפריט. אפשר לאשר או לערוך שוב.", "I made the item wording shorter. You can approve it or revise it again.");
+  }
+  if (key === "clearer") {
+    return TL_Menu_T_("הבהרתי את הנוסח של הפריט. אפשר לאשר או לערוך שוב.", "I made the item wording clearer. You can approve it or revise it again.");
+  }
+  return TL_Menu_T_("ניסחתי מחדש את הפריט. אפשר לאשר או לערוך שוב.", "I rewrote the item wording. You can approve it or revise it again.");
 }
 
 function TL_Menu_TryContinueOutboundRecipientResolution_(waId, packet, current, rawText, options) {
@@ -3193,7 +3270,10 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const option4Label = String(actionSpec.option4Label || TL_Menu_T_("ארכב")).trim();
   const styleShortcutLine = TL_Menu_IsOutboundCommunicationItem_(current) && !TL_Menu_ItemNeedsRecipientResolution_(current)
     ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש", "Style shortcuts: shorter | warmer | more formal | rewrite")
-    : "";
+    : (TL_Menu_IsContinuableCaptureItem_(current)
+      ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר ברור | נסח מחדש", "Style shortcuts: shorter | clearer | rewrite")
+      : "")
+    ;
   const meta = [];
   if (current.isUrgent) meta.push("דחוף");
   else if (current.isHigh) meta.push("חשוב");
