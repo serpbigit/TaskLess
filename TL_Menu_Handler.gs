@@ -160,6 +160,7 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
   const intent = TL_Menu_PopCachedIntent_(bossWaId, rawText) || TL_Menu_RecognizeBossIntent_(rawText, options);
   const continued = TL_Menu_TryContinueActiveItem_(bossWaId, rawText, intent, options);
   if (continued) return continued;
+  TL_Menu_PauseActiveItemForNewIntent_(bossWaId, intent);
   const routed = TL_Menu_HandleBossIntent_(ev, inboxRow, intent, options);
   if (routed) return routed;
 
@@ -204,6 +205,7 @@ function TL_Menu_ResetSession_(waId) {
   TL_Menu_ClearDecisionPacket_(waId);
   TL_Menu_ClearState_(waId);
   if (typeof TL_ActiveItem_Clear_ === "function") TL_ActiveItem_Clear_(waId);
+  if (typeof TL_ActiveItem_ClearPaused_ === "function") TL_ActiveItem_ClearPaused_(waId);
   return true;
 }
 
@@ -1200,6 +1202,18 @@ function TL_Menu_TryContinueActiveItem_(waId, rawText, intent, options) {
   }, Object.assign({}, options || {}, {
     activeItem: active
   }));
+}
+
+function TL_Menu_PauseActiveItemForNewIntent_(waId, intent) {
+  if (!waId || typeof TL_ActiveItem_Get_ !== "function" || typeof TL_ActiveItem_PauseCurrent_ !== "function") return null;
+  const active = TL_ActiveItem_Get_(waId);
+  if (!active || !active.item_id) return null;
+  const normalizedIntent = typeof TL_AI_normalizeBossIntent_ === "function"
+    ? TL_AI_normalizeBossIntent_(intent || {})
+    : { intent: "unknown", route: "none", summary_kind: "none" };
+  const intentName = String(normalizedIntent && normalizedIntent.intent || "").trim().toLowerCase();
+  if (!intentName || intentName === "unknown" || intentName === "out_of_scope") return null;
+  return TL_ActiveItem_PauseCurrent_(waId, "new_intent:" + intentName);
 }
 
 function TL_Menu_RenderSummaryKind_(summaryKind, waId) {

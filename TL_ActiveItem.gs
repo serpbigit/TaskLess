@@ -6,7 +6,9 @@
  */
 
 const TL_ACTIVE_ITEM = {
-  KEY_PREFIX: "ACTIVE_ITEM_"
+  KEY_PREFIX: "ACTIVE_ITEM_",
+  PAUSED_KEY_PREFIX: "PAUSED_ITEMS_",
+  MAX_PAUSED: 5
 };
 
 function TL_ActiveItem_Get_(waId) {
@@ -37,6 +39,50 @@ function TL_ActiveItem_Clear_(waId) {
   return true;
 }
 
+function TL_ActiveItem_GetPaused_(waId) {
+  const key = TL_ActiveItem_pausedKey_(waId);
+  if (!key) return [];
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(function(item) {
+      return item && typeof item === "object";
+    }) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function TL_ActiveItem_ClearPaused_(waId) {
+  const key = TL_ActiveItem_pausedKey_(waId);
+  if (!key) return false;
+  PropertiesService.getScriptProperties().deleteProperty(key);
+  return true;
+}
+
+function TL_ActiveItem_PauseCurrent_(waId, reason) {
+  const current = TL_ActiveItem_Get_(waId);
+  if (!current || !current.item_id) return { ok: true, paused: false };
+  const paused = TL_ActiveItem_GetPaused_(waId);
+  const nextItem = Object.assign({}, current, {
+    status: "paused",
+    paused_at: new Date().toISOString(),
+    pause_reason: String(reason || "replaced").trim() || "replaced"
+  });
+  const deduped = [nextItem].concat(paused.filter(function(item) {
+    return String(item && item.item_id || "").trim() !== String(current.item_id || "").trim();
+  })).slice(0, TL_ACTIVE_ITEM.MAX_PAUSED);
+  PropertiesService.getScriptProperties().setProperty(TL_ActiveItem_pausedKey_(waId), JSON.stringify(deduped));
+  TL_ActiveItem_Clear_(waId);
+  return {
+    ok: true,
+    paused: true,
+    item: nextItem,
+    paused_count: deduped.length
+  };
+}
+
 function TL_ActiveItem_normalize_(waId, item) {
   const nowIso = new Date().toISOString();
   const safe = item && typeof item === "object" ? item : {};
@@ -64,4 +110,10 @@ function TL_ActiveItem_key_(waId) {
   const id = String(waId || "").trim();
   if (!id) return "";
   return TL_ACTIVE_ITEM.KEY_PREFIX + id;
+}
+
+function TL_ActiveItem_pausedKey_(waId) {
+  const id = String(waId || "").trim();
+  if (!id) return "";
+  return TL_ACTIVE_ITEM.PAUSED_KEY_PREFIX + id;
 }

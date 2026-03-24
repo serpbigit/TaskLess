@@ -34,6 +34,7 @@ function TL_BossTurn_BuildPacket_(bossTurn, options) {
   );
   const currentState = TL_BossTurn_currentState_(waId, opts);
   const activeItem = TL_BossTurn_activeItem_(waId, opts);
+  const pausedItems = TL_BossTurn_pausedItems_(waId, opts);
 
   return {
     contract: "BossTurnPacket",
@@ -46,6 +47,7 @@ function TL_BossTurn_BuildPacket_(bossTurn, options) {
     },
     current_state: currentState,
     active_item: activeItem,
+    paused_items_summary: pausedItems,
     pending_items_summary: TL_BossTurn_pendingItems_(latestRows, opts),
     recent_memory: {
       recent_contacts: TL_BossTurn_recentContacts_(latestRows, opts),
@@ -86,6 +88,11 @@ function TL_BossTurn_BuildPromptBrief_(packet) {
       " | topic=" + String(data.active_item.resolved_topic_summary || data.active_item.topic_id || data.active_item.topic_query || "").trim()
     );
   }
+  if (data.paused_items_summary && data.paused_items_summary.length) {
+    lines.push("paused_items=" + data.paused_items_summary.map(function(item) {
+      return String(item.label || item.kind || item.item_id || "").trim();
+    }).filter(Boolean).join(", "));
+  }
   if (data.pending_items_summary && data.pending_items_summary.length) {
     lines.push("pending_items=" + data.pending_items_summary.map(function(item) {
       return String(item.label || item.record_id || "").trim();
@@ -119,7 +126,8 @@ function TL_BossTurn_currentState_(waId, options) {
       packet_stage: "",
       packet_cursor: 0,
       packet_size: 0,
-      has_active_item: false
+      has_active_item: false,
+      paused_count: 0
     }, opts.currentState);
   }
 
@@ -130,6 +138,9 @@ function TL_BossTurn_currentState_(waId, options) {
     ? TL_Menu_GetDecisionPacket_(waId)
     : null;
 
+  const pausedCount = waId && typeof TL_ActiveItem_GetPaused_ === "function"
+    ? TL_ActiveItem_GetPaused_(waId).length
+    : 0;
   return {
     menu_state: state || "root",
     has_open_packet: !!packet,
@@ -137,7 +148,8 @@ function TL_BossTurn_currentState_(waId, options) {
     packet_stage: String(packet && packet.stage || "").trim(),
     packet_cursor: Number(packet && packet.cursor || 0),
     packet_size: Array.isArray(packet && packet.items) ? packet.items.length : 0,
-    has_active_item: !!(waId && typeof TL_ActiveItem_Get_ === "function" && TL_ActiveItem_Get_(waId))
+    has_active_item: !!(waId && typeof TL_ActiveItem_Get_ === "function" && TL_ActiveItem_Get_(waId)),
+    paused_count: pausedCount
   };
 }
 
@@ -160,6 +172,24 @@ function TL_BossTurn_activeItem_(waId, options) {
     item_id: null,
     status: null
   };
+}
+
+function TL_BossTurn_pausedItems_(waId, options) {
+  const opts = options || {};
+  if (Array.isArray(opts.pausedItems)) return opts.pausedItems.slice();
+  if (!waId || typeof TL_ActiveItem_GetPaused_ !== "function") return [];
+  return TL_ActiveItem_GetPaused_(waId).slice(0, 3).map(function(item) {
+    return {
+      item_id: String(item && item.item_id || "").trim(),
+      kind: String(item && item.kind || "").trim(),
+      status: String(item && item.status || "").trim(),
+      label: [
+        String(item && (item.resolved_contact_name || item.contact_query) || "").trim(),
+        String(item && (item.resolved_topic_summary || item.topic_id || item.topic_query) || "").trim()
+      ].filter(Boolean).join(" | "),
+      paused_at: String(item && item.paused_at || "").trim()
+    };
+  });
 }
 
 function TL_BossTurn_pendingItems_(rows, options) {

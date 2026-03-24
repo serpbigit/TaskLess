@@ -1,7 +1,8 @@
 function TL_TestBossTurn_RunAll() {
   return {
     packet: TL_TestBossTurn_PacketRun(),
-    prompt_brief: TL_TestBossTurn_PromptBriefRun()
+    prompt_brief: TL_TestBossTurn_PromptBriefRun(),
+    paused_summary: TL_TestBossTurn_PausedSummaryRun()
   };
 }
 
@@ -155,6 +156,61 @@ function TL_TestBossTurn_PromptBriefRun() {
       brief.indexOf("available_capabilities=QUERY_CONTACTS_SEARCH, SEND_APPROVED_EMAIL") !== -1 &&
       brief.indexOf("active_item=context_lookup") !== -1,
     brief: brief
+  };
+}
+
+function TL_TestBossTurn_PausedSummaryRun() {
+  const packet = TL_BossTurn_BuildPacket_({
+    turn_id: "TURN_PAUSED_1",
+    timestamp: "2026-03-24T12:10:00.000Z",
+    wa_id: "972500000998",
+    message_text: "what can you do"
+  }, {
+    rows: [],
+    currentState: {
+      menu_state: "root",
+      has_open_packet: false,
+      paused_count: 2
+    },
+    pausedItems: [
+      {
+        item_id: "AI_P_1",
+        kind: "context_lookup",
+        status: "paused",
+        label: "Dana Banker | Missing documents",
+        paused_at: "2026-03-24T12:00:00.000Z"
+      },
+      {
+        item_id: "AI_P_2",
+        kind: "contact_lookup",
+        status: "paused",
+        label: "John Cohen",
+        paused_at: "2026-03-24T11:55:00.000Z"
+      }
+    ],
+    capabilityPacket: {
+      contract: "BossCapabilityPacket",
+      version: "v1",
+      policy: {
+        stateless_ai_assumption: true,
+        approval_required_for_external_execution: true,
+        retrieval_budget_max: 2,
+        active_item_state_supported: true
+      },
+      summary: {
+        available: ["PAUSE_AND_RESUME_ITEMS"],
+        limited: [],
+        planned: []
+      },
+      capabilities: []
+    }
+  });
+
+  return {
+    ok: packet.current_state.paused_count === 2 &&
+      packet.paused_items_summary.length === 2 &&
+      packet.paused_items_summary[0].label === "Dana Banker | Missing documents",
+    packet: packet
   };
 }
 

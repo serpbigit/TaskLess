@@ -11,6 +11,7 @@ function TL_TestBossIntentRouting_RunAll() {
     contact_lookup_route: TL_TestBossIntentRouting_ContactLookupRouteRun(),
     context_lookup_route: TL_TestBossIntentRouting_ContextLookupRouteRun(),
     active_item_continuation: TL_TestBossIntentRouting_ActiveItemContinuationRun(),
+    active_item_pause_replace: TL_TestBossIntentRouting_ActiveItemPauseReplaceRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
@@ -90,6 +91,62 @@ function TL_TestBossIntentRouting_ActiveItemContinuationRun() {
     };
   } finally {
     TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
+function TL_TestBossIntentRouting_ActiveItemPauseReplaceRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  try {
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_CONT_2",
+      kind: "context_lookup",
+      status: "active",
+      contact_query: "Dana",
+      topic_id: "topic_documents_needed",
+      resolved_contact_name: "Dana Banker",
+      resolved_topic_summary: "Missing documents"
+    });
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "what can you do"
+    }, null, {
+      intentFn: function(text) {
+        return {
+          intent: "show_capabilities",
+          route: "menu",
+          summary_kind: "none",
+          capture_state: "",
+          menu_target: "capabilities",
+          confidence: 0.98,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: text,
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      }
+    });
+
+    const active = TL_ActiveItem_Get_(waId);
+    const paused = TL_ActiveItem_GetPaused_(waId);
+    return {
+      ok: String(reply || "").indexOf("מה אני יכולה לעשות עבורך") !== -1 &&
+        !active &&
+        paused.length >= 1 &&
+        paused[0].item_id === "AI_CONT_2" &&
+        paused[0].pause_reason === "new_intent:show_capabilities",
+      reply: reply,
+      paused: paused
+    };
+  } finally {
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
   }
 }
 

@@ -300,14 +300,13 @@ function TL_Capabilities_registryDefs_() {
     {
       id: "PAUSE_AND_RESUME_ITEMS",
       category: "system",
-      fn: "",
+      fn: "TL_ActiveItem_PauseCurrent_",
       approval_required: false,
-      reads: [],
-      writes: [],
+      reads: ["SCRIPT_PROPERTIES"],
+      writes: ["SCRIPT_PROPERTIES"],
       channels: [],
       description: "Pause the current Boss item and resume it later.",
-      phase: "planned",
-      status: "planned"
+      phase: "current"
     }
   ];
 }
