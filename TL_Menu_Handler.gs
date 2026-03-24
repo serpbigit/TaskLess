@@ -1240,6 +1240,9 @@ function TL_Menu_ContinueOutboundDraft_(waId, rawText, options) {
   if (!packet || String(packet.stage || "").trim() !== "one_by_one") return null;
   const current = packet.items[packet.cursor || 0];
   if (!current || !TL_Menu_IsOutboundCommunicationItem_(current)) return null;
+  if (TL_Menu_IsDiscardCommand_(text)) {
+    return TL_Menu_DiscardCurrentDecisionItem_(waId, current, options);
+  }
   if (TL_Menu_IsLaterCommand_(text)) {
     return TL_Menu_ParkCurrentDecisionItem_(waId, packet, current, "boss_later");
   }
@@ -1307,6 +1310,24 @@ function TL_Menu_IsLaterCommand_(rawText) {
     "נשאיר לאחר כך",
     "שמור לאחר כך",
     "תזכיר לי אחר כך"
+  ].indexOf(text) !== -1;
+}
+
+function TL_Menu_IsDiscardCommand_(rawText) {
+  const text = String(rawText || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!text) return false;
+  return [
+    "discard",
+    "discard this",
+    "cancel this",
+    "cancel it",
+    "drop this",
+    "בטל",
+    "בטלי",
+    "בטל את זה",
+    "תבטל",
+    "תבטלי",
+    "זרוק את זה"
   ].indexOf(text) !== -1;
 }
 
@@ -1430,6 +1451,9 @@ function TL_Menu_ContinueCaptureItem_(waId, rawText) {
   if (!packet || String(packet.stage || "").trim() !== "one_by_one") return null;
   const current = packet.items[packet.cursor || 0];
   if (!current || !TL_Menu_IsContinuableCaptureItem_(current)) return null;
+  if (TL_Menu_IsDiscardCommand_(text)) {
+    return TL_Menu_DiscardCurrentDecisionItem_(waId, current, options);
+  }
   if (TL_Menu_IsLaterCommand_(text)) {
     return TL_Menu_ParkCurrentDecisionItem_(waId, packet, current, "boss_later");
   }
@@ -1484,6 +1508,23 @@ function TL_Menu_ParkCurrentDecisionItem_(waId, packet, current, reason) {
     return [itemLabel, resumeLabel].join("\n");
   }
   return itemLabel;
+}
+
+function TL_Menu_DiscardCurrentDecisionItem_(waId, current, options) {
+  if (!waId || !current) return null;
+  const archiveFn = options && typeof options.archiveDecisionRowFn === "function"
+    ? options.archiveDecisionRowFn
+    : TL_Menu_ArchiveDecisionRow_;
+  const archived = typeof archiveFn === "function"
+    ? archiveFn(current.rowNumber)
+    : { ok: false, receiptText: "" };
+  TL_Menu_ClearDecisionPacket_(waId);
+  if (archived && archived.ok) {
+    return TL_Menu_IsOutboundCommunicationItem_(current)
+      ? TL_Menu_T_("ביטלתי את הטיוטה הנוכחית והיא לא תישלח.", "I discarded the current draft and it will not be sent.")
+      : TL_Menu_T_("ביטלתי את הפריט הנוכחי והוא לא יישאר פתוח.", "I discarded the current item and it will not stay open.");
+  }
+  return String(archived && archived.receiptText || TL_Menu_T_("לא הצלחתי לבטל את הפריט הנוכחי.", "I couldn't discard the current item.")).trim();
 }
 
 function TL_Menu_RefineCaptureItemStyle_(current, styleCommand, options) {
@@ -3336,9 +3377,9 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const option3Label = String(actionSpec.option3Label || TL_Menu_T_("אח\"כ")).trim();
   const option4Label = String(actionSpec.option4Label || TL_Menu_T_("ארכב")).trim();
   const styleShortcutLine = TL_Menu_IsOutboundCommunicationItem_(current) && !TL_Menu_ItemNeedsRecipientResolution_(current)
-    ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש | אשר ושלח עכשיו | אחר כך", "Style shortcuts: shorter | warmer | more formal | rewrite | approve and send now | later")
+    ? TL_Menu_T_("קיצורי ניסוח/פעולה: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש | אשר ושלח עכשיו | אחר כך | בטל", "Shortcuts: shorter | warmer | more formal | rewrite | approve and send now | later | discard")
     : (TL_Menu_IsContinuableCaptureItem_(current)
-      ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר ברור | נסח מחדש | אחר כך", "Style shortcuts: shorter | clearer | rewrite | later")
+      ? TL_Menu_T_("קיצורי ניסוח/פעולה: קצר יותר | יותר ברור | נסח מחדש | אחר כך | בטל", "Shortcuts: shorter | clearer | rewrite | later | discard")
       : "")
     ;
   const meta = [];

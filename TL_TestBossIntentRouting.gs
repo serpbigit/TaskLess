@@ -21,10 +21,12 @@ function TL_TestBossIntentRouting_RunAll() {
     outbound_draft_style_shortcut: TL_TestBossIntentRouting_OutboundDraftStyleShortcutRun(),
     outbound_approve_send_shortcut: TL_TestBossIntentRouting_OutboundApproveSendShortcutRun(),
     outbound_later_shortcut: TL_TestBossIntentRouting_OutboundLaterShortcutRun(),
+    outbound_discard_shortcut: TL_TestBossIntentRouting_OutboundDiscardShortcutRun(),
     outbound_recipient_continuation: TL_TestBossIntentRouting_OutboundRecipientContinuationRun(),
     capture_item_continuation: TL_TestBossIntentRouting_CaptureItemContinuationRun(),
     capture_item_style_shortcut: TL_TestBossIntentRouting_CaptureItemStyleShortcutRun(),
     capture_item_later_shortcut: TL_TestBossIntentRouting_CaptureItemLaterShortcutRun(),
+    capture_item_discard_shortcut: TL_TestBossIntentRouting_CaptureItemDiscardShortcutRun(),
     draft_explanation_block: TL_TestBossIntentRouting_DraftExplanationBlockRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
@@ -639,6 +641,78 @@ function TL_TestBossIntentRouting_OutboundLaterShortcutRun() {
   }
 }
 
+function TL_TestBossIntentRouting_OutboundDiscardShortcutRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ClearDecisionPacket_(waId);
+  try {
+    const seeded = typeof TL_TestBossDecision_seedDecisionItem_ === "function"
+      ? TL_TestBossDecision_seedDecisionItem_({
+          root_id: "root_outbound_discard_" + Utilities.getUuid(),
+          approval_status: "awaiting_approval",
+          execution_status: "proposal_ready",
+          ai_summary: "Send Dana a quick update.",
+          ai_proposal: "Dana, I will be 10 minutes late."
+        })
+      : null;
+    if (!seeded) return { ok: false, reason: "missing_seed_helper" };
+    const item = Object.assign({}, seeded.item, {
+      channel: "whatsapp",
+      channelLabel: "WhatsApp",
+      captureKind: "whatsapp",
+      recipientQuery: "Dana",
+      recipientName: "Dana Banker",
+      recipientDestination: "972501112233",
+      resolutionStatus: "resolved",
+      contactId: "CI_1",
+      proposal: "Dana, I will be 10 minutes late.",
+      summary: "Send Dana a quick update."
+    });
+    TL_Menu_StoreDecisionPacket_(waId, "capture", [item]);
+    const preview = TL_Menu_BuildDecisionPacketOneByOneReply_(TL_Menu_GetDecisionPacket_(waId));
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "discard this"
+    }, null, {
+      intentFn: function() {
+        return {
+          intent: "unknown",
+          route: "none",
+          summary_kind: "none",
+          capture_state: "",
+          confidence: 0.2,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: "",
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      }
+    });
+
+    const updated = TL_TestBossIntentRouting_findRowByRoot_(seeded.rootId);
+    return {
+      ok: String(preview || "").indexOf("discard") !== -1 &&
+        String(reply || "").indexOf("לא תישלח") !== -1 &&
+        !TL_Menu_GetDecisionPacket_(waId) &&
+        !TL_ActiveItem_Get_(waId) &&
+        updated &&
+        String(TL_Orchestrator_value_(updated.values, "execution_status") || "").trim().toLowerCase() === "archived",
+      preview: preview,
+      reply: reply,
+      updatedExecutionStatus: updated ? TL_Orchestrator_value_(updated.values, "execution_status") : ""
+    };
+  } finally {
+    TL_Menu_ClearDecisionPacket_(waId);
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
 function TL_TestBossIntentRouting_OutboundRecipientContinuationRun() {
   const waId = TL_TestBossIntentRouting_getBossPhone_();
   TL_Menu_ClearDecisionPacket_(waId);
@@ -930,6 +1004,73 @@ function TL_TestBossIntentRouting_CaptureItemLaterShortcutRun() {
       preview: preview,
       reply: reply,
       paused: paused
+    };
+  } finally {
+    TL_Menu_ClearDecisionPacket_(waId);
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
+function TL_TestBossIntentRouting_CaptureItemDiscardShortcutRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ClearDecisionPacket_(waId);
+  try {
+    const seeded = typeof TL_TestBossDecision_seedDecisionItem_ === "function"
+      ? TL_TestBossDecision_seedDecisionItem_({
+          root_id: "root_capture_discard_" + Utilities.getUuid(),
+          approval_status: "awaiting_approval",
+          execution_status: "proposal_ready",
+          ai_summary: "Call Dana tomorrow.",
+          ai_proposal: "Call Dana tomorrow."
+        })
+      : null;
+    if (!seeded) return { ok: false, reason: "missing_seed_helper" };
+    const item = Object.assign({}, seeded.item, {
+      channel: "whatsapp",
+      channelLabel: "WhatsApp",
+      captureKind: "task",
+      proposal: "Call Dana tomorrow.",
+      summary: "Call Dana tomorrow."
+    });
+    TL_Menu_StoreDecisionPacket_(waId, "capture", [item]);
+    const preview = TL_Menu_BuildDecisionPacketOneByOneReply_(TL_Menu_GetDecisionPacket_(waId));
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "בטל"
+    }, null, {
+      intentFn: function() {
+        return {
+          intent: "unknown",
+          route: "none",
+          summary_kind: "none",
+          capture_state: "",
+          confidence: 0.2,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: "",
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      }
+    });
+
+    const updated = TL_TestBossIntentRouting_findRowByRoot_(seeded.rootId);
+    return {
+      ok: String(preview || "").indexOf("בטל") !== -1 &&
+        String(reply || "").indexOf("ביטלתי את הפריט") !== -1 &&
+        !TL_Menu_GetDecisionPacket_(waId) &&
+        !TL_ActiveItem_Get_(waId) &&
+        updated &&
+        String(TL_Orchestrator_value_(updated.values, "task_status") || "").trim().toLowerCase() === "archived",
+      preview: preview,
+      reply: reply,
+      updatedTaskStatus: updated ? TL_Orchestrator_value_(updated.values, "task_status") : ""
     };
   } finally {
     TL_Menu_ClearDecisionPacket_(waId);
