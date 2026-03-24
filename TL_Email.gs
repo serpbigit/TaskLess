@@ -818,6 +818,8 @@ function TL_Email_BuildBossCard_(snapshot, triage, proposal) {
     approvalStatus: "awaiting_approval",
     sendStatus: "pending",
     summary: String(triage.summary || proposal.summary || "").trim(),
+    topicId: String(triage.topic_id || "").trim(),
+    topicSummary: String(triage.topic_summary || "").trim(),
     triage: {
       priority_level: String(triage.priority_level || "medium"),
       importance_level: String(triage.importance_level || "medium"),
@@ -827,7 +829,8 @@ function TL_Email_BuildBossCard_(snapshot, triage, proposal) {
       suggested_action: String(triage.suggested_action || "review_manually")
     },
     historyDepth: Number(triage.historyDepth || 0),
-    historyUsed: triage.historyUsed || []
+    historyUsed: triage.historyUsed || [],
+    similarRepliesUsed: Number(proposal.similarRepliesUsed || 0)
   };
 }
 

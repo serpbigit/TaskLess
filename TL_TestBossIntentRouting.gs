@@ -20,6 +20,7 @@ function TL_TestBossIntentRouting_RunAll() {
     outbound_draft_continuation: TL_TestBossIntentRouting_OutboundDraftContinuationRun(),
     outbound_recipient_continuation: TL_TestBossIntentRouting_OutboundRecipientContinuationRun(),
     capture_item_continuation: TL_TestBossIntentRouting_CaptureItemContinuationRun(),
+    draft_explanation_block: TL_TestBossIntentRouting_DraftExplanationBlockRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
@@ -564,6 +565,27 @@ function TL_TestBossIntentRouting_CaptureItemContinuationRun() {
     TL_ActiveItem_Clear_(waId);
     TL_ActiveItem_ClearPaused_(waId);
   }
+}
+
+function TL_TestBossIntentRouting_DraftExplanationBlockRun() {
+  const body = TL_Menu_BuildDecisionPacketProposalBody_({
+    captureKind: "email",
+    proposal: "Please send the missing payslips so I can move this forward.",
+    recipientName: "Dana Banker",
+    subject: "Re: Missing documents",
+    topicSummary: "Missing documents",
+    historyDepth: 2,
+    similarRepliesUsed: 1
+  }, {
+    actionKind: "send_email"
+  });
+  return {
+    ok: String(body || "").indexOf("למה הטיוטה נראית כך") !== -1 &&
+      String(body || "").indexOf("Missing documents") !== -1 &&
+      String(body || "").indexOf("2") !== -1 &&
+      String(body || "").indexOf("1") !== -1,
+    body: body
+  };
 }
 
 function TL_TestBossIntentRouting_ContextLookupRouteRun() {

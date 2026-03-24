@@ -3588,6 +3588,7 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
   if (typeof TL_Orchestrator_readRecentRows_ !== "function") return [];
   const latest = {};
   const contactsIndex = typeof TL_Session_getContactsIndex_ === "function" ? TL_Session_getContactsIndex_() : null;
+  const topicSummaryMap = TL_Menu_TopicSummaryMap_();
   const rows = TL_Orchestrator_readRecentRows_(160);
   (rows || []).forEach(function(item) {
     if (!item || !item.values) return;
@@ -3617,7 +3618,12 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
     const threadSubject = String(TL_Orchestrator_value_(values, "thread_subject") || "").trim();
     const textValue = String(TL_Orchestrator_value_(values, "text") || "").trim();
     const contactId = String(TL_Orchestrator_value_(values, "contact_id") || "").trim();
+    const topicId = String(TL_Orchestrator_value_(values, "topic_id") || "").trim();
     const notes = String(TL_Orchestrator_value_(values, "notes") || "");
+    const payload = channel === "email" && typeof TL_Email_parseInboxPayload_ === "function"
+      ? TL_Email_parseInboxPayload_(String(TL_Orchestrator_value_(values, "raw_payload_ref") || ""))
+      : {};
+    const approval = payload && payload.approvalSnapshot ? payload.approvalSnapshot : {};
     const captureKind = typeof TL_Orchestrator_captureKindFromNotes_ === "function"
       ? TL_Orchestrator_captureKindFromNotes_(notes)
       : "";
@@ -3654,6 +3660,8 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
       channelLabel: TL_Menu_BuildPacketChannelLabel_(channel, messageType),
       messageType: messageType,
       subject: threadSubject,
+      topicId: topicId,
+      topicSummary: String(topicSummaryMap[topicId] || approval.topicSummary || "").trim(),
       rawSnippet: TL_Menu_BuildPacketSnippet_(channel, messageType, textValue),
       suggestedAction: String(TL_Orchestrator_value_(values, "suggested_action") || "").trim(),
       captureKind: captureKind,
@@ -3662,6 +3670,8 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
       approvalStatus: approvalStatus,
       executionStatus: String(TL_Orchestrator_value_(values, "execution_status") || "").trim(),
       taskStatus: String(TL_Orchestrator_value_(values, "task_status") || "").trim(),
+      similarRepliesUsed: Number(approval.similarRepliesUsed || TL_Menu_GetNoteKeyValue_(notes, "similar_replies_used") || 0),
+      historyDepth: Number(approval.historyDepth || 0),
       duePreview: String(dueInfo.preview || "").trim(),
       dueLabel: String(dueInfo.label || "").trim(),
       isUrgent: classified ? !!classified.isUrgent : false,
@@ -3678,6 +3688,35 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
     return Number(b.rowNumber || 0) - Number(a.rowNumber || 0);
   });
   return items;
+}
+
+function TL_Menu_TopicSummaryMap_() {
+  const out = {};
+  const topics = typeof TL_DraftContext_fetchTopics_ === "function"
+    ? TL_DraftContext_fetchTopics_(null, { topicLimit: 80 })
+    : [];
+  (topics || []).forEach(function(item) {
+    const topicId = String(item && (item.topicId || item.topic_id) || "").trim();
+    if (!topicId) return;
+    out[topicId] = String(item && (item.topicSummary || item.topic_summary) || "").trim();
+  });
+  return out;
+}
+
+function TL_Menu_GetNoteKeyValue_(notes, key) {
+  const safeKey = String(key || "").trim().toLowerCase();
+  if (!safeKey) return "";
+  const parts = String(notes || "").split(/[;\n]/);
+  for (let i = 0; i < parts.length; i++) {
+    const line = String(parts[i] || "").trim();
+    if (!line) continue;
+    const idx = line.indexOf("=");
+    if (idx <= 0) continue;
+    if (line.slice(0, idx).trim().toLowerCase() === safeKey) {
+      return line.slice(idx + 1).trim();
+    }
+  }
+  return "";
 }
 
 function TL_Menu_BuildPacketSenderLabel_(senderProfile, sender, receiver, contactId) {
@@ -3848,12 +3887,16 @@ function TL_Menu_BuildDecisionPacketProposalBody_(item, actionSpec) {
     return lines.filter(Boolean).join("\n");
   }
   if (captureKind === "whatsapp") {
-    return TL_Menu_T_("טיוטת WhatsApp אל ") + recipientLabel + ': "' + proposal + '"';
+    return [
+      TL_Menu_T_("טיוטת WhatsApp אל ") + recipientLabel + ': "' + proposal + '"',
+      TL_Menu_BuildDraftWhyBlock_(item)
+    ].filter(Boolean).join("\n");
   }
   if (captureKind === "email") {
     return [
       TL_Menu_T_("טיוטת אימייל אל ") + recipientLabel + ': "' + proposal + '"',
-      subject ? (TL_Menu_T_("נושא: ") + subject) : ""
+      subject ? (TL_Menu_T_("נושא: ") + subject) : "",
+      TL_Menu_BuildDraftWhyBlock_(item)
     ].filter(Boolean).join("\n");
   }
   if (captureKind === "schedule") {
@@ -3867,6 +3910,22 @@ function TL_Menu_BuildDecisionPacketProposalBody_(item, actionSpec) {
     return TL_Menu_T_("הפריט ייסגר ללא שליחת תגובה.");
   }
   return "";
+}
+
+function TL_Menu_BuildDraftWhyBlock_(item) {
+  const safe = item && typeof item === "object" ? item : {};
+  const lines = [];
+  const topic = String(safe.topicSummary || safe.topicId || "").trim();
+  const historyDepth = Number(safe.historyDepth || 0);
+  const similarRepliesUsed = Number(safe.similarRepliesUsed || 0);
+  if (topic) lines.push(TL_Menu_T_("נושא: ") + topic);
+  if (historyDepth > 0) lines.push(TL_Menu_T_("היסטוריה שנבדקה: ") + historyDepth);
+  if (similarRepliesUsed > 0) lines.push(TL_Menu_T_("תשובות דומות שנלקחו בחשבון: ") + similarRepliesUsed);
+  if (!lines.length) return "";
+  return [
+    TL_Menu_T_("למה הטיוטה נראית כך:"),
+    lines.join("\n")
+  ].join("\n");
 }
 
 function TL_Menu_BuildDecisionPacketReceipt_(item, approval) {

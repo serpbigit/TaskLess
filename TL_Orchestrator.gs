@@ -2043,6 +2043,7 @@ function TL_Capture_prepareOutboundRecipient_(item, captureText, contactsOverrid
       if (channel === "email") {
         normalized.subject = String(refined && refined.subject || normalized.subject).trim() || normalized.subject;
       }
+      normalized.similar_replies_used = similarReplies.length;
       normalized.notes = TL_Capture_appendInlineNote_(normalized.notes, "similar_replies_used=" + String(similarReplies.length));
     } catch (e) {
       normalized.notes = TL_Capture_appendInlineNote_(normalized.notes, "similar_replies_refine_failed=true");
@@ -2164,6 +2165,9 @@ function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, c
   }
   if (Array.isArray(item.search_queries) && item.search_queries.length) {
     notes.push("boss_capture_search_queries=" + encodeURIComponent(JSON.stringify(item.search_queries)));
+  }
+  if (Number(item.similar_replies_used || 0) > 0) {
+    notes.push("similar_replies_used=" + String(Number(item.similar_replies_used || 0)));
   }
 
   const emailSubject = String(item.subject || title || "").trim();
@@ -2326,11 +2330,14 @@ function TL_Capture_buildPacketItem_(childRow, rowNumber, sourceItem) {
     channelLabel: String(childRow.channel || ""),
     messageType: String(childRow.message_type || ""),
     subject: String(item.subject || childRow.thread_subject || ""),
+    topicId: String(childRow.topic_id || ""),
+    topicSummary: String(item.topic_summary || ""),
     recipientQuery: String(item.recipient_query || ""),
     recipientName: String(item.recipient_name || ""),
     recipientDestination: String(item.recipient_destination || childRow.receiver || ""),
     recipientCandidates: Array.isArray(item.recipient_candidates) ? item.recipient_candidates.slice(0, 5) : [],
     resolutionStatus: String(item.resolution_status || "").trim().toLowerCase(),
+    similarRepliesUsed: Number(item.similar_replies_used || TL_Capture_getInlineNoteValue_(notes, "similar_replies_used") || 0),
     searchQueries: Array.isArray(item.search_queries) ? item.search_queries.slice(0, 12) : [],
     contactId: String(childRow.contact_id || ""),
     approvalStatus: String(childRow.approval_status || ""),
@@ -2342,6 +2349,21 @@ function TL_Capture_buildPacketItem_(childRow, rowNumber, sourceItem) {
     isHigh: String(childRow.priority_level || "").toLowerCase() === "high" || String(childRow.importance_level || "").toLowerCase() === "high",
     captureLanguage: String(childRow.capture_language || "").trim()
   };
+}
+
+function TL_Capture_getInlineNoteValue_(notes, key) {
+  const safeKey = String(key || "").trim().toLowerCase();
+  if (!safeKey) return "";
+  const parts = String(notes || "").split(/[;\n]/);
+  for (let i = 0; i < parts.length; i++) {
+    const line = String(parts[i] || "").trim();
+    if (!line) continue;
+    const idx = line.indexOf("=");
+    if (idx <= 0) continue;
+    const k = line.slice(0, idx).trim().toLowerCase();
+    if (k === safeKey) return line.slice(idx + 1).trim();
+  }
+  return "";
 }
 
 function TL_Capture_buildDueInfo_(dueText, baseAt) {

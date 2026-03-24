@@ -160,6 +160,39 @@ function TL_Email_TestReplyProposalRefineDryRun() {
   };
 }
 
+function TL_Email_TestBossCardExplanationShape() {
+  const snapshot = TL_Email_buildSyntheticSnapshot_();
+  const triage = TL_Email_TriageSnapshot_(snapshot, { dryRun: true });
+  triage.topic_id = "topic_documents_needed";
+  triage.topic_summary = "Missing documents";
+  triage.historyDepth = 2;
+  const proposal = TL_Email_BuildReplyProposal_(snapshot, triage, {
+    dryRun: true,
+    similarRepliesFn: function() {
+      return [{
+        rowNumber: 12,
+        channel: "email",
+        subject: "Re: Missing documents",
+        proposal: "Please send the missing mortgage documents so I can proceed."
+      }];
+    },
+    refineFn: function(inputText, currentProposal, opts) {
+      return {
+        proposal: "Please send the missing payslips so I can move this forward.",
+        subject: String(opts.subject || "").trim()
+      };
+    }
+  });
+  const bossCard = TL_Email_BuildBossCard_(snapshot, triage, proposal);
+  return {
+    ok: String(bossCard.topicId || "") === "topic_documents_needed" &&
+      String(bossCard.topicSummary || "") === "Missing documents" &&
+      Number(bossCard.historyDepth || 0) === 2 &&
+      Number(bossCard.similarRepliesUsed || 0) === 1,
+    bossCard: bossCard
+  };
+}
+
 function TL_Email_TestApprovedSendDryRun() {
   TL_Sheets_bootstrapPOC();
   const snapshot = TL_Email_buildSyntheticSnapshot_();

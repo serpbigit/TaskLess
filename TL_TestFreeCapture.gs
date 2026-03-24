@@ -393,7 +393,8 @@ function TL_TestFreeCapture_OutboundRefineRun() {
       String(proposal || "").indexOf("please send the payslips") !== -1 &&
       String(notes || "").indexOf("similar_replies_used=1") !== -1 &&
       !!packetItem &&
-      String(packetItem.proposal || "").indexOf("please send the payslips") !== -1,
+      String(packetItem.proposal || "").indexOf("please send the payslips") !== -1 &&
+      Number(packetItem.similarRepliesUsed || 0) === 1,
     root_id: rootId,
     seed_row: seed.rowNumber,
     capture_result: captureResult,
