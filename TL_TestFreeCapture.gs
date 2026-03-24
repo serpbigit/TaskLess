@@ -9,7 +9,8 @@ function TL_TestFreeCapture_RunAll() {
     capture: TL_TestFreeCapture_MultiIntentCaptureRun(),
     approval: TL_TestFreeCapture_BatchApprovalRun(),
     end_to_end: TL_TestFreeCapture_EndToEndRun(),
-    capture_language: TL_TestFreeCapture_CaptureLanguagePropagationRun()
+    capture_language: TL_TestFreeCapture_CaptureLanguagePropagationRun(),
+    outbound_refine: TL_TestFreeCapture_OutboundRefineRun()
   };
 }
 
@@ -311,6 +312,97 @@ function TL_TestFreeCapture_CaptureLanguagePropagationRun() {
     child_language: childLanguage
   };
   Logger.log("TL_TestFreeCapture_CaptureLanguagePropagationRun: %s", JSON.stringify(result, null, 2));
+  return result;
+}
+
+function TL_TestFreeCapture_OutboundRefineRun() {
+  const rootId = "root_free_outbound_refine_" + Utilities.getUuid();
+  const seed = TL_TestFreeCapture_seedBossCaptureRow_({
+    root_id: rootId,
+    message_id: "msg_free_outbound_refine_" + Utilities.getUuid(),
+    text: "message Dana that I still need the payslips"
+  });
+
+  const packetStash = [];
+  const captureResult = TL_Capture_Run(1, {
+    useAi: false,
+    contactsOverride: [{
+      contactId: "CI_1",
+      name: "Dana Banker",
+      alias: "",
+      org: "Bank",
+      role: "Banker",
+      tags: "",
+      email: "dana@bank.example",
+      emailNorm: "dana@bank.example",
+      phone1: "972501112233",
+      phone1Norm: "972501112233",
+      phone2: "",
+      phone2Norm: ""
+    }],
+    promptFn: function() {
+      return {
+        summary: "outbound refine summary",
+        items: [{
+          kind: "whatsapp",
+          title: "Message Dana",
+          summary: "Send Dana a reminder.",
+          proposal: "I still need the payslips.",
+          recipient_query: "Dana",
+          search_queries: [{ type: "name", value: "Dana" }],
+          approval_required: "true"
+        }]
+      };
+    },
+    similarRepliesFn: function() {
+      return [{
+        rowNumber: 10,
+        channel: "whatsapp",
+        subject: "",
+        proposal: "Dana, please send the last 3 payslips and ID copy so I can proceed."
+      }];
+    },
+    refineOutboundFn: function(inputText, currentProposal, opts) {
+      return {
+        proposal: "Dana, please send the payslips so I can move this forward.",
+        subject: String(opts.subject || "").trim()
+      };
+    },
+    sendFn: function() {
+      return { ok: true, status: 200, body: "{}" };
+    },
+    storePacketFn: function(waId, kind, items) {
+      packetStash.push({
+        waId: String(waId || ""),
+        kind: String(kind || ""),
+        items: items
+      });
+      return true;
+    }
+  });
+
+  const child = TL_TestFreeCapture_findLatestByCaptureKind_(rootId, "whatsapp");
+  const childValues = child ? child.values : [];
+  const notes = child ? String(childValues[TLW_colIndex_("notes") - 1] || "") : "";
+  const proposal = child ? String(childValues[TLW_colIndex_("ai_proposal") - 1] || "") : "";
+  const packetItem = packetStash.length && packetStash[0].items && packetStash[0].items.length
+    ? packetStash[0].items[0]
+    : null;
+  const result = {
+    ok: !!child &&
+      String(proposal || "").indexOf("please send the payslips") !== -1 &&
+      String(notes || "").indexOf("similar_replies_used=1") !== -1 &&
+      !!packetItem &&
+      String(packetItem.proposal || "").indexOf("please send the payslips") !== -1,
+    root_id: rootId,
+    seed_row: seed.rowNumber,
+    capture_result: captureResult,
+    child_row: child ? child.rowNumber : "",
+    proposal: proposal,
+    notes: notes,
+    packet_item: packetItem
+  };
+  Logger.log("TL_TestFreeCapture_OutboundRefineRun: %s", JSON.stringify(result, null, 2));
   return result;
 }
 

@@ -323,6 +323,39 @@ function TL_AI_buildBossContextLookupPrompt_(inputText, language, bossName) {
   ].join("\n");
 }
 
+function TL_AI_buildOutboundRefinePrompt_(inputText, currentProposal, channel, recipientName, similarReplies, language, bossName, subject) {
+  const examples = Array.isArray(similarReplies) ? similarReplies : [];
+  return [
+    "You are TaskLess.",
+    "Refine one outbound draft using the Boss instruction plus a few prior sent examples.",
+    "Return strict JSON only.",
+    "Language preference: " + String(language || "Hebrew"),
+    "The Boss's name is: " + String(bossName || "Boss"),
+    "Channel: " + String(channel || "").trim().toLowerCase(),
+    "Recipient: " + String(recipientName || "").trim(),
+    "Current subject: " + String(subject || "").trim(),
+    "Required JSON shape:",
+    '{"proposal":"...","subject":"..."}',
+    "Rules:",
+    "Keep the Boss's intent the same. Do not invent new commitments or facts.",
+    "Use the examples only as style/context hints, not as facts to copy blindly.",
+    "Keep the draft concise and ready for approval.",
+    "For WhatsApp, subject should be empty.",
+    "For email, keep the subject close to the current subject unless a small cleanup is clearly better.",
+    "Examples from prior sent replies:",
+    examples.length ? examples.map(function(item, idx) {
+      return "[" + (idx + 1) + "] " +
+        String(item.channel || "").trim().toLowerCase() +
+        (item.subject ? (" | subject=" + String(item.subject || "").trim()) : "") +
+        " | " + String(item.proposal || "").trim();
+    }).join("\n") : "none",
+    "Boss instruction:",
+    String(inputText || ""),
+    "Current draft:",
+    String(currentProposal || "")
+  ].join("\n");
+}
+
 function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
   const capabilityBrief = typeof TL_Capabilities_BuildPromptBrief_ === "function"
     ? TL_Capabilities_BuildPromptBrief_()
@@ -761,6 +794,34 @@ function TL_AI_ExtractBossContextLookup_(inputText, options) {
     topic_query: String(raw.topic_query || "").trim(),
     topic_id: TL_AI_normalizeTopicSlug_(raw.topic_id || ""),
     reply_preamble: String(raw.reply_preamble || "").trim(),
+    raw_text: result.raw_text,
+    raw_json: raw,
+    response_body: result.response_body
+  };
+}
+
+function TL_AI_RefineOutboundDraft_(inputText, currentProposal, options) {
+  const opts = options || {};
+  if (typeof opts.refineFn === "function") {
+    return opts.refineFn(String(inputText || ""), String(currentProposal || ""), opts);
+  }
+
+  const cfg = TL_AI_getConfig_();
+  const prompt = TL_AI_buildOutboundRefinePrompt_(
+    String(inputText || ""),
+    String(currentProposal || ""),
+    String(opts.channel || "").trim(),
+    String(opts.recipientName || "").trim(),
+    Array.isArray(opts.similarReplies) ? opts.similarReplies : [],
+    cfg.language,
+    cfg.bossName,
+    String(opts.subject || "").trim()
+  );
+  const result = TL_AI_callPrompt_(prompt);
+  const raw = result.raw_json || {};
+  return {
+    proposal: String(raw.proposal || result.proposal || currentProposal || "").trim(),
+    subject: String(raw.subject || opts.subject || "").trim(),
     raw_text: result.raw_text,
     raw_json: raw,
     response_body: result.response_body

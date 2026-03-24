@@ -435,7 +435,7 @@ function TL_Capture_RunUnlocked_(batchSize, options) {
     const packetItems = [];
     const childResults = [];
     for (let index = 0; index < normalized.items.length; index++) {
-      const child = TL_Capture_prepareOutboundRecipient_(normalized.items[index], captureText);
+      const child = TL_Capture_prepareOutboundRecipient_(normalized.items[index], captureText, options && options.contactsOverride, options);
       const childRow = TL_Capture_buildChildRow_(values, item.rowNumber, child, index, cfg, now);
       const childResult = TL_Capture_upsertChildRow_(childRow);
       packetItems.push(TL_Capture_buildPacketItem_(childRow, childResult.rowNumber || childResult.row, child));
@@ -1972,10 +1972,11 @@ function TL_Capture_simplifyContactCandidate_(contact, channel) {
   };
 }
 
-function TL_Capture_prepareOutboundRecipient_(item, captureText, contactsOverride) {
+function TL_Capture_prepareOutboundRecipient_(item, captureText, contactsOverride, options) {
   const normalized = item && typeof item === "object" ? Object.assign({}, item) : {};
   const channel = String(normalized.kind || "").trim().toLowerCase();
   if (!TL_Capture_isOutboundCommunicationKind_(channel)) return normalized;
+  const opts = options || {};
 
   const resolution = typeof TL_Contacts_ResolveRequest_ === "function"
     ? TL_Contacts_ResolveRequest_({
@@ -2011,7 +2012,100 @@ function TL_Capture_prepareOutboundRecipient_(item, captureText, contactsOverrid
   if (channel === "email" && !String(normalized.subject || "").trim()) {
     normalized.subject = String(normalized.title || "").trim();
   }
+
+  const similarRepliesFn = typeof opts.similarRepliesFn === "function"
+    ? opts.similarRepliesFn
+    : TL_Capture_findSimilarReplies_;
+  const similarReplies = normalized.recipient_contact_id && typeof similarRepliesFn === "function"
+    ? similarRepliesFn({
+        contactId: normalized.recipient_contact_id,
+        channel: channel,
+        topicId: String(normalized.topic_id || "").trim()
+      }, opts)
+    : [];
+  const refineFn = opts.refineOutboundFn || null;
+  const shouldRefine = normalized.recipient_contact_id &&
+    String(normalized.proposal || "").trim() &&
+    Array.isArray(similarReplies) &&
+    similarReplies.length &&
+    typeof TL_AI_RefineOutboundDraft_ === "function";
+
+  if (shouldRefine) {
+    try {
+      const refined = TL_AI_RefineOutboundDraft_(captureText, normalized.proposal, {
+        channel: channel,
+        recipientName: normalized.recipient_name,
+        similarReplies: similarReplies,
+        subject: normalized.subject,
+        refineFn: refineFn
+      });
+      normalized.proposal = String(refined && refined.proposal || normalized.proposal).trim() || normalized.proposal;
+      if (channel === "email") {
+        normalized.subject = String(refined && refined.subject || normalized.subject).trim() || normalized.subject;
+      }
+      normalized.notes = TL_Capture_appendInlineNote_(normalized.notes, "similar_replies_used=" + String(similarReplies.length));
+    } catch (e) {
+      normalized.notes = TL_Capture_appendInlineNote_(normalized.notes, "similar_replies_refine_failed=true");
+    }
+  }
+
   return normalized;
+}
+
+function TL_Capture_findSimilarReplies_(lookup, options) {
+  const query = lookup || {};
+  const opts = options || {};
+  const contactId = String(query.contactId || "").trim();
+  const topicId = String(query.topicId || "").trim();
+  const channel = String(query.channel || "").trim().toLowerCase();
+  const limit = Number(opts.similarReplyLimit || 3);
+  if (!contactId && !topicId) return [];
+  if (typeof TL_Orchestrator_readRecentRows_ !== "function") return [];
+
+  const rows = TL_Orchestrator_readRecentRows_(Number(opts.scanRows || 160));
+  return (rows || []).map(function(item) {
+    const values = item && item.values ? item.values : [];
+    if (String(TL_Orchestrator_value_(values, "record_class") || "").trim().toLowerCase() !== "communication") return null;
+    if (String(TL_Orchestrator_value_(values, "direction") || "").trim().toLowerCase() !== "outgoing") return null;
+    if (contactId && String(TL_Orchestrator_value_(values, "contact_id") || "").trim() !== contactId) return null;
+    if (topicId && String(TL_Orchestrator_value_(values, "topic_id") || "").trim() !== topicId) return null;
+
+    const proposal = String(TL_Orchestrator_value_(values, "ai_proposal") || TL_Orchestrator_value_(values, "text") || "").trim();
+    if (!proposal) return null;
+
+    const rowChannel = String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase();
+    const approvalStatus = String(TL_Orchestrator_value_(values, "approval_status") || "").trim().toLowerCase();
+    const executionStatus = String(TL_Orchestrator_value_(values, "execution_status") || "").trim().toLowerCase();
+    const score = (executionStatus === "sent" || executionStatus === "delivered" || executionStatus === "read" || executionStatus === "completed" ? 4 : 0) +
+      (approvalStatus === "approved" || approvalStatus === "awaiting_approval" ? 2 : 0) +
+      (rowChannel === channel ? 2 : 0);
+    return {
+      rowNumber: Number(item.rowNumber || 0),
+      channel: rowChannel,
+      subject: String(TL_Orchestrator_value_(values, "thread_subject") || "").trim(),
+      proposal: proposal,
+      score: score
+    };
+  }).filter(Boolean).sort(function(a, b) {
+    if (b.score !== a.score) return b.score - a.score;
+    return Number(b.rowNumber || 0) - Number(a.rowNumber || 0);
+  }).slice(0, limit > 0 ? limit : 3).map(function(item) {
+    return {
+      rowNumber: item.rowNumber,
+      channel: item.channel,
+      subject: item.subject,
+      proposal: item.proposal
+    };
+  });
+}
+
+function TL_Capture_appendInlineNote_(existing, extraLine) {
+  const base = String(existing || "").trim();
+  const extra = String(extraLine || "").trim();
+  if (!extra) return base;
+  if (!base) return extra;
+  if (base.indexOf(extra) !== -1) return base;
+  return base + "\n" + extra;
 }
 
 function TL_Capture_buildChildRow_(sourceValues, sourceRowNumber, item, index, cfg, now) {
