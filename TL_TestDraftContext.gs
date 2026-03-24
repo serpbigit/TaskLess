@@ -4,7 +4,8 @@ function TL_TestDraftContext_RunAll() {
     preview_truncation: TL_TestDraftContext_PreviewTruncationRun(),
     topic_existing_selection: TL_TestDraftContext_TopicExistingSelectionRun(),
     topic_candidate_notes: TL_TestDraftContext_TopicCandidateNotesRun(),
-    topic_examples_retrieval: TL_TestDraftContext_TopicExamplesRetrievalRun()
+    topic_examples_retrieval: TL_TestDraftContext_TopicExamplesRetrievalRun(),
+    topic_owner_rendering: TL_TestDraftContext_TopicOwnerRenderingRun()
   };
 }
 
@@ -206,6 +207,62 @@ function TL_TestDraftContext_TopicExamplesRetrievalRun() {
   } finally {
     TL_Orchestrator_readRecentRows_ = originalReadRecentRows;
   }
+}
+
+function TL_TestDraftContext_TopicOwnerRenderingRun() {
+  const brief = TL_DraftContext_renderPromptBrief_(
+    {
+      contactId: "CI_1",
+      name: "David Cohen",
+      phone: "972541111111",
+      email: "david@example.com"
+    },
+    [],
+    [],
+    [],
+    [
+      {
+        contactId: "GC_1",
+        name: "Dana Banker",
+        routingRole: "banker",
+        role: "Mortgage Banker",
+        org: "Leumi",
+        phone1: "972501111111",
+        email: "dana@example.com"
+      }
+    ],
+    [],
+    []
+  );
+  const review = TL_DraftContext_renderReviewBrief_(
+    {
+      contactId: "CI_1",
+      name: "David Cohen",
+      phone: "972541111111",
+      email: "david@example.com"
+    },
+    [],
+    [],
+    [],
+    [
+      {
+        contactId: "GC_1",
+        name: "Dana Banker",
+        routingRole: "banker",
+        role: "Mortgage Banker",
+        org: "Leumi"
+      }
+    ],
+    []
+  );
+
+  return {
+    ok: brief.indexOf("Likely topic handlers:") !== -1 &&
+      brief.indexOf("Dana Banker") !== -1 &&
+      review.indexOf("מטפל אפשרי: Dana Banker | routing_role=banker | org=Leumi") !== -1,
+    brief: brief,
+    review: review
+  };
 }
 
 function TL_TestDraftContext_buildTopicExampleValues_(overrides) {

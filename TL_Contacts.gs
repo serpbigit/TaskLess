@@ -612,9 +612,11 @@ function TL_Contacts_readSearchContacts_() {
       const org = String(row[idx.org] || "").trim();
       const role = String(row[idx.role] || "").trim();
       const tags = String(row[idx.tags] || "").trim();
+      const labels = String(row[idx.labels] || "").trim();
       const email = String(row[idx.email] || "").trim();
       const phone1 = String(row[idx.phone1] || "").trim();
       const phone2 = String(row[idx.phone2] || "").trim();
+      const notesInternal = String(row[idx.notes_internal] || "").trim();
       out.push({
         contactId: contactId,
         name: name,
@@ -622,9 +624,11 @@ function TL_Contacts_readSearchContacts_() {
         org: org,
         role: role,
         tags: tags,
+        labels: labels,
         email: email,
         phone1: phone1,
         phone2: phone2,
+        notesInternal: notesInternal,
         phone1Norm: TL_Contacts_normalizePhoneField_(row[idx.phone1_normalized] || phone1 || ""),
         phone2Norm: TL_Contacts_normalizePhoneField_(row[idx.phone2_normalized] || phone2 || ""),
         emailNorm: TL_Contacts_normalizeEmail_(row[idx.email_normalized] || email || ""),
@@ -632,7 +636,8 @@ function TL_Contacts_readSearchContacts_() {
         aliasNorm: TL_Contacts_normalizeSearchText_(alias),
         orgNorm: TL_Contacts_normalizeSearchText_(org),
         roleNorm: TL_Contacts_normalizeSearchText_(role),
-        tagsNorm: TL_Contacts_normalizeSearchText_(tags)
+        tagsNorm: TL_Contacts_normalizeSearchText_(tags),
+        labelsNorm: TL_Contacts_normalizeSearchText_(labels)
       });
     });
   } catch (err) {}
@@ -710,6 +715,71 @@ function TL_Contacts_normalizeSearchQueryType_(value) {
   const v = String(value || "").trim().toLowerCase();
   const allowed = ["name", "name_prefix", "phone_fragment", "email", "relationship", "org"];
   return allowed.indexOf(v) !== -1 ? v : "";
+}
+
+function TL_Contacts_parseInternalNotesMap_(text) {
+  const out = {};
+  String(text || "").split(/\r?\n/).forEach(function(line) {
+    const raw = String(line || "").trim();
+    if (!raw) return;
+    const eq = raw.indexOf("=");
+    if (eq <= 0) return;
+    const key = String(raw.slice(0, eq) || "").trim().toLowerCase();
+    const value = String(raw.slice(eq + 1) || "").trim();
+    if (!key) return;
+    out[key] = value;
+  });
+  return out;
+}
+
+function TL_Contacts_csvList_(value) {
+  return String(value || "")
+    .split(",")
+    .map(function(part) { return String(part || "").trim(); })
+    .filter(Boolean);
+}
+
+function TL_Contacts_contactHandledTopics_(contact) {
+  const notesMap = TL_Contacts_parseInternalNotesMap_(contact && contact.notesInternal || contact && contact.notes_internal || "");
+  const topics = TL_Contacts_csvList_(notesMap.handled_topics || notesMap.topic_owner_for || "");
+  return topics.map(function(item) {
+    return TL_AI_normalizeTopicSlug_(item);
+  }).filter(Boolean);
+}
+
+function TL_Contacts_findTopicOwners_(topicId, options, contactsOverride) {
+  const normalizedTopicId = TL_AI_normalizeTopicSlug_(topicId);
+  if (!normalizedTopicId) return [];
+  const limit = Number(options && options.limit || 3);
+  const contacts = Array.isArray(contactsOverride) ? contactsOverride : TL_Contacts_readSearchContacts_();
+
+  return (contacts || []).map(function(contact) {
+    const handledTopics = TL_Contacts_contactHandledTopics_(contact);
+    const routingRole = String(TL_Contacts_parseInternalNotesMap_(contact && contact.notesInternal || contact && contact.notes_internal || "").routing_role || "").trim();
+    let score = 0;
+    if (handledTopics.indexOf(normalizedTopicId) !== -1) score += 200;
+    if (String(contact && contact.tags || "").toLowerCase().indexOf(normalizedTopicId.toLowerCase()) !== -1) score += 40;
+    if (String(contact && contact.role || "").trim()) score += 5;
+    if (String(contact && contact.org || "").trim()) score += 5;
+    if (score <= 0) return null;
+    return {
+      contactId: String(contact && contact.contactId || "").trim(),
+      name: String(contact && contact.name || "").trim(),
+      alias: String(contact && contact.alias || "").trim(),
+      org: String(contact && contact.org || "").trim(),
+      role: String(contact && contact.role || "").trim(),
+      tags: String(contact && contact.tags || "").trim(),
+      email: String(contact && contact.email || "").trim(),
+      phone1: String(contact && contact.phone1 || "").trim(),
+      phone2: String(contact && contact.phone2 || "").trim(),
+      handledTopics: handledTopics,
+      routingRole: routingRole,
+      matchScore: score
+    };
+  }).filter(Boolean).sort(function(a, b) {
+    if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore;
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  }).slice(0, limit > 0 ? limit : 3);
 }
 
 function TL_Contacts_buildSearchQueries_(rawText, extraction) {

@@ -61,6 +61,7 @@ function TL_DraftContext_build_(identity, options) {
   const emails = TL_DraftContext_fetchEmails_(resolved, options);
   const whatsapps = TL_DraftContext_fetchWhatsApps_(resolved, options);
   const topics = TL_DraftContext_fetchTopics_(resolved, options);
+  const topicOwners = TL_DraftContext_fetchTopicOwners_(String(options && options.currentTopicId || "").trim(), options);
   const topicExamples = TL_DraftContext_fetchTopicExamples_(String(options && options.currentTopicId || "").trim(), options);
 
   return {
@@ -70,9 +71,10 @@ function TL_DraftContext_build_(identity, options) {
     emails: emails,
     whatsapps: whatsapps,
     topics: topics,
+    topicOwners: topicOwners,
     topicExamples: topicExamples,
-    promptBrief: TL_DraftContext_renderPromptBrief_(resolved, enrichments, emails, whatsapps, topics, topicExamples),
-    reviewBrief: TL_DraftContext_renderReviewBrief_(resolved, enrichments, emails, whatsapps, topicExamples)
+    promptBrief: TL_DraftContext_renderPromptBrief_(resolved, enrichments, emails, whatsapps, topicOwners, topics, topicExamples),
+    reviewBrief: TL_DraftContext_renderReviewBrief_(resolved, enrichments, emails, whatsapps, topicOwners, topicExamples)
   };
 }
 
@@ -262,7 +264,7 @@ function TL_DraftContext_fetchWhatsApps_(contact, options) {
   return out;
 }
 
-function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsapps, topics, topicExamples) {
+function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsapps, topicOwners, topics, topicExamples) {
   const lines = [
     "Draft context brief:"
   ];
@@ -305,6 +307,15 @@ function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsa
     lines.push("none");
   }
 
+  lines.push("Likely topic handlers:");
+  if (topicOwners && topicOwners.length) {
+    TL_DraftContext_renderTopicOwnersSection_(topicOwners).forEach(function(line) {
+      lines.push(line);
+    });
+  } else {
+    lines.push("none");
+  }
+
   const topicLines = TL_DraftContext_renderTopicSection_(topics);
   lines.push("Topic registry (customer-specific):");
   if (topicLines.length) {
@@ -325,6 +336,14 @@ function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsa
   }
 
   return lines.join("\n");
+}
+
+function TL_DraftContext_fetchTopicOwners_(topicId, options) {
+  const normalizedTopicId = String(topicId || "").trim();
+  if (!normalizedTopicId || typeof TL_Contacts_findTopicOwners_ !== "function") return [];
+  return TL_Contacts_findTopicOwners_(normalizedTopicId, {
+    limit: Number(options && options.topicOwnerLimit || 3)
+  });
 }
 
 function TL_DraftContext_fetchTopicExamples_(topicId, options) {
@@ -517,7 +536,20 @@ function TL_DraftContext_renderTopicSection_(topics) {
   return out;
 }
 
-function TL_DraftContext_renderReviewBrief_(contact, enrichments, emails, whatsapps, topicExamples) {
+function TL_DraftContext_renderTopicOwnersSection_(topicOwners) {
+  return (topicOwners || []).map(function(item, idx) {
+    const bits = [];
+    bits.push("[" + (idx + 1) + "]");
+    if (item && item.name) bits.push(item.name);
+    if (item && item.routingRole) bits.push("routing_role=" + item.routingRole);
+    if (item && item.role) bits.push("role=" + item.role);
+    if (item && item.org) bits.push("org=" + item.org);
+    if (item && (item.phone1 || item.email)) bits.push([item.phone1, item.email].filter(Boolean).join(" | "));
+    return bits.join(" ");
+  }).filter(Boolean);
+}
+
+function TL_DraftContext_renderReviewBrief_(contact, enrichments, emails, whatsapps, topicOwners, topicExamples) {
   const lines = [];
   const contactBits = [];
   const contactName = String(contact && contact.name || "").trim();
@@ -556,6 +588,16 @@ function TL_DraftContext_renderReviewBrief_(contact, enrichments, emails, whatsa
     return parts.join(" | ");
   });
   if (whatsappLines.length) lines.push("וואטסאפ: " + whatsappLines.join(" ; "));
+
+  const topicOwnerLines = TL_DraftContext_renderReviewSection_(topicOwners, 2, function(item) {
+    const parts = [];
+    if (item && item.name) parts.push(item.name);
+    if (item && item.routingRole) parts.push("routing_role=" + item.routingRole);
+    else if (item && item.role) parts.push("role=" + item.role);
+    if (item && item.org) parts.push("org=" + item.org);
+    return parts.join(" | ");
+  });
+  if (topicOwnerLines.length) lines.push("מטפל אפשרי: " + topicOwnerLines.join(" ; "));
 
   const topicExampleLines = TL_DraftContext_renderReviewSection_(topicExamples, 2, function(item) {
     const parts = [];
