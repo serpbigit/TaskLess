@@ -10,7 +10,9 @@ function TL_TestBossIntentRouting_RunAll() {
     capabilities_route: TL_TestBossIntentRouting_CapabilitiesRouteRun(),
     contact_lookup_route: TL_TestBossIntentRouting_ContactLookupRouteRun(),
     context_lookup_route: TL_TestBossIntentRouting_ContextLookupRouteRun(),
+    similar_replies_route: TL_TestBossIntentRouting_SimilarRepliesRouteRun(),
     active_item_continuation: TL_TestBossIntentRouting_ActiveItemContinuationRun(),
+    similar_replies_continuation: TL_TestBossIntentRouting_SimilarRepliesContinuationRun(),
     active_item_pause_replace: TL_TestBossIntentRouting_ActiveItemPauseReplaceRun(),
     resume_paused_item: TL_TestBossIntentRouting_ResumePausedItemRun(),
     paused_items_route: TL_TestBossIntentRouting_PausedItemsRouteRun(),
@@ -635,6 +637,175 @@ function TL_TestBossIntentRouting_ContextLookupRouteRun() {
   };
   Logger.log("TL_TestBossIntentRouting_ContextLookupRouteRun: %s", JSON.stringify(output, null, 2));
   return output;
+}
+
+function TL_TestBossIntentRouting_SimilarRepliesRouteRun() {
+  const first = TL_TestBossIntentRouting_seedRow_({
+    root_id: "root_similar_reply_1_" + Utilities.getUuid(),
+    record_class: "communication",
+    direction: "outgoing",
+    channel: "whatsapp",
+    contact_id: "CI_1",
+    topic_id: "topic_documents_needed",
+    approval_status: "approved",
+    execution_status: "sent",
+    ai_proposal: "Dana, please send the last 3 payslips and ID copy."
+  });
+  const second = TL_TestBossIntentRouting_seedRow_({
+    root_id: "root_similar_reply_2_" + Utilities.getUuid(),
+    record_class: "communication",
+    direction: "outgoing",
+    channel: "email",
+    contact_id: "CI_1",
+    topic_id: "topic_documents_needed",
+    approval_status: "approved",
+    execution_status: "sent",
+    ai_proposal: "Please send the missing mortgage documents so I can move this forward."
+  });
+
+  const reply = TL_Menu_HandleBossMessage_({
+    from: TL_TestBossIntentRouting_getBossPhone_(),
+    text: "show similar replies for Dana about documents"
+  }, null, {
+    intentFn: function(text) {
+      return {
+        intent: "find_similar_replies",
+        route: "summary",
+        summary_kind: "similar_replies",
+        capture_state: "",
+        confidence: 0.97,
+        needs_clarification: "false",
+        reply: "",
+        parameters: {
+          query: text,
+          capture_kind: "",
+          capture_mode: "",
+          time_hint: "",
+          target: "Dana"
+        }
+      };
+    },
+    contextLookupFn: function() {
+      return {
+        contact_query: "Dana",
+        search_queries: [{ type: "name", value: "Dana" }],
+        topic_query: "documents",
+        topic_id: "topic_documents_needed",
+        reply_preamble: "אוספת תשובות דומות מהעבר."
+      };
+    },
+    resolveContactFn: function() {
+      return {
+        status: "resolved",
+        contact: {
+          contactId: "CI_1",
+          name: "Dana Banker",
+          phone1: "972501112233",
+          email: "dana@bank.example"
+        },
+        candidates: [],
+        queries: [{ type: "name", value: "Dana" }]
+      };
+    },
+    contextLimit: 10
+  });
+
+  return {
+    ok: String(reply || "").indexOf("תשובות דומות עבור") !== -1 &&
+      String(reply || "").indexOf("Dana Banker") !== -1 &&
+      String(reply || "").indexOf("payslips") !== -1 &&
+      first.rowNumber > 0 &&
+      second.rowNumber > 0,
+    reply: reply
+  };
+}
+
+function TL_TestBossIntentRouting_SimilarRepliesContinuationRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  try {
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_SIM_REPLY_1",
+      kind: "similar_replies_lookup",
+      status: "active",
+      source_text: "show similar replies for Dana",
+      contact_query: "Dana",
+      search_queries: [{ type: "name", value: "Dana" }],
+      resolved_contact_id: "CI_1",
+      resolved_contact_name: "Dana Banker"
+    });
+    TL_TestBossIntentRouting_seedRow_({
+      root_id: "root_similar_reply_cont_" + Utilities.getUuid(),
+      record_class: "communication",
+      direction: "outgoing",
+      channel: "whatsapp",
+      contact_id: "CI_1",
+      topic_id: "topic_documents_needed",
+      approval_status: "approved",
+      execution_status: "sent",
+      ai_proposal: "Dana, I still need the missing documents to submit the file."
+    });
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "about documents"
+    }, null, {
+      intentFn: function() {
+        return {
+          intent: "unknown",
+          route: "none",
+          summary_kind: "none",
+          capture_state: "",
+          confidence: 0.2,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: "",
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      },
+      contextLookupFn: function() {
+        return {
+          contact_query: "",
+          search_queries: [],
+          topic_query: "documents",
+          topic_id: "topic_documents_needed",
+          reply_preamble: ""
+        };
+      },
+      resolveContactFn: function() {
+        return {
+          status: "resolved",
+          contact: {
+            contactId: "CI_1",
+            name: "Dana Banker",
+            phone1: "972501112233",
+            email: "dana@bank.example"
+          },
+          candidates: [],
+          queries: [{ type: "name", value: "Dana" }]
+        };
+      },
+      topicLimit: 10
+    });
+
+    const active = TL_ActiveItem_Get_(waId);
+    return {
+      ok: String(reply || "").indexOf("ממשיכה את הבדיקה הקודמת") !== -1 &&
+        String(reply || "").indexOf("תשובות דומות עבור") !== -1 &&
+        !!active &&
+        active.kind === "similar_replies_lookup" &&
+        active.topic_id === "topic_documents_needed",
+      reply: reply,
+      active: active
+    };
+  } finally {
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
 }
 
 function TL_TestBossIntentRouting_ContactLookupRouteRun() {

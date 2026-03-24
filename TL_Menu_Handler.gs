@@ -1180,6 +1180,9 @@ function TL_Menu_HandleSummaryIntent_(intent, waId, ev, options) {
   if (summaryKind === "context_lookup") {
     return TL_Menu_BuildContextLookupSummary_(intent, ev, analysis, options);
   }
+  if (summaryKind === "similar_replies") {
+    return TL_Menu_BuildSimilarRepliesSummary_(intent, ev, analysis, options);
+  }
   const rendered = TL_Menu_RenderSummaryKind_(summaryKind, waId);
   const preamble = String(analysis && analysis.reply_preamble || "").trim();
   if (preamble && rendered) return [preamble, "", rendered].join("\n\n");
@@ -1202,24 +1205,32 @@ function TL_Menu_TryContinueActiveItem_(waId, rawText, intent, options) {
   if (kind === "capture_item") {
     return TL_Menu_ContinueCaptureItem_(waId, rawText);
   }
-  if (kind !== "contact_lookup" && kind !== "context_lookup") return null;
+  if (kind !== "contact_lookup" && kind !== "context_lookup" && kind !== "similar_replies_lookup") return null;
 
-  return TL_Menu_BuildContextLookupSummary_({
-    intent: "find_context",
+  const continuedSummaryKind = kind === "similar_replies_lookup" ? "similar_replies" : "context_lookup";
+
+  const continueIntent = {
+    intent: continuedSummaryKind === "similar_replies" ? "find_similar_replies" : "find_context",
     route: "summary",
-    summary_kind: "context_lookup",
+    summary_kind: continuedSummaryKind,
     parameters: {
       query: String(rawText || "").trim()
     }
-  }, {
+  };
+  const continueEv = {
     from: String(waId || "").trim(),
     text: String(rawText || "").trim()
-  }, {
-    summary_kind: "context_lookup",
+  };
+  const continueAnalysis = {
+    summary_kind: continuedSummaryKind,
     reply_preamble: TL_Menu_T_("ממשיכה את הבדיקה הקודמת.", "Continuing the previous lookup.")
-  }, Object.assign({}, options || {}, {
+  };
+  const continueOptions = Object.assign({}, options || {}, {
     activeItem: active
-  }));
+  });
+  return continuedSummaryKind === "similar_replies"
+    ? TL_Menu_BuildSimilarRepliesSummary_(continueIntent, continueEv, continueAnalysis, continueOptions)
+    : TL_Menu_BuildContextLookupSummary_(continueIntent, continueEv, continueAnalysis, continueOptions);
 }
 
 function TL_Menu_ContinueOutboundDraft_(waId, rawText, options) {
@@ -1712,6 +1723,97 @@ function TL_Menu_BuildContextLookupSummary_(intent, ev, analysis, options) {
   ].join("\n");
 }
 
+function TL_Menu_BuildSimilarRepliesSummary_(intent, ev, analysis, options) {
+  const opts = options || {};
+  const sourceText = String(ev && ev.text || intent && intent.parameters && intent.parameters.query || "").trim();
+  const active = opts.activeItem && typeof opts.activeItem === "object" ? opts.activeItem : null;
+  const lookup = typeof TL_AI_ExtractBossContextLookup_ === "function"
+    ? TL_AI_ExtractBossContextLookup_(sourceText, {
+        contextLookupFn: opts.contextLookupFn
+      })
+    : {
+        contact_query: sourceText,
+        search_queries: [],
+        topic_query: "",
+        topic_id: "",
+        reply_preamble: ""
+      };
+  const mergedLookup = {
+    contact_query: String(lookup.contact_query || active && active.contact_query || "").trim(),
+    search_queries: Array.isArray(lookup.search_queries) && lookup.search_queries.length
+      ? lookup.search_queries.slice()
+      : (Array.isArray(active && active.search_queries) ? active.search_queries.slice() : []),
+    topic_query: String(lookup.topic_query || active && active.topic_query || "").trim(),
+    topic_id: String(lookup.topic_id || active && active.topic_id || "").trim(),
+    reply_preamble: String(lookup.reply_preamble || "").trim()
+  };
+
+  const resolveFn = opts.resolveContactFn || TL_Contacts_ResolveRequest_;
+  const contactResult = (mergedLookup.contact_query || (mergedLookup.search_queries && mergedLookup.search_queries.length)) && typeof resolveFn === "function"
+    ? resolveFn({
+        rawText: sourceText,
+        query: String(mergedLookup.contact_query || sourceText).trim(),
+        contact_query: String(mergedLookup.contact_query || "").trim(),
+        search_queries: Array.isArray(mergedLookup.search_queries) ? mergedLookup.search_queries.slice() : []
+      }, { channel: "" }, opts.contacts || null)
+    : { status: "missing", contact: null, candidates: [], queries: [] };
+
+  const topicResult = TL_Menu_ResolveTopicLookup_({
+    topic_id: mergedLookup.topic_id,
+    topic_query: mergedLookup.topic_query
+  }, opts);
+  const rows = TL_Menu_FindSimilarReplyRows_(contactResult, topicResult, opts);
+  const preamble = String(
+    mergedLookup.reply_preamble ||
+    analysis && analysis.reply_preamble ||
+    TL_Menu_T_("אוספת כמה תשובות דומות מהעבר.", "Gathering a few similar past replies.")
+  ).trim();
+
+  const scopeBits = [];
+  if (contactResult && contactResult.contact) {
+    scopeBits.push(String(contactResult.contact.name || contactResult.contact.email || contactResult.contact.phone1 || "").trim());
+  }
+  if (topicResult && topicResult.topicId) {
+    scopeBits.push(String(topicResult.topicSummary || topicResult.topicId || "").trim());
+  }
+  const title = scopeBits.length
+    ? (TL_Menu_T_("תשובות דומות עבור: ", "Similar replies for: ") + scopeBits.join(" | "))
+    : TL_Menu_T_("תשובות דומות", "Similar replies");
+  const waId = String(ev && ev.from || "").trim();
+
+  if (waId && typeof TL_ActiveItem_Set_ === "function") {
+    TL_ActiveItem_Set_(waId, {
+      item_id: active && active.item_id || "",
+      kind: "similar_replies_lookup",
+      status: "active",
+      source_text: sourceText,
+      contact_query: mergedLookup.contact_query,
+      search_queries: mergedLookup.search_queries,
+      topic_query: mergedLookup.topic_query,
+      topic_id: String(topicResult && topicResult.topicId || mergedLookup.topic_id || "").trim(),
+      reply_preamble: preamble,
+      resolved_contact_id: String(contactResult && contactResult.contact && (contactResult.contact.contactId || contactResult.contact.contact_id) || active && active.resolved_contact_id || "").trim(),
+      resolved_contact_name: String(contactResult && contactResult.contact && contactResult.contact.name || active && active.resolved_contact_name || "").trim(),
+      resolved_topic_summary: String(topicResult && topicResult.topicSummary || active && active.resolved_topic_summary || "").trim()
+    });
+  }
+
+  if (!rows.length) {
+    return [
+      preamble,
+      "",
+      title,
+      TL_Menu_T_("לא מצאתי עדיין תשובות דומות בהיסטוריה המקומית.", "I couldn't find similar replies in the local history yet.")
+    ].join("\n");
+  }
+
+  return [
+    preamble,
+    "",
+    TL_Menu_BuildSummaryBlock_(title, rows, "")
+  ].join("\n");
+}
+
 function TL_Menu_ResolveTopicLookup_(lookup, options) {
   const data = lookup || {};
   const exactTopicId = String(data.topic_id || "").trim();
@@ -1780,6 +1882,72 @@ function TL_Menu_FindRecentContextRows_(contactResult, topicResult, options) {
     if (!resolvedContactId && !resolvedTopicId) return false;
     return true;
   }, limit);
+}
+
+function TL_Menu_FindSimilarReplyRows_(contactResult, topicResult, options) {
+  const limit = Number(options && options.similarReplyLimit || 3);
+  const resolvedContact = contactResult && contactResult.contact ? contactResult.contact : null;
+  const resolvedContactId = String(resolvedContact && (resolvedContact.contactId || resolvedContact.contact_id) || "").trim();
+  const resolvedTopicId = String(topicResult && topicResult.topicId || "").trim();
+
+  const rows = TL_Menu_FilterRecentRows_(function(item) {
+    const values = item && item.values ? item.values : [];
+    if (String(TL_Orchestrator_value_(values, "record_class") || "").trim().toLowerCase() !== "communication") return false;
+    if (String(TL_Orchestrator_value_(values, "direction") || "").trim().toLowerCase() !== "outgoing") return false;
+
+    const rowContactId = String(TL_Orchestrator_value_(values, "contact_id") || "").trim();
+    const rowTopicId = String(TL_Orchestrator_value_(values, "topic_id") || "").trim();
+    if (resolvedContactId && rowContactId !== resolvedContactId) return false;
+    if (resolvedTopicId && rowTopicId !== resolvedTopicId) return false;
+    if (!resolvedContactId && !resolvedTopicId) return false;
+
+    const hasReplyText = !!String(
+      TL_Orchestrator_value_(values, "ai_proposal") ||
+      TL_Orchestrator_value_(values, "text") ||
+      ""
+    ).trim();
+    return hasReplyText;
+  }, Math.max(limit * 4, 12));
+
+  return (rows || []).map(function(item) {
+    const values = item && item.values ? item.values : [];
+    const approvalStatus = String(TL_Orchestrator_value_(values, "approval_status") || "").trim().toLowerCase();
+    const executionStatus = String(TL_Orchestrator_value_(values, "execution_status") || "").trim().toLowerCase();
+    const channel = String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase();
+    const strongCompleted = executionStatus === "sent" ||
+      executionStatus === "delivered" ||
+      executionStatus === "read" ||
+      executionStatus === "completed" ||
+      executionStatus === "approved";
+    const approvedDraft = approvalStatus === "approved" || approvalStatus === "awaiting_approval";
+    const score = (strongCompleted ? 4 : 0) + (approvedDraft ? 2 : 0) + (channel === "whatsapp" ? 1 : 0);
+    return {
+      row: item,
+      score: score
+    };
+  }).sort(function(a, b) {
+    if (b.score !== a.score) return b.score - a.score;
+    return Number(b.row && b.row.rowNumber || 0) - Number(a.row && a.row.rowNumber || 0);
+  }).slice(0, limit > 0 ? limit : 3).map(function(entry) {
+    const values = entry.row && entry.row.values ? entry.row.values : [];
+    return {
+      label: [
+        String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase(),
+        TL_Menu_PreviewText_(TL_Orchestrator_value_(values, "ai_proposal") || TL_Orchestrator_value_(values, "text") || "", 140)
+      ].filter(Boolean).join(" | "),
+      rowNumber: Number(entry.row && entry.row.rowNumber || 0),
+      channel: String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase(),
+      approvalStatus: String(TL_Orchestrator_value_(values, "approval_status") || "").trim().toLowerCase(),
+      executionStatus: String(TL_Orchestrator_value_(values, "execution_status") || "").trim().toLowerCase()
+    };
+  });
+}
+
+function TL_Menu_PreviewText_(text, maxLen) {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+  const limit = Number(maxLen || 140);
+  if (!raw || raw.length <= limit) return raw;
+  return raw.slice(0, Math.max(limit - 1, 1)).trim() + "…";
 }
 
 function TL_Menu_IsAiCostQuery_(text) {

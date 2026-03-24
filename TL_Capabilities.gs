@@ -199,6 +199,15 @@ function TL_Capabilities_registryDefs_() {
       description: "Fetch recent local context by resolved contact and/or topic."
     },
     {
+      id: "QUERY_SIMILAR_REPLIES",
+      category: "query",
+      fn: "TL_Menu_FindSimilarReplyRows_",
+      approval_required: false,
+      reads: ["INBOX"],
+      channels: ["whatsapp","email"],
+      description: "Fetch a few strong prior outgoing replies by resolved contact and/or topic."
+    },
+    {
       id: "DRAFT_CONTEXT_FOR_INBOX_ROW",
       category: "draft",
       fn: "TL_DraftContext_BuildForInboxRowValues_",
