@@ -748,10 +748,29 @@ function TL_Email_significanceFlag_(rawJson, history) {
 }
 
 function TL_Email_BuildReplyProposal_(snapshot, triage, opts) {
+  const options = opts || {};
   const payload = snapshot.payload || {};
   const senderEmail = TL_Email_normEmail_(payload.senderEmail || snapshot.senderEmail || "");
-  const subject = TL_Email_replySubject_(payload.subject || snapshot.title || "");
-  const body = TL_Email_replyBody_(snapshot, triage, opts || {});
+  let subject = TL_Email_replySubject_(payload.subject || snapshot.title || "");
+  let body = TL_Email_replyBody_(snapshot, triage, options);
+  const similarReplies = TL_Email_FindSimilarReplies_(snapshot, triage, options);
+  if (similarReplies.length && typeof TL_AI_RefineOutboundDraft_ === "function") {
+    try {
+      const refined = TL_AI_RefineOutboundDraft_(
+        payload.flattenedText || snapshot.title || body,
+        body,
+        {
+          channel: "email",
+          recipientName: String(payload.senderName || payload.senderEmail || snapshot.senderEmail || "").trim(),
+          similarReplies: similarReplies,
+          subject: subject,
+          refineFn: options.refineFn
+        }
+      );
+      body = String(refined && refined.proposal || body).trim() || body;
+      subject = String(refined && refined.subject || subject).trim() || subject;
+    } catch (e) {}
+  }
   return {
     to: senderEmail,
     subject: subject,
@@ -762,9 +781,28 @@ function TL_Email_BuildReplyProposal_(snapshot, triage, opts) {
     threadId: payload.threadId || snapshot.threadId || "",
     latestMsgId: payload.latestMsgId || snapshot.chunkId || "",
     summary: String(triage.summary || "").trim(),
+    similarRepliesUsed: similarReplies.length,
     approvalStatus: "draft",
     sendStatus: "pending"
   };
+}
+
+function TL_Email_FindSimilarReplies_(snapshot, triage, opts) {
+  const options = opts || {};
+  const fn = typeof options.similarRepliesFn === "function"
+    ? options.similarRepliesFn
+    : (typeof TL_Capture_findSimilarReplies_ === "function" ? TL_Capture_findSimilarReplies_ : null);
+  if (typeof fn !== "function") return [];
+  const draftContext = triage && triage.draftContext ? triage.draftContext : null;
+  const contact = draftContext && draftContext.contact ? draftContext.contact : null;
+  const contactId = String(contact && (contact.contactId || contact.contact_id) || "").trim();
+  const topicId = String(triage && triage.topic_id || "").trim();
+  if (!contactId && !topicId) return [];
+  return fn({
+    contactId: contactId,
+    topicId: topicId,
+    channel: "email"
+  }, options);
 }
 
 function TL_Email_BuildBossCard_(snapshot, triage, proposal) {

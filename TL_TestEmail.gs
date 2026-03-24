@@ -126,6 +126,40 @@ function TL_Email_TestApprovalSnapshotShape() {
   };
 }
 
+function TL_Email_TestReplyProposalRefineDryRun() {
+  const snapshot = TL_Email_buildSyntheticSnapshot_();
+  const triage = TL_Email_TriageSnapshot_(snapshot, { dryRun: true });
+  triage.topic_id = "topic_documents_needed";
+  triage.draftContext = {
+    contact: {
+      contactId: "CI_1",
+      name: "Dana Banker"
+    }
+  };
+  const proposal = TL_Email_BuildReplyProposal_(snapshot, triage, {
+    dryRun: true,
+    similarRepliesFn: function() {
+      return [{
+        rowNumber: 12,
+        channel: "email",
+        subject: "Re: Missing documents",
+        proposal: "Please send the missing mortgage documents so I can proceed."
+      }];
+    },
+    refineFn: function(inputText, currentProposal, opts) {
+      return {
+        proposal: "Please send the missing payslips so I can move this forward.",
+        subject: String(opts.subject || "").trim()
+      };
+    }
+  });
+  return {
+    ok: String(proposal.body || "").indexOf("missing payslips") !== -1 &&
+      Number(proposal.similarRepliesUsed || 0) === 1,
+    proposal: proposal
+  };
+}
+
 function TL_Email_TestApprovedSendDryRun() {
   TL_Sheets_bootstrapPOC();
   const snapshot = TL_Email_buildSyntheticSnapshot_();
