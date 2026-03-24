@@ -14,6 +14,7 @@ function TL_TestBossIntentRouting_RunAll() {
     active_item_pause_replace: TL_TestBossIntentRouting_ActiveItemPauseReplaceRun(),
     resume_paused_item: TL_TestBossIntentRouting_ResumePausedItemRun(),
     outbound_draft_continuation: TL_TestBossIntentRouting_OutboundDraftContinuationRun(),
+    outbound_recipient_continuation: TL_TestBossIntentRouting_OutboundRecipientContinuationRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
@@ -266,6 +267,95 @@ function TL_TestBossIntentRouting_OutboundDraftContinuationRun() {
       ok: String(reply || "").indexOf("עדכנתי את הנוסח") !== -1 &&
         !!current &&
         String(current.proposal || "") === "Dana, I will be 15 minutes late.",
+      reply: reply,
+      current: current
+    };
+  } finally {
+    TL_Menu_ClearDecisionPacket_(waId);
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
+function TL_TestBossIntentRouting_OutboundRecipientContinuationRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ClearDecisionPacket_(waId);
+  try {
+    const seeded = typeof TL_TestBossDecision_seedDecisionItem_ === "function"
+      ? TL_TestBossDecision_seedDecisionItem_({
+          root_id: "root_outbound_recipient_" + Utilities.getUuid(),
+          approval_status: "awaiting_approval",
+          execution_status: "proposal_ready",
+          ai_summary: "Send Dana a quick update.",
+          ai_proposal: "Dana, I will be 10 minutes late."
+        })
+      : null;
+    if (!seeded) return { ok: false, reason: "missing_seed_helper" };
+    const item = Object.assign({}, seeded.item, {
+      channel: "whatsapp",
+      channelLabel: "WhatsApp",
+      captureKind: "whatsapp",
+      recipientQuery: "Dana",
+      recipientName: "",
+      recipientDestination: "",
+      resolutionStatus: "ambiguous",
+      contactId: "",
+      recipientCandidates: [
+        { contactId: "CI_X", name: "Old Dana", phone1: "972500000001", preferredDestination: "972500000001" }
+      ],
+      proposal: "Dana, I will be 10 minutes late.",
+      summary: "Send Dana a quick update."
+    });
+    TL_Menu_StoreDecisionPacket_(waId, "capture", [item]);
+    const livePacket = TL_Menu_GetDecisionPacket_(waId);
+    TL_Menu_BuildDecisionPacketOneByOneReply_(livePacket);
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "Dana banker"
+    }, null, {
+      intentFn: function() {
+        return {
+          intent: "unknown",
+          route: "none",
+          summary_kind: "none",
+          capture_state: "",
+          confidence: 0.2,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: "",
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      },
+      resolveContactFn: function() {
+        return {
+          status: "resolved",
+          contact: {
+            contactId: "CI_1",
+            name: "Dana Banker",
+            phone1: "972501112233",
+            email: "dana@bank.example"
+          },
+          destination: "972501112233",
+          candidates: [],
+          queries: [{ type: "name", value: "Dana banker" }]
+        };
+      }
+    });
+
+    const packetAfter = TL_Menu_GetDecisionPacket_(waId);
+    const current = packetAfter && packetAfter.items ? packetAfter.items[0] : null;
+    return {
+      ok: String(reply || "").indexOf("בחרתי את איש הקשר המתאים") !== -1 &&
+        !!current &&
+        String(current.recipientName || "") === "Dana Banker" &&
+        String(current.recipientDestination || "") === "972501112233" &&
+        String(current.resolutionStatus || "") === "resolved",
       reply: reply,
       current: current
     };

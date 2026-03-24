@@ -1218,11 +1218,55 @@ function TL_Menu_ContinueOutboundDraft_(waId, rawText) {
   if (!packet || String(packet.stage || "").trim() !== "one_by_one") return null;
   const current = packet.items[packet.cursor || 0];
   if (!current || !TL_Menu_IsOutboundCommunicationItem_(current)) return null;
+  if (TL_Menu_ItemNeedsRecipientResolution_(current)) {
+    return TL_Menu_TryContinueOutboundRecipientResolution_(waId, packet, current, text, options);
+  }
   const revised = TL_Menu_ReviseDecisionRow_(current.rowNumber, text);
   current.summary = revised.summary;
   current.proposal = revised.proposal;
   TL_Menu_SetDecisionPacket_(waId, packet);
   return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדכנתי את הנוסח. אפשר לאשר או לערוך שוב."));
+}
+
+function TL_Menu_TryContinueOutboundRecipientResolution_(waId, packet, current, rawText, options) {
+  const opts = options || {};
+  const resolveFn = opts.resolveContactFn || TL_Contacts_ResolveRequest_;
+  if (typeof resolveFn !== "function") {
+    return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
+  }
+  const captureKind = String(current.captureKind || current.channel || "").trim().toLowerCase();
+  const baseSearchQueries = Array.isArray(current.searchQueries) ? current.searchQueries.slice(0, 12) : [];
+  const combinedQueries = TL_AI_normalizeSearchQueries_(
+    baseSearchQueries.concat([{ type: "name", value: String(rawText || "").trim() }])
+  );
+  const resolution = resolveFn({
+    rawText: String(rawText || "").trim(),
+    query: String(rawText || current.recipientQuery || "").trim(),
+    recipient_query: String(current.recipientQuery || "").trim(),
+    search_queries: combinedQueries
+  }, { channel: captureKind }, null);
+
+  const status = String(resolution && resolution.status || "").trim().toLowerCase();
+  if (status === "resolved" && resolution.contact) {
+    const applied = TL_Menu_ApplyPacketRecipientChoice_(current, resolution.contact);
+    applied.searchQueries = Array.isArray(resolution.queries) ? resolution.queries.slice(0, 12) : applied.searchQueries;
+    packet.items[packet.cursor || 0] = applied;
+    TL_Menu_SetDecisionPacket_(waId, packet);
+    return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("בחרתי את איש הקשר המתאים."));
+  }
+
+  current.searchQueries = Array.isArray(resolution && resolution.queries) ? resolution.queries.slice(0, 12) : current.searchQueries;
+  current.recipientCandidates = Array.isArray(resolution && resolution.candidates) ? resolution.candidates.slice(0, 5).map(function(contact) {
+    return TL_Capture_simplifyContactCandidate_(contact, captureKind);
+  }) : [];
+  current.resolutionStatus = status || "missing";
+  packet.items[packet.cursor || 0] = current;
+  TL_Menu_SetDecisionPacket_(waId, packet);
+
+  if (current.resolutionStatus === "ambiguous") {
+    return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("מצאתי כמה התאמות אפשריות. בחר את איש הקשר המתאים."));
+  }
+  return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדיין לא מצאתי איש קשר ברור. אפשר לנסות שם או מספר אחר."));
 }
 
 function TL_Menu_PauseActiveItemForNewIntent_(waId, intent) {
