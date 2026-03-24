@@ -1977,15 +1977,15 @@ function TL_Capture_prepareOutboundRecipient_(item, captureText, contactsOverrid
   const channel = String(normalized.kind || "").trim().toLowerCase();
   if (!TL_Capture_isOutboundCommunicationKind_(channel)) return normalized;
 
-  const resolution = typeof TL_Contacts_resolveBySearchHints_ === "function"
-    ? TL_Contacts_resolveBySearchHints_({
+  const resolution = typeof TL_Contacts_ResolveRequest_ === "function"
+    ? TL_Contacts_ResolveRequest_({
         rawText: String(captureText || "").trim(),
         extraction: {
           recipient_query: String(normalized.recipient_query || "").trim(),
           search_queries: Array.isArray(normalized.search_queries) ? normalized.search_queries : []
         }
-      }, contactsOverride)
-    : { contact: null, candidates: [], queries: [] };
+      }, { channel: channel }, contactsOverride)
+    : { contact: null, candidates: [], queries: [], status: "missing", destination: "" };
 
   const candidates = (resolution && Array.isArray(resolution.candidates) ? resolution.candidates : [])
     .map(function(contact) {
@@ -2004,11 +2004,9 @@ function TL_Capture_prepareOutboundRecipient_(item, captureText, contactsOverrid
     ? resolution.queries
     : (Array.isArray(normalized.search_queries) ? normalized.search_queries : []);
   normalized.recipient_candidates = candidates;
-  normalized.resolution_status = resolved ? "resolved" : (candidates.length ? "ambiguous" : "missing");
+  normalized.resolution_status = String(resolution && resolution.status || "").trim().toLowerCase() || (resolved ? "resolved" : (candidates.length ? "ambiguous" : "missing"));
   normalized.recipient_name = resolved ? String(resolved.name || "").trim() : "";
-  normalized.recipient_destination = resolved
-    ? String(channel === "email" ? resolved.email : (resolved.phone1 || resolved.phone2 || "")).trim()
-    : "";
+  normalized.recipient_destination = resolved ? String(resolution && resolution.destination || "").trim() : "";
   normalized.recipient_contact_id = resolved ? String(resolved.contactId || "").trim() : "";
   if (channel === "email" && !String(normalized.subject || "").trim()) {
     normalized.subject = String(normalized.title || "").trim();

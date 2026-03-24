@@ -12,6 +12,8 @@ function TL_TestContacts_RunAll() {
     phone_candidate_split: TL_TestContacts_PhoneCandidateSplitRun(),
     replace_error_phone: TL_TestContacts_ReplaceErrorPhoneRun(),
     resolve_search_queries: TL_TestContacts_ResolveSearchQueriesRun(),
+    resolve_request_email: TL_TestContacts_ResolveRequestEmailRun(),
+    resolve_request_ambiguous: TL_TestContacts_ResolveRequestAmbiguousRun(),
     topic_owners: TL_TestContacts_TopicOwnersRun(),
     prepare_outbound_recipient: TL_TestContacts_PrepareOutboundRecipientRun(),
     outbound_card_format: TL_TestContacts_OutboundCardFormatRun()
@@ -297,6 +299,97 @@ function TL_TestContacts_TopicOwnersRun() {
       owners[0].routingRole === "banker" &&
       owners[0].handledTopics.indexOf("topic_bank_response") !== -1,
     owners: owners
+  };
+}
+
+function TL_TestContacts_ResolveRequestEmailRun() {
+  const contacts = [
+    {
+      contactId: "GC_1",
+      name: "David Cohen",
+      alias: "David",
+      org: "",
+      role: "",
+      tags: "",
+      email: "david@example.com",
+      phone1: "972506847373",
+      phone2: "",
+      phone1Norm: "972506847373",
+      phone2Norm: "",
+      emailNorm: "david@example.com"
+    }
+  ];
+
+  const result = TL_Contacts_ResolveRequest_({
+    rawText: "email David that this works",
+    extraction: {
+      recipient_query: "David",
+      search_queries: [
+        { type: "name", value: "David" },
+        { type: "name_prefix", value: "Dav" }
+      ]
+    }
+  }, { channel: "email" }, contacts);
+
+  return {
+    ok: result.status === "resolved" &&
+      result.contact &&
+      result.contact.contactId === "GC_1" &&
+      result.destination === "david@example.com" &&
+      Array.isArray(result.queries) &&
+      result.queries.length >= 2,
+    result: result
+  };
+}
+
+function TL_TestContacts_ResolveRequestAmbiguousRun() {
+  const contacts = [
+    {
+      contactId: "GC_1",
+      name: "John Cohen",
+      alias: "John",
+      org: "",
+      role: "",
+      tags: "",
+      email: "john1@example.com",
+      phone1: "972501111111",
+      phone2: "",
+      phone1Norm: "972501111111",
+      phone2Norm: "",
+      emailNorm: "john1@example.com"
+    },
+    {
+      contactId: "GC_2",
+      name: "John Levi",
+      alias: "John",
+      org: "",
+      role: "",
+      tags: "",
+      email: "john2@example.com",
+      phone1: "972502222222",
+      phone2: "",
+      phone1Norm: "972502222222",
+      phone2Norm: "",
+      emailNorm: "john2@example.com"
+    }
+  ];
+
+  const result = TL_Contacts_ResolveRequest_({
+    rawText: "message John",
+    extraction: {
+      recipient_query: "John",
+      search_queries: [
+        { type: "name", value: "John" }
+      ]
+    }
+  }, { channel: "whatsapp" }, contacts);
+
+  return {
+    ok: result.status === "ambiguous" &&
+      !result.contact &&
+      Array.isArray(result.candidates) &&
+      result.candidates.length === 2,
+    result: result
   };
 }
 

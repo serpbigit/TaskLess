@@ -894,6 +894,45 @@ function TL_Contacts_resolveBySearchHints_(input, contactsOverride) {
   };
 }
 
+function TL_Contacts_ResolveRequest_(input, options, contactsOverride) {
+  const source = input || {};
+  const opts = options || {};
+  const channel = String(opts.channel || source.channel || "").trim().toLowerCase();
+  const resolution = TL_Contacts_resolveBySearchHints_(source, contactsOverride);
+  const resolved = resolution && resolution.contact ? resolution.contact : null;
+  const candidates = Array.isArray(resolution && resolution.candidates) ? resolution.candidates : [];
+  const queries = Array.isArray(resolution && resolution.queries) ? resolution.queries : [];
+
+  const chosenDestination = resolved
+    ? TL_Contacts_destinationForChannel_(resolved, channel)
+    : "";
+
+  return {
+    ok: true,
+    channel: channel,
+    query: String(
+      source.query ||
+      source.contact_query ||
+      source.recipient_query ||
+      source.rawText ||
+      ""
+    ).trim(),
+    status: resolved ? "resolved" : (candidates.length ? "ambiguous" : "missing"),
+    contact: resolved,
+    destination: chosenDestination,
+    candidates: candidates,
+    queries: queries
+  };
+}
+
+function TL_Contacts_destinationForChannel_(contact, channel) {
+  const normalizedChannel = String(channel || "").trim().toLowerCase();
+  if (normalizedChannel === "email") {
+    return String(contact && contact.email || contact && contact.emailNorm || "").trim();
+  }
+  return String(contact && (contact.phone1 || contact.phone2 || contact.phone1Norm || contact.phone2Norm || "") || "").trim();
+}
+
 function TL_Contacts_scoreSearchCandidate_(contact, query) {
   const reasons = [];
   let score = 0;

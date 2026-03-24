@@ -880,13 +880,19 @@ function TL_Menu_BuildContactEnrichmentProposalRow_(sourceValues, sourceRowNumbe
 }
 
 function TL_Menu_ResolveContactForEnrichment_(captureText, extraction) {
-  if (typeof TL_Contacts_resolveBySearchHints_ !== "function") {
+  if (typeof TL_Contacts_ResolveRequest_ !== "function") {
     return { contact: null, candidates: [] };
   }
-  return TL_Contacts_resolveBySearchHints_({
+  const result = TL_Contacts_ResolveRequest_({
     rawText: String(captureText || "").trim(),
     extraction: extraction || {}
-  });
+  }, { channel: "" });
+  return {
+    contact: result.contact || null,
+    candidates: Array.isArray(result.candidates) ? result.candidates : [],
+    queries: Array.isArray(result.queries) ? result.queries : [],
+    status: String(result.status || "").trim().toLowerCase()
+  };
 }
 
 function TL_Menu_ReadContacts_() {
@@ -894,11 +900,11 @@ function TL_Menu_ReadContacts_() {
 }
 
 function TL_Menu_FindContactCandidatesByName_(query, contacts) {
-  if (typeof TL_Contacts_resolveBySearchHints_ !== "function") return [];
-  const result = TL_Contacts_resolveBySearchHints_({
+  if (typeof TL_Contacts_ResolveRequest_ !== "function") return [];
+  const result = TL_Contacts_ResolveRequest_({
     query: String(query || "").trim(),
     name_hints: [String(query || "").trim()]
-  }, contacts || []);
+  }, { channel: "" }, contacts || []);
   return result && result.candidates ? result.candidates : [];
 }
 
