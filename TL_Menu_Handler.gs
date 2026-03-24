@@ -1188,6 +1188,9 @@ function TL_Menu_TryContinueActiveItem_(waId, rawText, intent, options) {
   const intentName = String(normalizedIntent && normalizedIntent.intent || "").trim().toLowerCase();
   if (intentName && intentName !== "unknown" && intentName !== "out_of_scope") return null;
   const kind = String(active.kind || "").trim().toLowerCase();
+  if (kind === "outbound_draft") {
+    return TL_Menu_ContinueOutboundDraft_(waId, rawText);
+  }
   if (kind !== "contact_lookup" && kind !== "context_lookup") return null;
 
   return TL_Menu_BuildContextLookupSummary_({
@@ -1206,6 +1209,20 @@ function TL_Menu_TryContinueActiveItem_(waId, rawText, intent, options) {
   }, Object.assign({}, options || {}, {
     activeItem: active
   }));
+}
+
+function TL_Menu_ContinueOutboundDraft_(waId, rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) return null;
+  const packet = TL_Menu_GetDecisionPacket_(waId);
+  if (!packet || String(packet.stage || "").trim() !== "one_by_one") return null;
+  const current = packet.items[packet.cursor || 0];
+  if (!current || !TL_Menu_IsOutboundCommunicationItem_(current)) return null;
+  const revised = TL_Menu_ReviseDecisionRow_(current.rowNumber, text);
+  current.summary = revised.summary;
+  current.proposal = revised.proposal;
+  TL_Menu_SetDecisionPacket_(waId, packet);
+  return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדכנתי את הנוסח. אפשר לאשר או לערוך שוב."));
 }
 
 function TL_Menu_PauseActiveItemForNewIntent_(waId, intent) {
@@ -1765,6 +1782,7 @@ function TL_Menu_SetDecisionPacket_(waId, packet) {
 
 function TL_Menu_ClearDecisionPacket_(waId) {
   PropertiesService.getScriptProperties().deleteProperty(TL_MENU.PACKET_KEY_PREFIX + String(waId || "").trim());
+  TL_Menu_ClearOutboundDraftActiveItem_(waId);
 }
 
 function TL_Menu_StoreDecisionPacket_(waId, kind, items) {
@@ -2722,6 +2740,11 @@ function TL_Menu_BuildDecisionPacketSmartReply_(packet) {
 function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const current = packet.items[packet.cursor || 0];
   if (!current) return "אין עוד פריטים בחבילה.";
+  if (TL_Menu_IsOutboundCommunicationItem_(current)) {
+    TL_Menu_SyncOutboundDraftActiveItem_(packet, current);
+  } else {
+    TL_Menu_ClearOutboundDraftActiveItem_(TL_Menu_FindDecisionPacketOwnerWaId_(packet));
+  }
   const index = Number(packet.cursor || 0) + 1;
   const total = packet.items.length;
   if (TL_Menu_ItemNeedsRecipientResolution_(current)) {
@@ -2770,6 +2793,53 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     lines.unshift(String(arguments[1]));
   }
   return lines.filter(Boolean).join("\n");
+}
+
+function TL_Menu_SyncOutboundDraftActiveItem_(packet, current) {
+  if (typeof TL_ActiveItem_Set_ !== "function") return false;
+  if (!current || !TL_Menu_IsOutboundCommunicationItem_(current)) return false;
+  const activeWaId = TL_Menu_FindDecisionPacketOwnerWaId_(packet);
+  if (!activeWaId) return false;
+  TL_ActiveItem_Set_(activeWaId, {
+    item_id: "OUTBOUND_" + String(current.rowNumber || current.key || "").trim(),
+    kind: "outbound_draft",
+    status: "active",
+    row_number: Number(current.rowNumber || 0),
+    capture_kind: String(current.captureKind || current.channel || "").trim().toLowerCase(),
+    source_text: String(current.proposal || current.summary || "").trim(),
+    contact_query: String(current.recipientQuery || current.recipientName || "").trim(),
+    search_queries: Array.isArray(current.searchQueries) ? current.searchQueries.slice(0, 12) : [],
+    resolved_contact_id: String(current.contactId || "").trim(),
+    resolved_contact_name: String(current.recipientName || "").trim(),
+    subject: String(current.subject || "").trim(),
+    recipient_destination: String(current.recipientDestination || "").trim(),
+    resolution_status: String(current.resolutionStatus || "").trim().toLowerCase()
+  });
+  return true;
+}
+
+function TL_Menu_FindDecisionPacketOwnerWaId_(packet) {
+  const target = packet && packet.items && packet.items.length ? packet : null;
+  if (!target) return "";
+  const props = PropertiesService.getScriptProperties().getProperties();
+  const prefix = TL_MENU.PACKET_KEY_PREFIX;
+  const rawTarget = JSON.stringify(target);
+  const keys = Object.keys(props || {});
+  for (let i = 0; i < keys.length; i++) {
+    const key = String(keys[i] || "");
+    if (key.indexOf(prefix) !== 0) continue;
+    if (String(props[key] || "") !== rawTarget) continue;
+    return key.slice(prefix.length);
+  }
+  return "";
+}
+
+function TL_Menu_ClearOutboundDraftActiveItem_(waId) {
+  if (!waId || typeof TL_ActiveItem_Get_ !== "function" || typeof TL_ActiveItem_Clear_ !== "function") return false;
+  const active = TL_ActiveItem_Get_(waId);
+  if (!active || String(active.kind || "").trim().toLowerCase() !== "outbound_draft") return false;
+  TL_ActiveItem_Clear_(waId);
+  return true;
 }
 
 function TL_Menu_BuildDecisionPacketRecipientReply_(packet, current, index, total, preface) {

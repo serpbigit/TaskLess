@@ -114,6 +114,8 @@ function TL_ActiveItem_normalize_(waId, item) {
     wa_id: String(waId || safe.wa_id || "").trim(),
     kind: String(safe.kind || "").trim().toLowerCase(),
     status: String(safe.status || "active").trim().toLowerCase(),
+    row_number: Number(safe.row_number || 0),
+    capture_kind: String(safe.capture_kind || "").trim().toLowerCase(),
     opened_at: existingOpenedAt || nowIso,
     updated_at: nowIso,
     source_text: String(safe.source_text || "").trim(),
@@ -124,7 +126,10 @@ function TL_ActiveItem_normalize_(waId, item) {
     reply_preamble: String(safe.reply_preamble || "").trim(),
     resolved_contact_id: String(safe.resolved_contact_id || "").trim(),
     resolved_contact_name: String(safe.resolved_contact_name || "").trim(),
-    resolved_topic_summary: String(safe.resolved_topic_summary || "").trim()
+    resolved_topic_summary: String(safe.resolved_topic_summary || "").trim(),
+    subject: String(safe.subject || "").trim(),
+    recipient_destination: String(safe.recipient_destination || "").trim(),
+    resolution_status: String(safe.resolution_status || "").trim().toLowerCase()
   };
 }
 
