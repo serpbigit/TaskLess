@@ -1240,6 +1240,9 @@ function TL_Menu_ContinueOutboundDraft_(waId, rawText, options) {
   if (!packet || String(packet.stage || "").trim() !== "one_by_one") return null;
   const current = packet.items[packet.cursor || 0];
   if (!current || !TL_Menu_IsOutboundCommunicationItem_(current)) return null;
+  if (TL_Menu_IsLaterCommand_(text)) {
+    return TL_Menu_ParkCurrentDecisionItem_(waId, packet, current, "boss_later");
+  }
   if (TL_Menu_ItemNeedsRecipientResolution_(current)) {
     return TL_Menu_TryContinueOutboundRecipientResolution_(waId, packet, current, text, options);
   }
@@ -1286,6 +1289,24 @@ function TL_Menu_IsApproveAndSendCommand_(rawText) {
     "שלח עכשיו",
     "שלחי עכשיו",
     "אשר עכשיו"
+  ].indexOf(text) !== -1;
+}
+
+function TL_Menu_IsLaterCommand_(rawText) {
+  const text = String(rawText || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!text) return false;
+  return [
+    "later",
+    "for later",
+    "leave for later",
+    "remind me later",
+    "park this",
+    "אח\"כ",
+    "אחר כך",
+    "אחרי זה",
+    "נשאיר לאחר כך",
+    "שמור לאחר כך",
+    "תזכיר לי אחר כך"
   ].indexOf(text) !== -1;
 }
 
@@ -1409,6 +1430,9 @@ function TL_Menu_ContinueCaptureItem_(waId, rawText) {
   if (!packet || String(packet.stage || "").trim() !== "one_by_one") return null;
   const current = packet.items[packet.cursor || 0];
   if (!current || !TL_Menu_IsContinuableCaptureItem_(current)) return null;
+  if (TL_Menu_IsLaterCommand_(text)) {
+    return TL_Menu_ParkCurrentDecisionItem_(waId, packet, current, "boss_later");
+  }
 
   const dueUpdate = TL_Menu_TryUpdateCaptureItemDue_(current, text);
   if (dueUpdate.updated) {
@@ -1441,6 +1465,25 @@ function TL_Menu_ContinueCaptureItem_(waId, rawText) {
   }
   TL_Menu_SetDecisionPacket_(waId, packet);
   return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדכנתי את הנוסח. אפשר לאשר או לערוך שוב."));
+}
+
+function TL_Menu_ParkCurrentDecisionItem_(waId, packet, current, reason) {
+  if (!waId || !packet || !current) return null;
+  const paused = typeof TL_ActiveItem_PauseCurrent_ === "function"
+    ? TL_ActiveItem_PauseCurrent_(waId, String(reason || "boss_later").trim() || "boss_later")
+    : { paused: false };
+  TL_Menu_ClearDecisionPacket_(waId);
+  const itemLabel = TL_Menu_IsOutboundCommunicationItem_(current)
+    ? TL_Menu_T_("השארתי את הטיוטה לאחר כך.", "I left the draft for later.")
+    : TL_Menu_T_("השארתי את הפריט לאחר כך.", "I left the item for later.");
+  const resumeLabel = TL_Menu_T_(
+    "כדי לחזור לזה, אפשר לכתוב: המשך או הצג פריטים מושהים.",
+    "To return to it, you can write: continue or show paused items."
+  );
+  if (paused && paused.paused) {
+    return [itemLabel, resumeLabel].join("\n");
+  }
+  return itemLabel;
 }
 
 function TL_Menu_RefineCaptureItemStyle_(current, styleCommand, options) {
@@ -3293,9 +3336,9 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const option3Label = String(actionSpec.option3Label || TL_Menu_T_("אח\"כ")).trim();
   const option4Label = String(actionSpec.option4Label || TL_Menu_T_("ארכב")).trim();
   const styleShortcutLine = TL_Menu_IsOutboundCommunicationItem_(current) && !TL_Menu_ItemNeedsRecipientResolution_(current)
-    ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש | אשר ושלח עכשיו", "Style shortcuts: shorter | warmer | more formal | rewrite | approve and send now")
+    ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש | אשר ושלח עכשיו | אחר כך", "Style shortcuts: shorter | warmer | more formal | rewrite | approve and send now | later")
     : (TL_Menu_IsContinuableCaptureItem_(current)
-      ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר ברור | נסח מחדש", "Style shortcuts: shorter | clearer | rewrite")
+      ? TL_Menu_T_("קיצורי ניסוח: קצר יותר | יותר ברור | נסח מחדש | אחר כך", "Style shortcuts: shorter | clearer | rewrite | later")
       : "")
     ;
   const meta = [];
