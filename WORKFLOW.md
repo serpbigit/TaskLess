@@ -21,19 +21,18 @@ The main thread should contain decisions and summaries, not raw intermediate wor
 Rules:
 - `DEV_TASKS.md` is the active roadmap and sprint focus file.
 - Robin summarizes; Robin does not dump raw subagent output into the main thread.
-- the State Manager keeps `active target`, `parked items`, `local vs deployed vs tested`, and runtime state explicit.
-- Reuven should mostly interact with Robin for implementation guidance and with the State Manager for alignment commands such as `checkpoint`, `park this`, and `switch target`.
+- Robin keeps `active target`, parked items, and `local vs deployed vs tested` explicit in the main thread and `DEV_TASKS.md`.
+- The Developer should surface blockers, design ambiguity, or schema risk early instead of burning long stretches of time silently when a short architectural correction would help.
+- Reuven should mostly interact with Robin in the main thread; the Developer works through Robin unless a direct handoff is explicitly needed.
 
 ## 3. Roles
 
 Agent system nicknames are ephemeral, but when a subagent is active in a session, Robin should refer to that subagent in chat using:
 - `<system nickname> - Developer`
-- `<system nickname> - Tester`
 - `<system nickname> - Explorer`
-- `<system nickname> - State Manager`
 
 Current example format for this session:
-- `<system nickname> - State Manager`
+- `<system nickname> - Developer`
 
 This keeps the visible chat label simple while still exposing the current temporary system nickname and the job being performed.
 
@@ -47,24 +46,21 @@ This keeps the visible chat label simple while still exposing the current tempor
 - Owns implementation guidance and technical direction with Reuven
 - Uses `DEV_TASKS.md` to keep current work focused
 - Breaks work into bounded tasks
-- Makes code changes directly unless a helper is explicitly activated
+- Makes code changes directly unless a Developer helper is explicitly activated
 - Returns only distilled summaries, decisions, blockers, and command blocks
+- Reviews Developer output before treating work as complete
 
-### `<system nickname> - State Manager`
-- Alignment and state-discipline role
-- Does not own feature design or most code changes
-- Keeps exactly one `active target` visible at a time
-- Maintains:
-  - current active target
-  - parked items
-  - blocked items
-  - local vs deployed vs tested state
-  - trigger state
-  - important runtime settings
-  - last verified test
-- Produces short checkpoints on demand
-- Prevents topic switching from causing state drift
-- Helps Robin and Reuven resume cleanly after brainstorming, bugs, or interruptions
+### `<system nickname> - Developer`
+- Bounded implementation role activated by Robin
+- Owns a clearly scoped slice of work and should not widen scope on its own
+- Must surface blockers, design ambiguity, missing schema decisions, or conflicting interpretations quickly
+- Should prefer asking for clarification through Robin over silently making architectural guesses when the design impact is meaningful
+- Must finish implementation with at least one quick deterministic test or smoke check before handing work back
+- Must report:
+  - files changed
+  - what was implemented
+  - what was tested
+  - what remains risky or unproven
 
 ## 4. Source-of-Truth Hierarchy
 
@@ -109,12 +105,12 @@ Reuven and Robin discuss:
 - what is explicitly out of scope
 - what counts as done
 
-The State Manager then records:
+Robin then records:
 - active target
 - parked items
 - next step
 
-Robin then updates or anchors the task in `DEV_TASKS.md`.
+Robin updates or anchors the task in `DEV_TASKS.md`.
 
 ### Step 2: Robin prepares the implementation brief
 Robin prepares a bounded brief containing:
@@ -124,19 +120,17 @@ Robin prepares a bounded brief containing:
 - known constraints
 - whether deploy will be needed
 
-### Step 3: Robin implements
-Robin:
-- inspects the relevant code paths
-- edits the necessary files
-- keeps changes scoped to the agreed task
-- surfaces blockers or design concerns to Reuven only when needed
-
-If brainstorming or a new idea appears mid-task, the State Manager should park it unless Reuven explicitly switches targets.
+### Step 3: Robin or the Developer implements
+- Robin may implement directly or activate a bounded Developer helper.
+- The implementer must keep changes scoped to the agreed task.
+- If a blocker or architecture ambiguity appears, it should be surfaced quickly rather than hidden inside a long silent implementation attempt.
+- If brainstorming or a new idea appears mid-task, Robin should park it unless Reuven explicitly switches targets.
 
 ### Step 4: Verify
-Robin and Reuven verify with one real test or deterministic GAS runner.
+The implementer runs at least one quick deterministic test, smoke check, or other narrow verification before calling the task complete.
+Robin and Reuven then verify with one real test or deterministic GAS runner when needed.
 
-The State Manager records:
+Robin records:
 - what is deployed
 - what exact test ran
 - what is now proven
@@ -193,7 +187,7 @@ Do not use it for:
 
 ## 8. State Commands
 
-The State Manager should support these short commands in the main thread:
+Robin should support these short commands in the main thread:
 - `checkpoint`
 - `park this`
 - `switch target to ...`
@@ -214,7 +208,7 @@ Expected behavior:
 
 ## 9. Handoff Format
 
-Robin and the State Manager should keep handoffs short and structured.
+Robin and the Developer should keep handoffs short and structured.
 
 For Reuven:
 - current task
@@ -222,21 +216,30 @@ For Reuven:
 - blocker or decision needed
 - next action
 
-For the State Manager:
+For Robin:
 - active target
 - parked
 - local vs deployed vs tested
 - open risks
 - next recommended step
 
+For the Developer:
+- files changed
+- what was implemented
+- quick test or smoke check that was run
+- blocker, open risk, or ambiguity that should be surfaced now
+
 ## 10. Success Condition
 
 This workflow is working if:
-- Reuven mainly talks to Robin and the State Manager
+- Reuven mainly talks to Robin in the main thread
+- Robin uses Developers as bounded helpers when useful
 - `DEV_TASKS.md` stays current
 - the active target is always clear
 - parked items do not get lost
 - the main thread stays decision-focused
+- blockers are surfaced early instead of buried in long silent implementation attempts
+- each bounded implementation closes with a quick verification step
 - deployment and git handoffs are explicit and reproducible
 
 ## 11. Testing Standard For New Workers And Channels

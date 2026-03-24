@@ -168,13 +168,18 @@ function TL_AI_buildTriagePrompt_(inputText, language, bossName, draftContextBri
     "Boss UI language: " + String(language || "Hebrew"),
     "Draft reply language: " + String(replyLanguage || language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
+    "The draft context brief contains a customer-specific topic registry. Use one exact existing topic if it fits; otherwise propose one new topic candidate only.",
     "Return exactly one JSON object with these keys only:",
-    '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","summary":"string","proposal":"string"}',
+    '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","topic_id":"string","topic_candidate":"string","topic_summary":"string","topic_confidence":"0 to 1","summary":"string","proposal":"string"}',
     "Field definitions:",
     "priority_level: overall work priority for queue ordering. Use high sparingly.",
     "importance_level: business significance such as money, commitments, customer impact, legal/reputation risk.",
     "urgency_flag: true only when timing matters now or very soon.",
     "needs_owner_now: true only when the Boss personally should see or decide soon.",
+    "topic_id: one exact existing topic from the provided topic registry. Leave blank if no existing topic fits well.",
+    "topic_candidate: one new topic slug if no existing topic fits. Use lowercase snake_case with a topic_ prefix.",
+    "topic_summary: short human-readable description of the chosen or proposed topic.",
+    "topic_confidence: decimal confidence for the topic decision, between 0 and 1.",
     "suggested_action meanings:",
     "reply_now = immediate reply is best.",
     "reply_later = reply is needed but not immediately.",
@@ -190,14 +195,15 @@ function TL_AI_buildTriagePrompt_(inputText, language, bossName, draftContextBri
     "Always output all keys.",
     "Use only the allowed enum values.",
     "Use empty strings only if absolutely necessary; prefer a concrete short summary/proposal.",
+    "Choose exactly one topic path: either set topic_id or set topic_candidate, never both.",
     "Do not wrap the JSON in markdown fences.",
     "Interpret urgency narrowly: only true when timing matters now or soon.",
     "Interpret importance as business relevance, money, reputation, commitment, or customer risk.",
     "Examples:",
-    '{"priority_level":"high","importance_level":"high","urgency_flag":"true","needs_owner_now":"true","suggested_action":"reply_now","summary":"לקוח מבקש תשובה דחופה לגבי פגישה להיום.","proposal":"שלום, קיבלתי. אני זמין היום בשעה 16:00. אם נוח לך, אשמח לאשר."}',
-    '{"priority_level":"medium","importance_level":"medium","urgency_flag":"false","needs_owner_now":"false","suggested_action":"reply_later","summary":"הלקוח מתעניין בהמשך שיחה על שיתוף פעולה בשבוע הבא.","proposal":"היי, תודה על ההודעה. אשמח לדבר בשבוע הבא. תגיד לי איזה יום ושעה נוחים לך."}',
-    '{"priority_level":"low","importance_level":"low","urgency_flag":"false","needs_owner_now":"false","suggested_action":"ignore","summary":"נשלחה הודעת בדיקה פנימית ללא בקשה לפעולה.","proposal":"אין צורך להשיב. אפשר לסגור את הפריט ללא שליחה."}',
-    '{"priority_level":"medium","importance_level":"high","urgency_flag":"false","needs_owner_now":"true","suggested_action":"review_manually","summary":"לקוח קיים מעלה נושא מסחרי רגיש שדורש שיקול דעת לפני מענה.","proposal":"לא לשלוח עדיין. כדאי שהבוס יבדוק את ההקשר לפני ניסוח תשובה."}',
+    '{"priority_level":"high","importance_level":"high","urgency_flag":"true","needs_owner_now":"true","suggested_action":"reply_now","topic_id":"topic_meeting_followup","topic_candidate":"","topic_summary":"Meeting follow-up","topic_confidence":"0.96","summary":"לקוח מבקש תשובה דחופה לגבי פגישה להיום.","proposal":"שלום, קיבלתי. אני זמין היום בשעה 16:00. אם נוח לך, אשמח לאשר."}',
+    '{"priority_level":"medium","importance_level":"medium","urgency_flag":"false","needs_owner_now":"false","suggested_action":"reply_later","topic_id":"","topic_candidate":"topic_quote_request","topic_summary":"Quote request","topic_confidence":"0.82","summary":"הלקוח מתעניין בהמשך שיחה על שיתוף פעולה בשבוע הבא.","proposal":"היי, תודה על ההודעה. אשמח לדבר בשבוע הבא. תגיד לי איזה יום ושעה נוחים לך."}',
+    '{"priority_level":"low","importance_level":"low","urgency_flag":"false","needs_owner_now":"false","suggested_action":"ignore","topic_id":"topic_internal_note","topic_candidate":"","topic_summary":"Internal note","topic_confidence":"0.91","summary":"נשלחה הודעת בדיקה פנימית ללא בקשה לפעולה.","proposal":"אין צורך להשיב. אפשר לסגור את הפריט ללא שליחה."}',
+    '{"priority_level":"medium","importance_level":"high","urgency_flag":"false","needs_owner_now":"true","suggested_action":"review_manually","topic_id":"","topic_candidate":"topic_sensitive_business_followup","topic_summary":"Sensitive business follow-up","topic_confidence":"0.64","summary":"לקוח קיים מעלה נושא מסחרי רגיש שדורש שיקול דעת לפני מענה.","proposal":"לא לשלוח עדיין. כדאי שהבוס יבדוק את ההקשר לפני ניסוח תשובה."}',
     draftContextBrief ? draftContextBrief : "Draft context brief: none",
     "Message:",
     String(inputText || "")
@@ -658,6 +664,19 @@ function TL_AI_TriageInboxRow_(rowNumber) {
   const replyLanguage = TL_AI_resolveReplyLanguage_(inputText, cfg.language, cfg.replyLanguagePolicy);
   const prompt = TL_AI_buildTriagePrompt_(inputText, cfg.language, cfg.bossName, draftContext && draftContext.promptBrief, replyLanguage);
   const result = TL_AI_callPrompt_(prompt);
+  const topicWriteback = TL_AI_resolveTopicWriteback_(
+    result.raw_json,
+    draftContext,
+    rowData,
+    rowData[TLW_colIndex_("notes") - 1],
+    {
+      nowIso: new Date().toISOString(),
+      sourceLabel: "whatsapp_triage",
+      contact: draftContext && draftContext.contact ? draftContext.contact : null,
+      contactId: String(rowData[TLW_colIndex_("contact_id") - 1] || "").trim(),
+      contactName: String(draftContext && draftContext.contact && draftContext.contact.name || "").trim()
+    }
+  );
 
   const triage = {
     priority_level: TL_AI_normalizeLevel_(result.raw_json.priority_level),
@@ -665,6 +684,9 @@ function TL_AI_TriageInboxRow_(rowNumber) {
     urgency_flag: TL_AI_normalizeBooleanString_(result.raw_json.urgency_flag),
     needs_owner_now: TL_AI_normalizeBooleanString_(result.raw_json.needs_owner_now),
     suggested_action: TL_AI_normalizeSuggestedAction_(result.raw_json.suggested_action),
+    topic_id: String(topicWriteback.topic_id || "").trim(),
+    topic_candidate: String(topicWriteback.topic_candidate || "").trim(),
+    topic_summary: String(topicWriteback.topic_summary || "").trim(),
     summary: String(result.raw_json.summary || result.summary || "").trim(),
     proposal: String(result.raw_json.proposal || result.proposal || "").trim()
   };
@@ -676,6 +698,12 @@ function TL_AI_TriageInboxRow_(rowNumber) {
   loc.sh.getRange(loc.row, TLW_colIndex_("suggested_action")).setValue(triage.suggested_action);
   loc.sh.getRange(loc.row, TLW_colIndex_("ai_summary")).setValue(triage.summary);
   loc.sh.getRange(loc.row, TLW_colIndex_("ai_proposal")).setValue(triage.proposal);
+  loc.sh.getRange(loc.row, TLW_colIndex_("topic_id")).setValue(triage.topic_id);
+  loc.sh.getRange(loc.row, TLW_colIndex_("topic_tagged_at")).setValue(String(topicWriteback.topic_tagged_at || "").trim());
+  loc.sh.getRange(loc.row, TLW_colIndex_("notes")).setValue(String(topicWriteback.notes || "").trim());
+  if (topicWriteback.registryWrite && typeof TL_AI_upsertTopicRegistry_ === "function") {
+    TL_AI_upsertTopicRegistry_(topicWriteback.registryWrite);
+  }
   TLW_applyVersionBump_(loc.row, "ai_triage");
 
   TLW_logInfo_("ai_triage_row", {
@@ -684,7 +712,9 @@ function TL_AI_TriageInboxRow_(rowNumber) {
     importance_level: triage.importance_level,
     urgency_flag: triage.urgency_flag,
     needs_owner_now: triage.needs_owner_now,
-    suggested_action: triage.suggested_action
+    suggested_action: triage.suggested_action,
+    topic_id: triage.topic_id,
+    topic_candidate: triage.topic_candidate
   });
 
   Logger.log("TL_AI_TriageInboxRow_: %s", JSON.stringify({
@@ -917,6 +947,291 @@ function TL_AI_normalizeSuggestedAction_(value) {
   const v = String(value || "").trim().toLowerCase();
   const allowed = ["reply_now","reply_later","call","schedule","follow_up","wait","ignore","review_manually"];
   return allowed.indexOf(v) !== -1 ? v : "review_manually";
+}
+
+function TL_AI_normalizeTopicSlug_(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  const cleaned = raw
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (!cleaned) return "";
+  return cleaned.indexOf("topic_") === 0 ? cleaned : ("topic_" + cleaned);
+}
+
+function TL_AI_topicRegistryMap_(topics) {
+  const out = {};
+  (topics || []).forEach(function(topic) {
+    const topicId = String(topic && (topic.topicId || topic.topic_id) || "").trim();
+    if (!topicId) return;
+    const normalized = TL_AI_normalizeTopicSlug_(topicId).toLowerCase();
+    if (!normalized) return;
+    out[normalized] = {
+      topicId: topicId,
+      topicSummary: String(topic && (topic.topicSummary || topic.topic_summary) || "").trim(),
+      contactId: String(topic && (topic.contactId || topic.contact_id) || "").trim(),
+      contactName: String(topic && (topic.contactName || topic.contact_name) || "").trim(),
+      usageCount: Number(topic && (topic.usageCount || topic.usage_count) || 0),
+      lastUsedAt: String(topic && (topic.lastUsedAt || topic.last_used_at) || "").trim(),
+      recentExamplesJson: String(topic && (topic.recentExamplesJson || topic.recent_examples_json) || "").trim(),
+      notes: String(topic && topic.notes || "").trim()
+    };
+  });
+  return out;
+}
+
+function TL_AI_normalizeTopicDecision_(rawJson, topics) {
+  const raw = rawJson && typeof rawJson === "object" ? rawJson : {};
+  const registry = TL_AI_topicRegistryMap_(topics);
+  const registryIds = Object.keys(registry);
+  const exactTopicId = TL_AI_normalizeTopicSlug_(raw.topic_id);
+  const exactCandidate = TL_AI_normalizeTopicSlug_(raw.topic_candidate);
+  const topicSummary = String(raw.topic_summary || "").trim();
+  let topicId = "";
+  let topicCandidate = "";
+  let selectedTopic = null;
+
+  if (exactTopicId && registry[exactTopicId.toLowerCase()]) {
+    selectedTopic = registry[exactTopicId.toLowerCase()];
+  } else if (exactCandidate && registry[exactCandidate.toLowerCase()]) {
+    selectedTopic = registry[exactCandidate.toLowerCase()];
+  }
+
+  if (selectedTopic) {
+    topicId = String(selectedTopic.topicId || "").trim();
+  } else if (exactTopicId) {
+    topicCandidate = exactTopicId;
+  } else if (exactCandidate) {
+    topicCandidate = exactCandidate;
+  }
+
+  const confidenceRaw = Number(raw.topic_confidence);
+  const confidence = isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : (topicId ? 1 : 0);
+  const selectedSummary = topicSummary || String(selectedTopic && selectedTopic.topicSummary || "").trim();
+
+  return {
+    topic_id: topicId,
+    topic_candidate: topicCandidate,
+    topic_summary: selectedSummary,
+    topic_confidence: confidence,
+    is_new_topic: !!topicCandidate && !topicId,
+    available_topic_ids: registryIds,
+    raw: raw
+  };
+}
+
+function TL_AI_topicRegistryExampleFromValues_(values, topicDecision, summaryText, sourceLabel) {
+  const channel = String(typeof TL_Orchestrator_value_ === "function" ? TL_Orchestrator_value_(values, "channel") : "").trim();
+  const direction = String(typeof TL_Orchestrator_value_ === "function" ? TL_Orchestrator_value_(values, "direction") : "").trim();
+  const recordId = String(typeof TL_Orchestrator_value_ === "function" ? TL_Orchestrator_value_(values, "record_id") : "").trim();
+  const messageId = String(typeof TL_Orchestrator_value_ === "function" ? TL_Orchestrator_value_(values, "message_id") : "").trim();
+  const latestAt = String(
+    (typeof TL_Orchestrator_value_ === "function" ? TL_Orchestrator_value_(values, "latest_message_at") : "") ||
+    (typeof TL_Orchestrator_value_ === "function" ? TL_Orchestrator_value_(values, "timestamp") : "") ||
+    ""
+  ).trim();
+  const text = String(
+    summaryText ||
+    (typeof TL_Orchestrator_value_ === "function" ? TL_Orchestrator_value_(values, "ai_summary") : "") ||
+    (typeof TL_Orchestrator_value_ === "function" ? TL_Orchestrator_value_(values, "text") : "") ||
+    ""
+  ).trim();
+  return {
+    topic_id: String(topicDecision && (topicDecision.topic_id || topicDecision.topic_candidate) || "").trim(),
+    topic_summary: String(topicDecision && topicDecision.topic_summary || "").trim(),
+    source: String(sourceLabel || "").trim(),
+    record_id: recordId,
+    message_id: messageId,
+    channel: channel,
+    direction: direction,
+    latest_message_at: latestAt,
+    summary: text.slice(0, 220)
+  };
+}
+
+function TL_AI_mergeTopicExamples_(existingJson, example) {
+  const out = [];
+  try {
+    const parsed = JSON.parse(String(existingJson || "[]"));
+    if (Array.isArray(parsed)) {
+      parsed.forEach(function(item) {
+        if (item && typeof item === "object") out.push(item);
+      });
+    }
+  } catch (e) {}
+
+  if (example && typeof example === "object") {
+    const key = TL_AI_normalizeTopicSlug_(String(example.record_id || "") + "|" + String(example.message_id || "") + "|" + String(example.channel || "") + "|" + String(example.direction || "")).toLowerCase();
+    const filtered = out.filter(function(item) {
+      const itemKey = TL_AI_normalizeTopicSlug_(String(item.record_id || "") + "|" + String(item.message_id || "") + "|" + String(item.channel || "") + "|" + String(item.direction || "")).toLowerCase();
+      return itemKey !== key;
+    });
+    filtered.unshift(example);
+    while (filtered.length > 3) filtered.pop();
+    return JSON.stringify(filtered);
+  }
+
+  return JSON.stringify(out.slice(0, 3));
+}
+
+function TL_AI_setNoteKeyValue_(existing, key, value) {
+  const safeKey = String(key || "").trim();
+  if (!safeKey) return String(existing || "").trim();
+  const safeValue = String(value || "").trim();
+  const lines = String(existing || "").split(/\r?\n/).map(function(line) {
+    return String(line || "").trim();
+  }).filter(Boolean);
+  const prefix = safeKey + "=";
+  let replaced = false;
+  const next = [];
+  lines.forEach(function(line) {
+    if (line.toLowerCase().indexOf(prefix.toLowerCase()) === 0) {
+      if (!replaced) {
+        next.push(prefix + safeValue);
+        replaced = true;
+      }
+      return;
+    }
+    next.push(line);
+  });
+  if (!replaced) next.push(prefix + safeValue);
+  return next.filter(Boolean).join("\n");
+}
+
+function TL_AI_removeNoteKey_(existing, key) {
+  const safeKey = String(key || "").trim();
+  if (!safeKey) return String(existing || "").trim();
+  const prefix = safeKey.toLowerCase() + "=";
+  return String(existing || "")
+    .split(/\r?\n/)
+    .map(function(line) { return String(line || "").trim(); })
+    .filter(function(line) {
+      return line && line.toLowerCase().indexOf(prefix) !== 0;
+    })
+    .join("\n");
+}
+
+function TL_AI_buildTopicNotes_(existingNotes, topicDecision) {
+  let notes = String(existingNotes || "").trim();
+  if (!topicDecision) return notes;
+  if (topicDecision.topic_candidate) {
+    notes = TL_AI_setNoteKeyValue_(notes, "topic_candidate", topicDecision.topic_candidate);
+    notes = TL_AI_setNoteKeyValue_(notes, "topic_candidate_summary", topicDecision.topic_summary || "");
+  } else {
+    notes = TL_AI_removeNoteKey_(notes, "topic_candidate");
+    notes = TL_AI_removeNoteKey_(notes, "topic_candidate_summary");
+  }
+  return notes;
+}
+
+function TL_AI_upsertTopicRegistry_(options) {
+  const opts = options || {};
+  const topicDecision = opts.topicDecision || {};
+  const values = opts.values || [];
+  const recordContext = opts.recordContext || {};
+  const topicId = String(topicDecision.topic_id || "").trim();
+  if (!topicId) {
+    return { ok: true, skipped: true, reason: "missing_registry_topic_id" };
+  }
+
+  const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+  if (!sheetId) return { ok: false, reason: "missing_sheet_id" };
+  const ss = SpreadsheetApp.openById(sheetId);
+  let sh = ss.getSheetByName("TOPICS");
+  if (!sh) {
+    sh = ss.insertSheet("TOPICS");
+  }
+  const headers = TL_SCHEMA && TL_SCHEMA.TOPICS_HEADERS ? TL_SCHEMA.TOPICS_HEADERS : ["topic_id","contact_id","contact_name","topic_summary","last_used_at","usage_count","recent_examples_json","notes"];
+  const range = sh.getRange(1, 1, 1, headers.length);
+  const existingHeaders = range.getValues()[0];
+  const needsHeaders = existingHeaders.some(function(value, index) {
+    return String(value || "") !== String(headers[index] || "");
+  });
+  if (needsHeaders) {
+    range.setValues([headers]);
+    sh.setFrozenRows(1);
+  }
+
+  const normalizedKey = TL_AI_normalizeTopicSlug_(topicId).toLowerCase();
+  const rowCount = sh.getLastRow();
+  let rowNumber = 0;
+  if (rowCount >= 2) {
+    const valuesRange = sh.getRange(2, 1, rowCount - 1, headers.length).getValues();
+    for (let i = 0; i < valuesRange.length; i++) {
+      const rowTopicId = String(valuesRange[i][0] || "").trim();
+      if (TL_AI_normalizeTopicSlug_(rowTopicId).toLowerCase() === normalizedKey) {
+        rowNumber = i + 2;
+        break;
+      }
+    }
+  }
+
+  const contact = recordContext.contact || {};
+  const nowIso = String(opts.nowIso || new Date().toISOString()).trim() || new Date().toISOString();
+  const example = TL_AI_topicRegistryExampleFromValues_(values, topicDecision, opts.summary || topicDecision.topic_summary || "", opts.sourceLabel || "");
+  const existingRow = rowNumber ? sh.getRange(rowNumber, 1, 1, headers.length).getValues()[0] : [];
+  const nextContactId = String(recordContext.contactId || contact.contactId || existingRow[1] || "").trim();
+  const nextContactName = String(recordContext.contactName || contact.name || existingRow[2] || "").trim();
+  const nextTopicSummary = String(topicDecision.topic_summary || existingRow[3] || "").trim();
+  const prevUsage = Number(existingRow[5] || 0);
+  const nextUsage = rowNumber ? (isFinite(prevUsage) && prevUsage > 0 ? prevUsage + 1 : 1) : 1;
+  const prevExamplesJson = String(existingRow[6] || "[]").trim();
+  const nextExamplesJson = TL_AI_mergeTopicExamples_(prevExamplesJson, example);
+  const nextNotes = String(existingRow[7] || "").trim();
+  const row = [
+    topicId,
+    nextContactId,
+    nextContactName,
+    nextTopicSummary,
+    nowIso,
+    nextUsage,
+    nextExamplesJson,
+    nextNotes
+  ];
+
+  if (rowNumber) {
+    sh.getRange(rowNumber, 1, 1, headers.length).setValues([row]);
+    return {
+      ok: true,
+      rowNumber: rowNumber,
+      topic_id: topicId,
+      updated: true,
+      created: false,
+      registrySize: rowCount - 1
+    };
+  }
+
+  sh.appendRow(row);
+  return {
+    ok: true,
+    rowNumber: sh.getLastRow(),
+    topic_id: topicId,
+    updated: false,
+    created: true,
+    registrySize: sh.getLastRow() - 1
+  };
+}
+
+function TL_AI_resolveTopicWriteback_(rawJson, draftContext, values, existingNotes, recordContext) {
+  const decision = TL_AI_normalizeTopicDecision_(rawJson, draftContext && draftContext.topics ? draftContext.topics : []);
+  return {
+    decision: decision,
+    notes: TL_AI_buildTopicNotes_(existingNotes, decision),
+    topic_id: decision.topic_id,
+    topic_candidate: decision.topic_candidate,
+    topic_summary: decision.topic_summary,
+    topic_confidence: decision.topic_confidence,
+    topic_tagged_at: decision.topic_id ? String((recordContext && recordContext.nowIso) || new Date().toISOString()) : "",
+    registryWrite: decision.topic_id ? {
+      topicDecision: decision,
+      values: values,
+      recordContext: recordContext || {},
+      sourceLabel: String(recordContext && recordContext.sourceLabel || "").trim(),
+      summary: String(rawJson && rawJson.summary || "").trim(),
+      nowIso: String((recordContext && recordContext.nowIso) || new Date().toISOString())
+    } : null
+  };
 }
 
 function TL_AI_normalizeBossCaptureKind_(value) {

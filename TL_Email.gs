@@ -637,7 +637,10 @@ function TL_Email_TriagePending(opts) {
         bossCard: bossCard
       });
     } else {
-      const nextNotes = TL_Email_appendNote_(TL_Orchestrator_value_(item.values, "notes"), "email_triaged");
+      const baseNotes = typeof TL_AI_buildTopicNotes_ === "function"
+        ? TL_AI_buildTopicNotes_(TL_Orchestrator_value_(item.values, "notes"), triage)
+        : String(TL_Orchestrator_value_(item.values, "notes") || "");
+      const nextNotes = TL_Email_appendNote_(baseNotes, "email_triaged");
       TL_Email_appendInboxVersion_(item.rowNumber, {
         ai_summary: String(triage.summary || "").trim(),
         ai_proposal: String(proposal.body || triage.proposal || "").trim(),
@@ -650,8 +653,24 @@ function TL_Email_TriagePending(opts) {
         urgency_flag: String(triage.urgency_flag || "").trim(),
         needs_owner_now: String(triage.needs_owner_now || "").trim(),
         suggested_action: String(triage.suggested_action || "").trim(),
+        topic_id: String(triage.topic_id || "").trim(),
+        topic_tagged_at: triage.topic_id ? new Date().toISOString() : "",
         notes: nextNotes
       }, "email_triage");
+      if (triage.topic_id && typeof TL_AI_upsertTopicRegistry_ === "function") {
+        TL_AI_upsertTopicRegistry_({
+          topicDecision: triage,
+          values: item.values,
+          recordContext: {
+            contact: triage.draftContext && triage.draftContext.contact ? triage.draftContext.contact : null,
+            contactId: String(snapshot.contactId || "").trim(),
+            contactName: String(snapshot.contactName || "").trim()
+          },
+          sourceLabel: "email_triage",
+          summary: String(triage.summary || "").trim(),
+          nowIso: new Date().toISOString()
+        });
+      }
       result.queued++;
       result.updatedRows++;
     }
@@ -696,6 +715,9 @@ function TL_Email_TriageSnapshot_(snapshot, opts) {
     : cfg.language;
   const prompt = TL_Email_buildTriagePrompt_(inputText, cfg.language, cfg.bossName, history, payload, draftContext && draftContext.promptBrief, replyLanguage);
   const result = TL_AI_callPrompt_(prompt);
+  const topicDecision = typeof TL_AI_normalizeTopicDecision_ === "function"
+    ? TL_AI_normalizeTopicDecision_(result.raw_json, draftContext && draftContext.topics ? draftContext.topics : [])
+    : { topic_id: "", topic_candidate: "", topic_summary: "", topic_confidence: 0 };
 
   return {
     priority_level: TL_AI_normalizeLevel_(result.raw_json.priority_level),
@@ -704,6 +726,10 @@ function TL_Email_TriageSnapshot_(snapshot, opts) {
     significance_flag: TL_Email_significanceFlag_(result.raw_json, history),
     needs_owner_now: TL_AI_normalizeBooleanString_(result.raw_json.needs_owner_now),
     suggested_action: TL_AI_normalizeSuggestedAction_(result.raw_json.suggested_action),
+    topic_id: String(topicDecision.topic_id || "").trim(),
+    topic_candidate: String(topicDecision.topic_candidate || "").trim(),
+    topic_summary: String(topicDecision.topic_summary || "").trim(),
+    topic_confidence: Number(topicDecision.topic_confidence || 0),
     summary: String(result.raw_json.summary || result.summary || "").trim(),
     proposal: String(result.raw_json.proposal || result.proposal || "").trim(),
     historyDepth: history.depth,
@@ -984,23 +1010,29 @@ function TL_Email_buildTriagePrompt_(inputText, language, bossName, history, pay
     "Boss UI language: " + String(language || "Hebrew"),
     "Draft reply language: " + String(replyLanguage || language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
+    "The draft context brief contains a customer-specific topic registry. Use one exact existing topic if it fits; otherwise propose one new topic candidate only.",
     "Return exactly one JSON object with these keys only:",
-    '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","significance_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","summary":"string","proposal":"string"}',
+    '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","significance_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","topic_id":"string","topic_candidate":"string","topic_summary":"string","topic_confidence":"0 to 1","summary":"string","proposal":"string"}',
     "Field definitions:",
     "priority_level: queue priority for the work stack.",
     "importance_level: business significance such as money, commitments, customer impact, legal/reputation risk.",
     "urgency_flag: true only when timing matters now or very soon.",
     "significance_flag: true when broader history/context materially changes how the Boss should view this thread.",
     "needs_owner_now: true only when the Boss personally should decide or act soon.",
+    "topic_id: one exact existing topic from the provided topic registry. Leave blank if no existing topic fits well.",
+    "topic_candidate: one new topic slug if no existing topic fits. Use lowercase snake_case with a topic_ prefix.",
+    "topic_summary: short human-readable description of the chosen or proposed topic.",
+    "topic_confidence: decimal confidence for the topic decision, between 0 and 1.",
     "summary: 1-2 factual sentences about the email thread in the Boss UI language.",
     "proposal: exact next-step wording on the Boss's behalf in the Draft reply language. If a reply should be sent, write the actual reply text. If no reply should be sent, explain the recommended action clearly.",
     "Validation rules:",
     "Always output all keys.",
     "Use only the allowed enum values.",
+    "Choose exactly one topic path: either set topic_id or set topic_candidate, never both.",
     "Do not wrap the JSON in markdown fences.",
     "Examples:",
-    '{"priority_level":"high","importance_level":"high","urgency_flag":"false","significance_flag":"true","needs_owner_now":"false","suggested_action":"review_manually","summary":"לקוח חשוב מבקש אישור להצעת מחיר ומצפה לתשובה מסודרת.","proposal":"שלום, קיבלתי את המייל. אעבור על הפרטים ואחזור אליך עם תשובה מסודרת להצעת המחיר."}',
-    '{"priority_level":"low","importance_level":"low","urgency_flag":"false","significance_flag":"false","needs_owner_now":"false","suggested_action":"ignore","summary":"נשלח מייל בדיקה פנימי ללא בקשה ממשית לפעולה.","proposal":"אין צורך להשיב. אפשר לסגור את הפריט ללא שליחה."}',
+    '{"priority_level":"high","importance_level":"high","urgency_flag":"false","significance_flag":"true","needs_owner_now":"false","suggested_action":"review_manually","topic_id":"topic_quote_request","topic_candidate":"","topic_summary":"Quote request","topic_confidence":"0.94","summary":"לקוח חשוב מבקש אישור להצעת מחיר ומצפה לתשובה מסודרת.","proposal":"שלום, קיבלתי את המייל. אעבור על הפרטים ואחזור אליך עם תשובה מסודרת להצעת המחיר."}',
+    '{"priority_level":"low","importance_level":"low","urgency_flag":"false","significance_flag":"false","needs_owner_now":"false","suggested_action":"ignore","topic_id":"","topic_candidate":"topic_internal_check","topic_summary":"Internal check","topic_confidence":"0.78","summary":"נשלח מייל בדיקה פנימי ללא בקשה ממשית לפעולה.","proposal":"אין צורך להשיב. אפשר לסגור את הפריט ללא שליחה."}',
     draftContextBrief ? draftContextBrief : "Draft context brief: none",
     historyText ? "Recent sender history:\n" + historyText : "Recent sender history: none",
     "Email thread:",
