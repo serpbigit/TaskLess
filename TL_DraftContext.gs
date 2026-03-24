@@ -7,7 +7,8 @@
  * - last 5 recent emails
  * - last 5 recent WhatsApp items
  *
- * Topic/example retrieval is intentionally deferred to the next phase.
+ * Topic registry retrieval is included so inbound enrichment can choose from
+ * customer-specific topics and propose new candidates when needed.
  */
 
 const TL_DRAFT_CONTEXT = {
@@ -15,7 +16,8 @@ const TL_DRAFT_CONTEXT = {
   EMAIL_LIMIT: 5,
   WHATSAPP_LIMIT: 5,
   EMAIL_SCAN_ROWS: 120,
-  INBOX_SCAN_ROWS: 250
+  INBOX_SCAN_ROWS: 250,
+  TOPIC_LIMIT: 25
 };
 
 function TL_DraftContext_BuildForInboxRowValues_(values, options) {
@@ -50,6 +52,7 @@ function TL_DraftContext_build_(identity, options) {
   const enrichments = TL_DraftContext_fetchEnrichments_(resolved, options);
   const emails = TL_DraftContext_fetchEmails_(resolved, options);
   const whatsapps = TL_DraftContext_fetchWhatsApps_(resolved, options);
+  const topics = TL_DraftContext_fetchTopics_(resolved, options);
 
   return {
     ok: true,
@@ -57,7 +60,8 @@ function TL_DraftContext_build_(identity, options) {
     enrichments: enrichments,
     emails: emails,
     whatsapps: whatsapps,
-    promptBrief: TL_DraftContext_renderPromptBrief_(resolved, enrichments, emails, whatsapps),
+    topics: topics,
+    promptBrief: TL_DraftContext_renderPromptBrief_(resolved, enrichments, emails, whatsapps, topics),
     reviewBrief: TL_DraftContext_renderReviewBrief_(resolved, enrichments, emails, whatsapps)
   };
 }
@@ -248,7 +252,7 @@ function TL_DraftContext_fetchWhatsApps_(contact, options) {
   return out;
 }
 
-function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsapps) {
+function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsapps, topics) {
   const lines = [
     "Draft context brief:"
   ];
@@ -291,7 +295,106 @@ function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsa
     lines.push("none");
   }
 
+  const topicLines = TL_DraftContext_renderTopicSection_(topics);
+  lines.push("Topic registry (customer-specific):");
+  if (topicLines.length) {
+    topicLines.forEach(function(line) {
+      lines.push(line);
+    });
+  } else {
+    lines.push("none");
+  }
+
   return lines.join("\n");
+}
+
+function TL_DraftContext_fetchTopics_(contact, options) {
+  const out = [];
+  try {
+    const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+    if (!sheetId) return out;
+    const ss = SpreadsheetApp.openById(sheetId);
+    const sh = ss.getSheetByName("TOPICS");
+    if (!sh || sh.getLastRow() < 2) return out;
+    const values = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
+    const headers = values[0];
+    const idx = {};
+    headers.forEach(function(header, index) {
+      idx[String(header || "")] = index;
+    });
+
+    const preferredContactId = String(contact && contact.contactId || "").trim();
+    const rows = values.slice(1).map(function(row, index) {
+      return TL_DraftContext_topicRowToObject_(headers, row, index + 2);
+    }).filter(function(item) {
+      return !!String(item.topicId || "").trim();
+    }).sort(function(a, b) {
+      const aContactMatch = preferredContactId && String(a.contactId || "").trim() === preferredContactId ? 1 : 0;
+      const bContactMatch = preferredContactId && String(b.contactId || "").trim() === preferredContactId ? 1 : 0;
+      if (bContactMatch !== aContactMatch) return bContactMatch - aContactMatch;
+      const aUsage = Number(a.usageCount || 0);
+      const bUsage = Number(b.usageCount || 0);
+      if (bUsage !== aUsage) return bUsage - aUsage;
+      const aLast = TL_DraftContext_safeDate_(a.lastUsedAt).getTime();
+      const bLast = TL_DraftContext_safeDate_(b.lastUsedAt).getTime();
+      if (bLast !== aLast) return bLast - aLast;
+      return String(a.topicId || "").localeCompare(String(b.topicId || ""));
+    });
+
+    const limit = Number((options && options.topicLimit) || TL_DRAFT_CONTEXT.TOPIC_LIMIT);
+    rows.slice(0, limit > 0 ? limit : TL_DRAFT_CONTEXT.TOPIC_LIMIT).forEach(function(item) {
+      item.recentExamplesPreview = TL_DraftContext_preview_(String(item.recentExamplesJson || ""), 120);
+      out.push(item);
+    });
+  } catch (err) {}
+  return out;
+}
+
+function TL_DraftContext_topicRowToObject_(headers, row, rowNumber) {
+  const out = {
+    rowNumber: rowNumber,
+    topicId: "",
+    contactId: "",
+    contactName: "",
+    topicSummary: "",
+    lastUsedAt: "",
+    usageCount: 0,
+    recentExamplesJson: "",
+    notes: ""
+  };
+  if (!headers || !row) return out;
+  headers.forEach(function(header, index) {
+    const key = String(header || "");
+    const value = row[index];
+    if (key === "topic_id") out.topicId = String(value || "").trim();
+    else if (key === "contact_id") out.contactId = String(value || "").trim();
+    else if (key === "contact_name") out.contactName = String(value || "").trim();
+    else if (key === "topic_summary") out.topicSummary = String(value || "").trim();
+    else if (key === "last_used_at") out.lastUsedAt = String(value || "").trim();
+    else if (key === "usage_count") out.usageCount = Number(value || 0);
+    else if (key === "recent_examples_json") out.recentExamplesJson = String(value || "").trim();
+    else if (key === "notes") out.notes = String(value || "").trim();
+  });
+  return out;
+}
+
+function TL_DraftContext_renderTopicSection_(topics) {
+  const out = [];
+  (topics || []).forEach(function(topic, idx) {
+    const bits = [];
+    const topicId = String(topic && topic.topicId || "").trim();
+    const summary = String(topic && topic.topicSummary || "").trim();
+    const contactName = String(topic && topic.contactName || "").trim();
+    const usageCount = Number(topic && topic.usageCount || 0);
+    const examples = String(topic && topic.recentExamplesPreview || "").trim();
+    bits.push("[" + (idx + 1) + "]" + (topicId ? " " + topicId : ""));
+    if (summary) bits.push(summary);
+    if (contactName) bits.push("contact=" + contactName);
+    if (usageCount) bits.push("usage=" + usageCount);
+    if (examples) bits.push("examples=" + examples);
+    out.push(bits.join(" | "));
+  });
+  return out;
 }
 
 function TL_DraftContext_renderReviewBrief_(contact, enrichments, emails, whatsapps) {

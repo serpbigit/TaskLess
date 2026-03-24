@@ -661,6 +661,52 @@ Explanation-rich approval flows are more trustworthy than raw confidence claims.
 - “What should I do now?” decision mode:
   - a focused mode that returns the best next actions with the least cognitive load, prioritized for practical execution rather than information dump.
 
+## Parked architecture: Boss turn protocol and continuity layer
+- The long-term Boss interaction should be free-style and completion-oriented rather than menu-first:
+  - Boss shares intent naturally
+  - AI advances completion immediately
+  - AI asks only for the smallest blocking piece
+  - Boss approves before any external execution
+  - GAS persists state so unfinished work survives across turns
+- Canonical mental model for this phase:
+  - Boss expresses -> AI completes -> Boss approves -> system executes -> state is persisted
+- Runtime role split for this phase:
+  - Google Sheets = durable structured memory
+  - GAS = orchestrator, retrieval layer, state reconstruction layer, write-back authority
+  - AI = stateless completion engine that only knows what GAS includes in the current turn packet
+- Boss-turn state model to add later as a first-class durable layer:
+  - one `active` item per Boss at a time
+  - additional items may be `blocked`, `paused`, `pending`, `awaiting_approval`, `ready`, `executed`, or `archived`
+  - new Boss input should be treated as refinement of the active item unless clearly a new intent
+  - if clearly a new intent, the old active item should be paused/pending rather than lost
+  - pending items should remain quietly available for contextual resurfacing rather than nagging
+- Turn protocol direction (parked target):
+  - GAS should assemble a turn packet with current active item, pending summary, bounded memory, and capability list
+  - AI should classify the Boss input, decide the smallest next completion step, and return explicit persistence updates
+  - if more context is needed, AI should request bounded targeted retrieval rather than asking the Boss too early
+  - GAS should remain the authority for persistence, routing, approval gating, and execution
+- Boss-facing turn rules for the future layer:
+  - AI should always try to complete first
+  - infer missing information whenever reasonable
+  - prefer drafts/proposals over clarification questions
+  - keep responses short, actionable, and approval-oriented
+  - use flexible numbered options only when needed, for example contact disambiguation, approve/edit/later, or channel choice
+  - AI should be explicitly allowed to construct the numbered options dynamically per turn so the Boss can reach the fastest correct resolution
+  - these options should not be treated as a rigid fixed menu; they should adapt to the current state of the item, for example approval, revision, defer, recipient selection, channel selection, or one missing blocking decision
+  - the goal of the options is to move the task/reply/decision forward with minimal friction rather than force the Boss into predefined static flows
+  - GAS must still enforce the deterministic boundary: AI may shape the options, but only within the currently allowed capabilities and approval rules
+- Capability list direction (parked for the Boss flow, not inbound enrichment):
+  - capabilities should live in code as an explicit structured list that can be updated over time
+  - AI should always know what it can and cannot do in the current turn
+  - initial capability families should include search contacts, query inbox records, query contact enrichments, query topic examples, draft WhatsApp, draft email, create task/reminder, pause item, resume item, and mark pending
+  - inbound enrichment should remain bounded and should not become a general capability-driven agent loop
+- Tightening rules for this future phase:
+  - approval remains mandatory for external actions
+  - persistence updates should be explicit every turn
+  - Boss-turn lifecycle state must stay separate from inbound enrichment state
+  - the system should preserve continuity without forcing the Boss to learn commands or menu syntax
+  - unfinished work should become durable state, not chat-local context
+
 ## Safety and operational controls
 - Global automation on/off switch:
   - one clear kill switch for outbound automation and background automation
@@ -732,4 +778,12 @@ Explanation-rich approval flows are more trustworthy than raw confidence claims.
   - last similar cases
   - prior reply patterns
   - cross-client pattern memory
+- Per-customer topic routing should stay explicit:
+  - inbound enrichment should always receive the customer's current `TOPICS` list and prefer selecting an existing topic before proposing a new topic candidate
+  - topic vocabularies should be customizable per client vertical, for example a mortgage agent may keep topics such as missing documents, bank approval, rate negotiation, refinance, insurance, payment, and follow-up
+  - when no existing topic fits, AI should return a new topic candidate so GAS can write it back safely and later update the customer's `TOPICS` sheet
+- Topic handling should support operational routing, not just labeling:
+  - `TOPICS` should help group related inbound WhatsApps/emails faster and improve reply drafting quality
+  - for recurring workflows, quick structured lookup should prefer stable searchable fields in `CONTACTS` (for example who usually handles a topic or issue type) before relying on append-only `CONTACT_ENRICHMENTS`
+  - `CONTACT_ENRICHMENTS` should remain supporting narrative memory, while `CONTACTS` holds faster role/specialty ownership data and `TOPICS` holds issue classification
 
