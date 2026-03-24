@@ -1074,7 +1074,7 @@ function TL_Menu_HandleBossIntent_(ev, inboxRow, intent) {
 
   if (normalized.route === "summary") {
     TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
-    return TL_Menu_HandleSummaryIntent_(normalized, bossWaId);
+    return TL_Menu_HandleSummaryIntent_(normalized, bossWaId, ev);
   }
 
   if (normalized.route === "capture") {
@@ -1143,8 +1143,16 @@ function TL_Menu_OpenMenuTarget_(waId, intent) {
   return null;
 }
 
-function TL_Menu_HandleSummaryIntent_(intent, waId) {
-  const summaryKind = String(intent && intent.summary_kind || "").trim().toLowerCase();
+function TL_Menu_HandleSummaryIntent_(intent, waId, ev, options) {
+  const analysis = TL_Menu_AnalyzeReadOnlySummaryIntent_(intent, waId, ev, options);
+  const summaryKind = String(analysis && analysis.summary_kind || intent && intent.summary_kind || "").trim().toLowerCase();
+  const rendered = TL_Menu_RenderSummaryKind_(summaryKind, waId);
+  const preamble = String(analysis && analysis.reply_preamble || "").trim();
+  if (preamble && rendered) return [preamble, "", rendered].join("\n\n");
+  return rendered;
+}
+
+function TL_Menu_RenderSummaryKind_(summaryKind, waId) {
   switch (summaryKind) {
     case "ai_cost": return TL_AI_BuildMonthToDateSpendReport_();
     case "pending": return TL_Menu_BuildPendingSummary_();
@@ -1165,6 +1173,58 @@ function TL_Menu_HandleSummaryIntent_(intent, waId) {
     case "reminders": return TL_Menu_BuildRemindersSummary_();
     case "tasks": return TL_Menu_BuildOpenTasksSummary_();
     default: return TL_Menu_BuildPendingSummary_();
+  }
+}
+
+function TL_Menu_AnalyzeReadOnlySummaryIntent_(intent, waId, ev, options) {
+  const opts = options || {};
+  const fallbackSummaryKind = String(intent && intent.summary_kind || "pending").trim().toLowerCase() || "pending";
+  const fallback = {
+    summary_kind: fallbackSummaryKind,
+    retrieval_focus: [],
+    reply_preamble: "",
+    confidence: Number(intent && intent.confidence || 0)
+  };
+
+  if (typeof TL_BossTurn_BuildPacket_ !== "function" || typeof TL_AI_AnalyzeBossReadOnlyTurn_ !== "function") {
+    return fallback;
+  }
+
+  try {
+    const packet = (opts.packetFn || TL_BossTurn_BuildPacket_)({
+      wa_id: String(waId || "").trim(),
+      message_text: String(ev && ev.text || intent && intent.parameters && intent.parameters.query || "").trim(),
+      timestamp: new Date().toISOString()
+    }, opts.packetOptions || {});
+    const analyzed = TL_AI_AnalyzeBossReadOnlyTurn_(packet, {
+      analysisFn: opts.analysisFn
+    });
+    const summaryKind = String(analyzed && analyzed.summary_kind || fallback.summary_kind).trim().toLowerCase() || fallback.summary_kind;
+    const normalized = {
+      summary_kind: summaryKind,
+      retrieval_focus: Array.isArray(analyzed && analyzed.retrieval_focus) ? analyzed.retrieval_focus.slice() : [],
+      reply_preamble: String(analyzed && analyzed.reply_preamble || "").trim(),
+      confidence: Number(analyzed && analyzed.confidence || 0),
+      packet: packet
+    };
+    if (typeof TLW_logInfo_ === "function") {
+      TLW_logInfo_("boss_turn_read_only_analysis", {
+        wa_id: String(waId || "").trim(),
+        input_summary_kind: fallback.summary_kind,
+        output_summary_kind: normalized.summary_kind,
+        retrieval_focus: normalized.retrieval_focus.join(","),
+        confidence: normalized.confidence
+      });
+    }
+    return normalized;
+  } catch (e) {
+    if (typeof TLW_logWarn_ === "function") {
+      TLW_logWarn_("boss_turn_read_only_analysis_failed", {
+        wa_id: String(waId || "").trim(),
+        error: String(e && e.message || e)
+      });
+    }
+    return fallback;
   }
 }
 

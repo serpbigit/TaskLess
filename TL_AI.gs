@@ -325,6 +325,42 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
   ].join("\n");
 }
 
+function TL_AI_buildBossReadOnlyTurnPrompt_(packet, language, bossName) {
+  const packetBrief = typeof TL_BossTurn_BuildPromptBrief_ === "function"
+    ? TL_BossTurn_BuildPromptBrief_(packet)
+    : "";
+  return [
+    "You are TaskLess's read-only Boss turn analyst.",
+    "You are analyzing one Boss message plus the current state packet.",
+    "This pass is read-only. Do not propose execution, sending, or state mutation.",
+    "Return strict JSON only.",
+    "Language preference: " + String(language || "Hebrew"),
+    "The Boss's name is: " + String(bossName || "Boss"),
+    "Choose the best existing read-only summary surface and the most useful retrieval focus.",
+    "Return exactly one JSON object with this shape:",
+    '{"summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|topic_candidates|reminders|tasks|ai_cost|menu|help|verticals|settings|none","retrieval_focus":["pending_items|recent_records|recent_contacts|recent_threads|topic_candidates"],"reply_preamble":"string","confidence":0.0}',
+    "Rules:",
+    "summary_kind must be one supported value only.",
+    "retrieval_focus may include up to two values and should reflect the packet's retrieval_budget_max policy.",
+    "reply_preamble should be one short sentence in the Boss UI language describing what TaskLess is about to show.",
+    "Prefer the smallest useful surface. Do not invent unsupported surfaces.",
+    "Use topic_candidates only when the Boss is clearly asking about topic candidates or topic promotion review.",
+    "Use approvals for things waiting on explicit approval.",
+    "Use pending for general what's open / what's on my plate questions.",
+    "Use attention for what needs attention now.",
+    "Use next_steps for what should I do next questions.",
+    "If the packet already strongly indicates the correct surface, align with it.",
+    "Do not wrap the JSON in markdown fences.",
+    "Examples:",
+    '{"summary_kind":"approvals","retrieval_focus":["pending_items","recent_records"],"reply_preamble":"מראה לך מה ממתין לאישור.","confidence":0.97}',
+    '{"summary_kind":"attention","retrieval_focus":["recent_records"],"reply_preamble":"מראה לך מה צריך תשומת לב עכשיו.","confidence":0.93}',
+    '{"summary_kind":"topic_candidates","retrieval_focus":["topic_candidates"],"reply_preamble":"מראה לך מועמדי נושא פתוחים לסקירה.","confidence":0.96}',
+    packetBrief ? packetBrief : "Current Boss turn packet: unavailable",
+    "Message:",
+    String(packet && packet.boss_turn && packet.boss_turn.message_text || "")
+  ].join("\n");
+}
+
 function TL_AI_buildTranscriptionPrompt_(language) {
   return [
     "You are TaskLess, a business communication assistant.",
@@ -428,6 +464,24 @@ function TL_AI_parseBossIntentJson_(text) {
   }
 
   return TL_AI_normalizeBossIntent_(parsed);
+}
+
+function TL_AI_parseBossReadOnlyTurnJson_(text) {
+  const raw = String(text || "").trim();
+  if (!raw) throw new Error("AI text payload is empty");
+
+  let jsonText = raw;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced && fenced[1]) jsonText = fenced[1].trim();
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (e) {
+    throw new Error("AI text is not valid JSON: " + e.message + " :: " + jsonText.slice(0, 300));
+  }
+
+  return TL_AI_normalizeBossReadOnlyTurn_(parsed);
 }
 
 function TL_AI_call_(contents, generationConfig) {
@@ -538,6 +592,25 @@ function TL_AI_RecognizeBossIntent_(inputText, options) {
   }
 
   return TL_AI_normalizeBossIntent_(parsed);
+}
+
+function TL_AI_AnalyzeBossReadOnlyTurn_(packet, options) {
+  const opts = options || {};
+  const safePacket = packet || {};
+  if (opts && typeof opts.analysisFn === "function") {
+    return TL_AI_normalizeBossReadOnlyTurn_(opts.analysisFn(safePacket, opts));
+  }
+
+  const cfg = TL_AI_getConfig_();
+  const prompt = TL_AI_buildBossReadOnlyTurnPrompt_(safePacket, cfg.language, cfg.bossName);
+  const result = TL_AI_callPrompt_(prompt);
+  const parsed = TL_AI_parseBossReadOnlyTurnJson_(result.raw_text);
+  return Object.assign({}, parsed, {
+    raw_text: result.raw_text,
+    raw_json: parsed.raw,
+    response_body: result.response_body,
+    status: result.status
+  });
 }
 
 function TL_AI_ExtractContactEnrichment_(inputText) {
@@ -1307,6 +1380,17 @@ function TL_AI_normalizeBossIntent_(item) {
   };
 }
 
+function TL_AI_normalizeBossReadOnlyTurn_(item) {
+  const safe = item && typeof item === "object" ? item : {};
+  return {
+    summary_kind: TL_AI_normalizeBossSummaryKind_(safe.summary_kind),
+    retrieval_focus: TL_AI_normalizeBossRetrievalFocus_(safe.retrieval_focus),
+    reply_preamble: String(safe.reply_preamble || "").trim(),
+    confidence: TL_AI_normalizeBossConfidence_(safe.confidence),
+    raw: safe
+  };
+}
+
 function TL_AI_bossRouteFromIntent_(intent) {
   const v = String(intent || "").trim().toLowerCase();
   if (v === "show_menu" || v === "help" || v === "show_settings" || v === "show_verticals") return "menu";
@@ -1403,6 +1487,19 @@ function TL_AI_normalizeBossSummaryKind_(value) {
   if (v === "urgent") return "attention";
   const allowed = ["pending","attention","approvals","next_steps","topic_candidates","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","ai_cost","none"];
   return allowed.indexOf(v) !== -1 ? v : "none";
+}
+
+function TL_AI_normalizeBossRetrievalFocus_(value) {
+  const allowed = ["pending_items","recent_records","recent_contacts","recent_threads","topic_candidates"];
+  const arr = Array.isArray(value) ? value : (value ? [value] : []);
+  const seen = {};
+  return arr.map(function(item) {
+    return String(item || "").trim().toLowerCase();
+  }).filter(function(item) {
+    if (!item || allowed.indexOf(item) === -1 || seen[item]) return false;
+    seen[item] = true;
+    return true;
+  }).slice(0, 2);
 }
 
 function TL_AI_normalizeBossMenuTarget_(value) {
