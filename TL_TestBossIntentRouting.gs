@@ -15,6 +15,7 @@ function TL_TestBossIntentRouting_RunAll() {
     resume_paused_item: TL_TestBossIntentRouting_ResumePausedItemRun(),
     outbound_draft_continuation: TL_TestBossIntentRouting_OutboundDraftContinuationRun(),
     outbound_recipient_continuation: TL_TestBossIntentRouting_OutboundRecipientContinuationRun(),
+    capture_item_continuation: TL_TestBossIntentRouting_CaptureItemContinuationRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
@@ -356,6 +357,73 @@ function TL_TestBossIntentRouting_OutboundRecipientContinuationRun() {
         String(current.recipientName || "") === "Dana Banker" &&
         String(current.recipientDestination || "") === "972501112233" &&
         String(current.resolutionStatus || "") === "resolved",
+      reply: reply,
+      current: current
+    };
+  } finally {
+    TL_Menu_ClearDecisionPacket_(waId);
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
+function TL_TestBossIntentRouting_CaptureItemContinuationRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ClearDecisionPacket_(waId);
+  try {
+    const seeded = typeof TL_TestBossDecision_seedDecisionItem_ === "function"
+      ? TL_TestBossDecision_seedDecisionItem_({
+          root_id: "root_capture_item_" + Utilities.getUuid(),
+          approval_status: "awaiting_approval",
+          execution_status: "proposal_ready",
+          ai_summary: "Call Dana.",
+          ai_proposal: "Call Dana."
+        })
+      : null;
+    if (!seeded) return { ok: false, reason: "missing_seed_helper" };
+    const item = Object.assign({}, seeded.item, {
+      channel: "whatsapp",
+      channelLabel: "WhatsApp",
+      captureKind: "task",
+      proposal: "Call Dana.",
+      summary: "Call Dana.",
+      duePreview: "",
+      dueLabel: ""
+    });
+    TL_Menu_StoreDecisionPacket_(waId, "capture", [item]);
+    const livePacket = TL_Menu_GetDecisionPacket_(waId);
+    TL_Menu_BuildDecisionPacketOneByOneReply_(livePacket);
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "tomorrow 17:00"
+    }, null, {
+      intentFn: function() {
+        return {
+          intent: "unknown",
+          route: "none",
+          summary_kind: "none",
+          capture_state: "",
+          confidence: 0.2,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: "",
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      }
+    });
+
+    const packetAfter = TL_Menu_GetDecisionPacket_(waId);
+    const current = packetAfter && packetAfter.items ? packetAfter.items[0] : null;
+    return {
+      ok: String(reply || "").indexOf("עדכנתי את הזמן") !== -1 &&
+        !!current &&
+        String(current.duePreview || "").trim() !== "",
       reply: reply,
       current: current
     };

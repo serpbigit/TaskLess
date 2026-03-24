@@ -129,7 +129,9 @@ function TL_ActiveItem_normalize_(waId, item) {
     resolved_topic_summary: String(safe.resolved_topic_summary || "").trim(),
     subject: String(safe.subject || "").trim(),
     recipient_destination: String(safe.recipient_destination || "").trim(),
-    resolution_status: String(safe.resolution_status || "").trim().toLowerCase()
+    resolution_status: String(safe.resolution_status || "").trim().toLowerCase(),
+    task_due: String(safe.task_due || "").trim(),
+    due_label: String(safe.due_label || "").trim()
   };
 }
 

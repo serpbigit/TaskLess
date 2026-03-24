@@ -1189,7 +1189,10 @@ function TL_Menu_TryContinueActiveItem_(waId, rawText, intent, options) {
   if (intentName && intentName !== "unknown" && intentName !== "out_of_scope") return null;
   const kind = String(active.kind || "").trim().toLowerCase();
   if (kind === "outbound_draft") {
-    return TL_Menu_ContinueOutboundDraft_(waId, rawText);
+    return TL_Menu_ContinueOutboundDraft_(waId, rawText, options);
+  }
+  if (kind === "capture_item") {
+    return TL_Menu_ContinueCaptureItem_(waId, rawText);
   }
   if (kind !== "contact_lookup" && kind !== "context_lookup") return null;
 
@@ -1211,7 +1214,7 @@ function TL_Menu_TryContinueActiveItem_(waId, rawText, intent, options) {
   }));
 }
 
-function TL_Menu_ContinueOutboundDraft_(waId, rawText) {
+function TL_Menu_ContinueOutboundDraft_(waId, rawText, options) {
   const text = String(rawText || "").trim();
   if (!text) return null;
   const packet = TL_Menu_GetDecisionPacket_(waId);
@@ -1224,6 +1227,31 @@ function TL_Menu_ContinueOutboundDraft_(waId, rawText) {
   const revised = TL_Menu_ReviseDecisionRow_(current.rowNumber, text);
   current.summary = revised.summary;
   current.proposal = revised.proposal;
+  TL_Menu_SetDecisionPacket_(waId, packet);
+  return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדכנתי את הנוסח. אפשר לאשר או לערוך שוב."));
+}
+
+function TL_Menu_ContinueCaptureItem_(waId, rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) return null;
+  const packet = TL_Menu_GetDecisionPacket_(waId);
+  if (!packet || String(packet.stage || "").trim() !== "one_by_one") return null;
+  const current = packet.items[packet.cursor || 0];
+  if (!current || !TL_Menu_IsContinuableCaptureItem_(current)) return null;
+
+  const dueUpdate = TL_Menu_TryUpdateCaptureItemDue_(current, text);
+  if (dueUpdate.updated) {
+    packet.items[packet.cursor || 0] = dueUpdate.item;
+    TL_Menu_SetDecisionPacket_(waId, packet);
+    return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדכנתי את הזמן לפריט הנוכחי."));
+  }
+
+  const revised = TL_Menu_ReviseDecisionRow_(current.rowNumber, text);
+  current.summary = revised.summary;
+  current.proposal = revised.proposal;
+  if (String(current.captureKind || "").trim().toLowerCase() === "reminder") {
+    current.reminderMessage = revised.summary;
+  }
   TL_Menu_SetDecisionPacket_(waId, packet);
   return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדכנתי את הנוסח. אפשר לאשר או לערוך שוב."));
 }
@@ -1267,6 +1295,41 @@ function TL_Menu_TryContinueOutboundRecipientResolution_(waId, packet, current, 
     return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("מצאתי כמה התאמות אפשריות. בחר את איש הקשר המתאים."));
   }
   return TL_Menu_BuildDecisionPacketOneByOneReply_(packet, TL_Menu_T_("עדיין לא מצאתי איש קשר ברור. אפשר לנסות שם או מספר אחר."));
+}
+
+function TL_Menu_IsContinuableCaptureItem_(item) {
+  const kind = String(item && item.captureKind || "").trim().toLowerCase();
+  return kind === "task" || kind === "reminder";
+}
+
+function TL_Menu_TryUpdateCaptureItemDue_(item, rawText) {
+  const current = item && typeof item === "object" ? item : {};
+  const text = String(rawText || "").trim();
+  if (!text || typeof TL_Reminder_parseDueAt_ !== "function" || typeof TL_Capture_buildDueInfo_ !== "function") {
+    return { updated: false, item: current };
+  }
+  const kind = String(current.captureKind || "").trim().toLowerCase();
+  if (kind !== "task" && kind !== "reminder") {
+    return { updated: false, item: current };
+  }
+  const parsed = TL_Reminder_parseDueAt_(text, new Date());
+  if (!parsed) {
+    return { updated: false, item: current };
+  }
+  const rowNumber = Number(current.rowNumber || 0);
+  if (rowNumber && typeof TL_Orchestrator_updateRowFields_ === "function") {
+    TL_Orchestrator_updateRowFields_(rowNumber, {
+      task_due: text
+    }, "boss_revise_due");
+  }
+  const dueInfo = TL_Capture_buildDueInfo_(text, new Date());
+  return {
+    updated: true,
+    item: Object.assign({}, current, {
+      duePreview: String(dueInfo.preview || "").trim(),
+      dueLabel: String(dueInfo.label || "").trim()
+    })
+  };
 }
 
 function TL_Menu_PauseActiveItemForNewIntent_(waId, intent) {
@@ -1827,6 +1890,7 @@ function TL_Menu_SetDecisionPacket_(waId, packet) {
 function TL_Menu_ClearDecisionPacket_(waId) {
   PropertiesService.getScriptProperties().deleteProperty(TL_MENU.PACKET_KEY_PREFIX + String(waId || "").trim());
   TL_Menu_ClearOutboundDraftActiveItem_(waId);
+  TL_Menu_ClearCaptureItemActiveItem_(waId);
 }
 
 function TL_Menu_StoreDecisionPacket_(waId, kind, items) {
@@ -2786,8 +2850,12 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   if (!current) return "אין עוד פריטים בחבילה.";
   if (TL_Menu_IsOutboundCommunicationItem_(current)) {
     TL_Menu_SyncOutboundDraftActiveItem_(packet, current);
+  } else if (TL_Menu_IsContinuableCaptureItem_(current)) {
+    TL_Menu_SyncCaptureItemActiveItem_(packet, current);
   } else {
-    TL_Menu_ClearOutboundDraftActiveItem_(TL_Menu_FindDecisionPacketOwnerWaId_(packet));
+    const packetWaId = TL_Menu_FindDecisionPacketOwnerWaId_(packet);
+    TL_Menu_ClearOutboundDraftActiveItem_(packetWaId);
+    TL_Menu_ClearCaptureItemActiveItem_(packetWaId);
   }
   const index = Number(packet.cursor || 0) + 1;
   const total = packet.items.length;
@@ -2882,6 +2950,32 @@ function TL_Menu_ClearOutboundDraftActiveItem_(waId) {
   if (!waId || typeof TL_ActiveItem_Get_ !== "function" || typeof TL_ActiveItem_Clear_ !== "function") return false;
   const active = TL_ActiveItem_Get_(waId);
   if (!active || String(active.kind || "").trim().toLowerCase() !== "outbound_draft") return false;
+  TL_ActiveItem_Clear_(waId);
+  return true;
+}
+
+function TL_Menu_SyncCaptureItemActiveItem_(packet, current) {
+  if (typeof TL_ActiveItem_Set_ !== "function") return false;
+  if (!current || !TL_Menu_IsContinuableCaptureItem_(current)) return false;
+  const activeWaId = TL_Menu_FindDecisionPacketOwnerWaId_(packet);
+  if (!activeWaId) return false;
+  TL_ActiveItem_Set_(activeWaId, {
+    item_id: "CAPTURE_" + String(current.rowNumber || current.key || "").trim(),
+    kind: "capture_item",
+    status: "active",
+    row_number: Number(current.rowNumber || 0),
+    capture_kind: String(current.captureKind || "").trim().toLowerCase(),
+    source_text: String(current.proposal || current.summary || "").trim(),
+    task_due: String(current.duePreview || "").trim(),
+    due_label: String(current.dueLabel || "").trim()
+  });
+  return true;
+}
+
+function TL_Menu_ClearCaptureItemActiveItem_(waId) {
+  if (!waId || typeof TL_ActiveItem_Get_ !== "function" || typeof TL_ActiveItem_Clear_ !== "function") return false;
+  const active = TL_ActiveItem_Get_(waId);
+  if (!active || String(active.kind || "").trim().toLowerCase() !== "capture_item") return false;
   TL_ActiveItem_Clear_(waId);
   return true;
 }
