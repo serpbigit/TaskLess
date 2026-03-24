@@ -16,6 +16,7 @@ function TL_TestBossIntentRouting_RunAll() {
     active_item_pause_replace: TL_TestBossIntentRouting_ActiveItemPauseReplaceRun(),
     resume_paused_item: TL_TestBossIntentRouting_ResumePausedItemRun(),
     paused_items_route: TL_TestBossIntentRouting_PausedItemsRouteRun(),
+    waiting_on_me_now_route: TL_TestBossIntentRouting_WaitingOnMeNowRouteRun(),
     resume_paused_item_by_index: TL_TestBossIntentRouting_ResumePausedItemByIndexRun(),
     outbound_draft_continuation: TL_TestBossIntentRouting_OutboundDraftContinuationRun(),
     outbound_draft_style_shortcut: TL_TestBossIntentRouting_OutboundDraftStyleShortcutRun(),
@@ -267,6 +268,69 @@ function TL_TestBossIntentRouting_PausedItemsRouteRun() {
   } finally {
     TL_ActiveItem_Clear_(waId);
     TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
+function TL_TestBossIntentRouting_WaitingOnMeNowRouteRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  const row = TL_TestBossIntentRouting_seedRow_({
+    root_id: "root_waiting_on_me_now_" + Utilities.getUuid(),
+    record_class: "proposal",
+    approval_status: "awaiting_approval",
+    execution_status: "proposal_ready",
+    task_status: "proposal_ready",
+    ai_summary: "Approve the message to Dana.",
+    ai_proposal: "Dana, I will send the document shortly.",
+    needs_owner_now: "true",
+    urgency_flag: "true"
+  });
+
+  TL_ActiveItem_Set_(waId, {
+    item_id: "WAITING_ON_ME_ACTIVE",
+    kind: "outbound_draft",
+    status: "active",
+    row_number: row.rowNumber,
+    resolved_contact_name: "Dana Banker",
+    source_text: "Dana, I will send the document shortly."
+  });
+
+  try {
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "what's waiting on me now"
+    }, null, {
+      intentFn: function() {
+        return {
+          intent: "unknown",
+          route: "none",
+          summary_kind: "none",
+          capture_state: "",
+          confidence: 0.2,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: "",
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      }
+    });
+
+    const output = {
+      ok: String(reply || "").indexOf("מה מחכה לי עכשיו") !== -1 &&
+        String(reply || "").indexOf("פתוח כרגע") !== -1 &&
+        String(reply || "").indexOf("Dana") !== -1,
+      seeded_row: row.rowNumber,
+      reply: reply
+    };
+    Logger.log("TL_TestBossIntentRouting_WaitingOnMeNowRouteRun: %s", JSON.stringify(output, null, 2));
+    return output;
+  } finally {
+    TL_ActiveItem_Clear_(waId);
+    TL_Menu_ClearDecisionPacket_(waId);
   }
 }
 

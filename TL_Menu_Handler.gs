@@ -124,6 +124,11 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
     return TL_Menu_BuildPausedItemsSummary_(bossWaId);
   }
 
+  if (TL_Menu_IsWaitingOnMeNowQuery_(rawText)) {
+    TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
+    return TL_Menu_BuildWaitingOnMeNowSummary_(bossWaId);
+  }
+
   // Check triggers
   if (TL_MENU.TRIGGERS.some(t => text === t)) {
     const targetState = TL_MENU.CAPABILITY_TRIGGERS.some(t => text === t)
@@ -221,6 +226,22 @@ function TL_Menu_ResetSession_(waId) {
 
 function TL_Menu_IsNumericChoice_(text) {
   return !!TL_Menu_ParseChoice_(text);
+}
+
+function TL_Menu_IsWaitingOnMeNowQuery_(rawText) {
+  const text = String(rawText || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!text) return false;
+  return [
+    "what's waiting on me now",
+    "what is waiting on me now",
+    "show me what's waiting on me now",
+    "show me what is waiting on me now",
+    "what needs me now",
+    "show me what needs me now",
+    "מה מחכה לי עכשיו",
+    "מה ממתין לי עכשיו",
+    "מה צריך אותי עכשיו"
+  ].indexOf(text) !== -1;
 }
 
 function TL_Menu_ParseChoice_(text) {
@@ -3634,6 +3655,52 @@ function TL_Menu_BuildUrgentSummary_() {
       TL_Orchestrator_value_(values, "needs_owner_now").toLowerCase() === "true";
   }, TL_MENU.MAX_PENDING_SUMMARY);
   return TL_Menu_BuildSummaryBlock_("מה צריך תשומת לב", rows, "אין כרגע פריטים בולטים שצריכים תשומת לב.");
+}
+
+function TL_Menu_BuildWaitingOnMeNowSummary_(waId) {
+  const rows = TL_Menu_FilterRecentRows_(function(item) {
+    const values = item.values;
+    const taskStatus = TL_Orchestrator_value_(values, "task_status").toLowerCase();
+    const approvalStatus = TL_Orchestrator_value_(values, "approval_status").toLowerCase();
+    const executionStatus = TL_Orchestrator_value_(values, "execution_status").toLowerCase();
+    const urgency = TL_Orchestrator_value_(values, "urgency_flag").toLowerCase() === "true";
+    const ownerNow = TL_Orchestrator_value_(values, "needs_owner_now").toLowerCase() === "true";
+    return ownerNow ||
+      urgency ||
+      approvalStatus === "draft" ||
+      approvalStatus === "awaiting_approval" ||
+      executionStatus === "proposal_ready" ||
+      taskStatus === "proposal_ready";
+  }, Math.max(5, Math.min(TL_MENU.MAX_PENDING_SUMMARY, 7)));
+  const block = TL_Menu_BuildSummaryBlock_("מה מחכה לי עכשיו", rows, "אין כרגע פריטים שמחכים להחלטה שלך עכשיו.");
+  return TL_Menu_AttachActiveItemContext_(waId, block);
+}
+
+function TL_Menu_AttachActiveItemContext_(waId, summaryText) {
+  const text = String(summaryText || "").trim();
+  const active = typeof TL_ActiveItem_Get_ === "function" ? TL_ActiveItem_Get_(waId) : null;
+  if (!active || !active.item_id) return text;
+  const line = TL_Menu_BuildActiveItemContextLine_(active);
+  if (!line) return text;
+  return [line, "", text].filter(Boolean).join("\n");
+}
+
+function TL_Menu_BuildActiveItemContextLine_(active) {
+  const item = active && typeof active === "object" ? active : {};
+  const kind = String(item.kind || "").trim().toLowerCase();
+  const contact = String(item.resolved_contact_name || item.contact_query || "").trim();
+  if (kind === "outbound_draft") {
+    return contact
+      ? (TL_Menu_T_("פתוח כרגע: טיוטה פעילה עבור ", "Open now: active draft for ") + contact)
+      : TL_Menu_T_("פתוח כרגע: טיוטה פעילה.", "Open now: active draft.");
+  }
+  if (kind === "capture_item") {
+    return TL_Menu_T_("פתוח כרגע: פריט פעולה פעיל.", "Open now: active action item.");
+  }
+  if (kind === "contact_lookup" || kind === "context_lookup" || kind === "similar_replies_lookup") {
+    return TL_Menu_T_("פתוחה כרגע גם בדיקה פעילה.", "There is also an active lookup open now.");
+  }
+  return TL_Menu_T_("פתוח כרגע גם פריט פעיל.", "There is also an active item open now.");
 }
 
 function TL_Menu_BuildAwaitingApprovalSummary_(waId) {
