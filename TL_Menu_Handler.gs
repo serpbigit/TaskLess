@@ -17,6 +17,7 @@ const TL_MENU = {
   TRIGGERS: ["תפריט","menu","/menu","עזרה","help","מה אפשר לעשות","מה את יכולה לעשות","מה אתה יכול לעשות","what can i do","what can you do","what can i say"],
   HELP_TRIGGERS: ["עזרה","help","מה אפשר לעשות","what can i do","what can i say"],
   CAPABILITY_TRIGGERS: ["מה את יכולה לעשות","מה אתה יכול לעשות","מה אפשר לעשות","what can you do","what can i do"],
+  RESUME_TRIGGERS: ["continue","resume","continue previous","resume previous","continue previous lookup","back to previous","המשך","להמשיך","תמשיכי","תמשיך","חזרי לקודם","חזור לקודם","חזרי לבדיקה הקודמת","חזור לבדיקה הקודמת"],
   COST_TRIGGERS: ["עלות","cost","ai cost","עלות ai","עלות ה-ai","עלות של ai"],
   EXIT_TRIGGERS: ["יציאה","איפוס","בטל","cancel","exit","reset","stop"],
   STATE_KEY_PREFIX: "MENU_STATE_", // + wa_id
@@ -156,6 +157,9 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
       TL_Menu_T_("אם צריך, אחזור אליך עם כרטיס אישור או שאלת הבהרה.")
     ].join("\n");
   }
+
+  const resumed = TL_Menu_TryResumePausedItem_(bossWaId, rawText, options);
+  if (resumed) return resumed;
 
   const intent = TL_Menu_PopCachedIntent_(bossWaId, rawText) || TL_Menu_RecognizeBossIntent_(rawText, options);
   const continued = TL_Menu_TryContinueActiveItem_(bossWaId, rawText, intent, options);
@@ -1214,6 +1218,66 @@ function TL_Menu_PauseActiveItemForNewIntent_(waId, intent) {
   const intentName = String(normalizedIntent && normalizedIntent.intent || "").trim().toLowerCase();
   if (!intentName || intentName === "unknown" || intentName === "out_of_scope") return null;
   return TL_ActiveItem_PauseCurrent_(waId, "new_intent:" + intentName);
+}
+
+function TL_Menu_TryResumePausedItem_(waId, rawText, options) {
+  if (!TL_Menu_IsResumePausedCommand_(rawText)) return null;
+  if (typeof TL_ActiveItem_ResumeLatest_ !== "function") return null;
+  const active = typeof TL_ActiveItem_Get_ === "function" ? TL_ActiveItem_Get_(waId) : null;
+  if (active && active.item_id) {
+    return TL_Menu_T_(
+      "יש כבר בדיקה פתוחה. אפשר להמשיך אותה או לאפס קודם.",
+      "There is already an open lookup. You can continue it or reset first."
+    );
+  }
+  const resumed = TL_ActiveItem_ResumeLatest_(waId);
+  if (!resumed || !resumed.resumed || !resumed.item) {
+    return TL_Menu_T_(
+      "אין כרגע פריט מושהה להמשיך ממנו.",
+      "There is no paused item to resume right now."
+    );
+  }
+  const item = resumed.item;
+  const preamble = TL_Menu_T_("חוזרת למה שהשארנו פתוח.", "Returning to what we left open.");
+  const baseOptions = Object.assign({}, options || {}, { activeItem: item });
+  if (String(item.kind || "").trim().toLowerCase() === "contact_lookup") {
+    return TL_Menu_BuildContactLookupSummary_({
+      intent: "find_contact",
+      route: "summary",
+      summary_kind: "contact_lookup",
+      parameters: {
+        query: String(item.contact_query || item.resolved_contact_name || "").trim()
+      }
+    }, {
+      from: String(waId || "").trim(),
+      text: String(item.contact_query || item.resolved_contact_name || "").trim()
+    }, {
+      summary_kind: "contact_lookup",
+      reply_preamble: preamble
+    }, baseOptions);
+  }
+  return TL_Menu_BuildContextLookupSummary_({
+    intent: "find_context",
+    route: "summary",
+    summary_kind: "context_lookup",
+    parameters: {
+      query: String(item.source_text || item.contact_query || item.topic_query || "").trim()
+    }
+  }, {
+    from: String(waId || "").trim(),
+    text: String(item.source_text || item.contact_query || item.topic_query || "").trim()
+  }, {
+    summary_kind: "context_lookup",
+    reply_preamble: preamble
+  }, baseOptions);
+}
+
+function TL_Menu_IsResumePausedCommand_(text) {
+  const normalized = String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized) return false;
+  return TL_MENU.RESUME_TRIGGERS.some(function(trigger) {
+    return normalized === String(trigger || "").trim().toLowerCase();
+  });
 }
 
 function TL_Menu_RenderSummaryKind_(summaryKind, waId) {

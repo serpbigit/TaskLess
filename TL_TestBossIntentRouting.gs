@@ -12,6 +12,7 @@ function TL_TestBossIntentRouting_RunAll() {
     context_lookup_route: TL_TestBossIntentRouting_ContextLookupRouteRun(),
     active_item_continuation: TL_TestBossIntentRouting_ActiveItemContinuationRun(),
     active_item_pause_replace: TL_TestBossIntentRouting_ActiveItemPauseReplaceRun(),
+    resume_paused_item: TL_TestBossIntentRouting_ResumePausedItemRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
@@ -143,6 +144,60 @@ function TL_TestBossIntentRouting_ActiveItemPauseReplaceRun() {
         paused[0].pause_reason === "new_intent:show_capabilities",
       reply: reply,
       paused: paused
+    };
+  } finally {
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
+function TL_TestBossIntentRouting_ResumePausedItemRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  try {
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_RESUME_LOOKUP_1",
+      kind: "context_lookup",
+      status: "active",
+      source_text: "show recent messages with Dana about documents",
+      contact_query: "Dana",
+      search_queries: [{ type: "name", value: "Dana" }],
+      topic_query: "documents",
+      topic_id: "topic_documents_needed",
+      resolved_contact_id: "CI_1",
+      resolved_contact_name: "Dana Banker",
+      resolved_topic_summary: "Missing documents"
+    });
+    TL_ActiveItem_PauseCurrent_(waId, "new_intent:show_capabilities");
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "continue previous"
+    }, null, {
+      resolveContactFn: function() {
+        return {
+          status: "resolved",
+          contact: {
+            contactId: "CI_1",
+            name: "Dana Banker",
+            phone1: "972501112233",
+            email: "dana@bank.example"
+          },
+          candidates: [],
+          queries: [{ type: "name", value: "Dana" }]
+        };
+      },
+      topicLimit: 10
+    });
+
+    const active = TL_ActiveItem_Get_(waId);
+    return {
+      ok: String(reply || "").indexOf("חוזרת למה שהשארנו פתוח") !== -1 &&
+        String(reply || "").indexOf("הקשר אחרון עבור") !== -1 &&
+        !!active &&
+        active.item_id === "AI_RESUME_LOOKUP_1" &&
+        active.status === "active",
+      reply: reply,
+      active: active
     };
   } finally {
     TL_ActiveItem_Clear_(waId);

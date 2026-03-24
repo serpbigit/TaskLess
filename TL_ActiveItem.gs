@@ -83,6 +83,28 @@ function TL_ActiveItem_PauseCurrent_(waId, reason) {
   };
 }
 
+function TL_ActiveItem_ResumeLatest_(waId) {
+  const paused = TL_ActiveItem_GetPaused_(waId);
+  if (!paused.length) return { ok: true, resumed: false };
+  const item = paused[0];
+  const rest = paused.slice(1);
+  if (rest.length) {
+    PropertiesService.getScriptProperties().setProperty(TL_ActiveItem_pausedKey_(waId), JSON.stringify(rest));
+  } else {
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+  const resumed = TL_ActiveItem_normalize_(waId, Object.assign({}, item, {
+    status: "active"
+  }));
+  TL_ActiveItem_Set_(waId, resumed);
+  return {
+    ok: true,
+    resumed: true,
+    item: resumed,
+    paused_count: rest.length
+  };
+}
+
 function TL_ActiveItem_normalize_(waId, item) {
   const nowIso = new Date().toISOString();
   const safe = item && typeof item === "object" ? item : {};

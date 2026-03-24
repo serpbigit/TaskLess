@@ -300,12 +300,12 @@ function TL_Capabilities_registryDefs_() {
     {
       id: "PAUSE_AND_RESUME_ITEMS",
       category: "system",
-      fn: "TL_ActiveItem_PauseCurrent_",
+      fn: "TL_ActiveItem_ResumeLatest_",
       approval_required: false,
       reads: ["SCRIPT_PROPERTIES"],
       writes: ["SCRIPT_PROPERTIES"],
       channels: [],
-      description: "Pause the current Boss item and resume it later.",
+      description: "Pause the current Boss item and resume the latest paused item.",
       phase: "current"
     }
   ];

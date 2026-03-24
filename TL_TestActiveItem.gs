@@ -2,7 +2,8 @@ function TL_TestActiveItem_RunAll() {
   return {
     storage: TL_TestActiveItem_StorageRun(),
     boss_turn_packet: TL_TestActiveItem_BossTurnPacketRun(),
-    pause_current: TL_TestActiveItem_PauseCurrentRun()
+    pause_current: TL_TestActiveItem_PauseCurrentRun(),
+    resume_latest: TL_TestActiveItem_ResumeLatestRun()
   };
 }
 
@@ -89,6 +90,37 @@ function TL_TestActiveItem_PauseCurrentRun() {
         paused[0].pause_reason === "new_intent:show_capabilities",
       result: result,
       paused: paused
+    };
+  } finally {
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
+function TL_TestActiveItem_ResumeLatestRun() {
+  const waId = "972500001114";
+  try {
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_RESUME_1",
+      kind: "context_lookup",
+      status: "active",
+      contact_query: "Dana",
+      topic_id: "topic_documents_needed",
+      resolved_contact_name: "Dana Banker"
+    });
+    TL_ActiveItem_PauseCurrent_(waId, "new_intent:show_capabilities");
+    const result = TL_ActiveItem_ResumeLatest_(waId);
+    const active = TL_ActiveItem_Get_(waId);
+    const paused = TL_ActiveItem_GetPaused_(waId);
+    return {
+      ok: !!result &&
+        result.resumed === true &&
+        !!active &&
+        active.item_id === "AI_RESUME_1" &&
+        active.status === "active" &&
+        paused.length === 0,
+      result: result,
+      active: active
     };
   } finally {
     TL_ActiveItem_Clear_(waId);
