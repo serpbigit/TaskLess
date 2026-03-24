@@ -376,8 +376,9 @@ function TL_Menu_HandleManageWorkChoice_(waId, choice) {
   if (choice === "7") return TL_Menu_BuildFollowupsSummary_();
   if (choice === "8") return TL_Menu_BuildOpenTasksSummary_();
   if (choice === "9") return TL_Menu_BuildBlockedTasksSummary_();
-  if (choice === "10") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
-  if (choice === "11") return TL_Menu_BuildMenuReply_();
+  if (choice === "10") return TL_Menu_BuildTopicCandidatesSummary_();
+  if (choice === "11") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
+  if (choice === "12") return TL_Menu_BuildMenuReply_();
   return TL_Menu_BuildManageWorkMenu_();
 }
 
@@ -555,8 +556,9 @@ function TL_Menu_BuildManageWorkMenu_() {
     "7. מעקבים",
     "8. משימות פתוחות",
     "9. משימות חסומות",
-    "10. חזרה לתפריט קודם",
-    "11. חזרה לתפריט ראשי",
+    "10. מועמדי נושא לקידום",
+    "11. חזרה לתפריט קודם",
+    "12. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ]);
@@ -1144,6 +1146,7 @@ function TL_Menu_HandleSummaryIntent_(intent, waId) {
     case "attention": return TL_Menu_BuildUrgentSummary_();
     case "approvals": return TL_Menu_BuildAwaitingApprovalSummary_(waId);
     case "next_steps": return TL_Menu_BuildSuggestedNextSteps_();
+    case "topic_candidates": return TL_Menu_BuildTopicCandidatesSummary_();
     case "draft_replies": return TL_Menu_BuildDraftRepliesSummary_(waId);
     case "waiting_on_others": return TL_Menu_BuildWaitingOnOthersSummary_();
     case "followups": return TL_Menu_BuildFollowupsSummary_();
@@ -2397,6 +2400,30 @@ function TL_Menu_BuildDraftRepliesSummary_(waId) {
       (approvalStatus === "draft" || approvalStatus === "awaiting_approval" || recordClass === "proposal");
   }, TL_MENU.MAX_PENDING_SUMMARY);
   return TL_Menu_attachApprovalPacketHint_(waId, TL_Menu_BuildSummaryBlock_("טיוטות לתגובה", rows, "אין כרגע טיוטות תגובה פתוחות."), "drafts");
+}
+
+function TL_Menu_BuildTopicCandidatesSummary_() {
+  if (typeof TL_Topics_BuildCandidateReviewText_ !== "function") {
+    return TL_Menu_T_(
+      "סקירת מועמדי נושא עוד לא זמינה.",
+      "Topic-candidate review is not available yet."
+    );
+  }
+  const review = String(TL_Topics_BuildCandidateReviewText_() || "").trim();
+  if (!review) {
+    return TL_Menu_T_(
+      "אין כרגע מועמדי נושא פתוחים לקידום.",
+      "There are no open topic candidates to promote right now."
+    );
+  }
+  return [
+    review,
+    "",
+    TL_Menu_T_(
+      "לקידום בפועל השתמש בפונקציית האדמין TL_Topics_PromoteCandidate_(\"topic_slug\").",
+      "To promote one, use the admin function TL_Topics_PromoteCandidate_(\"topic_slug\")."
+    )
+  ].join("\n");
 }
 
 function TL_Menu_attachApprovalPacketHint_(waId, text, mode) {

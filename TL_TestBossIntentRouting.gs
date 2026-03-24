@@ -8,6 +8,7 @@ function TL_TestBossIntentRouting_RunAll() {
   return {
     recognition: TL_TestBossIntentRouting_RecognitionRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
+    topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
     reminders_route: TL_TestBossIntentRouting_ListRemindersRouteRun(),
     out_of_scope: TL_TestBossIntentRouting_OutOfScopeRun()
@@ -90,6 +91,51 @@ function TL_TestBossIntentRouting_ListApprovalsRouteRun() {
   };
   Logger.log("TL_TestBossIntentRouting_ListApprovalsRouteRun: %s", JSON.stringify(output, null, 2));
   return output;
+}
+
+function TL_TestBossIntentRouting_TopicCandidatesRouteRun() {
+  const originalBuilder = typeof TL_Topics_BuildCandidateReviewText_ === "function"
+    ? TL_Topics_BuildCandidateReviewText_
+    : null;
+  try {
+    TL_Topics_BuildCandidateReviewText_ = function() {
+      return "מועמדי נושא לקידום:\n1. topic_documents_needed | count=2";
+    };
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: TL_TestBossIntentRouting_getBossPhone_(),
+      text: "show topic candidates"
+    }, null, {
+      intentFn: function(text) {
+        return {
+          intent: "list_topic_candidates",
+          route: "summary",
+          summary_kind: "topic_candidates",
+          capture_state: "",
+          confidence: 0.97,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: text,
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      }
+    });
+
+    const output = {
+      ok: String(reply || "").indexOf("מועמדי נושא לקידום") !== -1 &&
+        String(reply || "").indexOf("TL_Topics_PromoteCandidate_") !== -1,
+      reply: reply
+    };
+    Logger.log("TL_TestBossIntentRouting_TopicCandidatesRouteRun: %s", JSON.stringify(output, null, 2));
+    return output;
+  } finally {
+    TL_Topics_BuildCandidateReviewText_ = originalBuilder;
+  }
 }
 
 function TL_TestBossIntentRouting_CreateTaskRouteRun() {
