@@ -84,10 +84,19 @@ function TL_ActiveItem_PauseCurrent_(waId, reason) {
 }
 
 function TL_ActiveItem_ResumeLatest_(waId) {
+  return TL_ActiveItem_ResumeByIndex_(waId, 1);
+}
+
+function TL_ActiveItem_ResumeByIndex_(waId, index) {
   const paused = TL_ActiveItem_GetPaused_(waId);
-  if (!paused.length) return { ok: true, resumed: false };
-  const item = paused[0];
-  const rest = paused.slice(1);
+  const safeIndex = Number(index || 1);
+  if (!paused.length || !isFinite(safeIndex) || safeIndex < 1 || safeIndex > paused.length) {
+    return { ok: true, resumed: false };
+  }
+  const item = paused[safeIndex - 1];
+  const rest = paused.filter(function(_, idx) {
+    return idx !== (safeIndex - 1);
+  });
   if (rest.length) {
     PropertiesService.getScriptProperties().setProperty(TL_ActiveItem_pausedKey_(waId), JSON.stringify(rest));
   } else {
@@ -101,7 +110,8 @@ function TL_ActiveItem_ResumeLatest_(waId) {
     ok: true,
     resumed: true,
     item: resumed,
-    paused_count: rest.length
+    paused_count: rest.length,
+    resumed_index: safeIndex
   };
 }
 

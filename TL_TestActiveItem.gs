@@ -3,7 +3,8 @@ function TL_TestActiveItem_RunAll() {
     storage: TL_TestActiveItem_StorageRun(),
     boss_turn_packet: TL_TestActiveItem_BossTurnPacketRun(),
     pause_current: TL_TestActiveItem_PauseCurrentRun(),
-    resume_latest: TL_TestActiveItem_ResumeLatestRun()
+    resume_latest: TL_TestActiveItem_ResumeLatestRun(),
+    resume_by_index: TL_TestActiveItem_ResumeByIndexRun()
   };
 }
 
@@ -121,6 +122,46 @@ function TL_TestActiveItem_ResumeLatestRun() {
         paused.length === 0,
       result: result,
       active: active
+    };
+  } finally {
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
+function TL_TestActiveItem_ResumeByIndexRun() {
+  const waId = "972500001115";
+  try {
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_RESUME_IDX_1",
+      kind: "context_lookup",
+      status: "active",
+      contact_query: "Dana",
+      resolved_contact_name: "Dana Banker"
+    });
+    TL_ActiveItem_PauseCurrent_(waId, "new_intent:show_capabilities");
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_RESUME_IDX_2",
+      kind: "contact_lookup",
+      status: "active",
+      contact_query: "Avi",
+      resolved_contact_name: "Avi Broker"
+    });
+    TL_ActiveItem_PauseCurrent_(waId, "new_intent:list_pending");
+    const result = TL_ActiveItem_ResumeByIndex_(waId, 2);
+    const active = TL_ActiveItem_Get_(waId);
+    const paused = TL_ActiveItem_GetPaused_(waId);
+    return {
+      ok: !!result &&
+        result.resumed === true &&
+        result.resumed_index === 2 &&
+        !!active &&
+        active.item_id === "AI_RESUME_IDX_1" &&
+        paused.length === 1 &&
+        paused[0].item_id === "AI_RESUME_IDX_2",
+      result: result,
+      active: active,
+      paused: paused
     };
   } finally {
     TL_ActiveItem_Clear_(waId);

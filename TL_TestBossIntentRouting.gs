@@ -13,6 +13,8 @@ function TL_TestBossIntentRouting_RunAll() {
     active_item_continuation: TL_TestBossIntentRouting_ActiveItemContinuationRun(),
     active_item_pause_replace: TL_TestBossIntentRouting_ActiveItemPauseReplaceRun(),
     resume_paused_item: TL_TestBossIntentRouting_ResumePausedItemRun(),
+    paused_items_route: TL_TestBossIntentRouting_PausedItemsRouteRun(),
+    resume_paused_item_by_index: TL_TestBossIntentRouting_ResumePausedItemByIndexRun(),
     outbound_draft_continuation: TL_TestBossIntentRouting_OutboundDraftContinuationRun(),
     outbound_recipient_continuation: TL_TestBossIntentRouting_OutboundRecipientContinuationRun(),
     capture_item_continuation: TL_TestBossIntentRouting_CaptureItemContinuationRun(),
@@ -198,6 +200,134 @@ function TL_TestBossIntentRouting_ResumePausedItemRun() {
         String(reply || "").indexOf("הקשר אחרון עבור") !== -1 &&
         !!active &&
         active.item_id === "AI_RESUME_LOOKUP_1" &&
+        active.status === "active",
+      reply: reply,
+      active: active
+    };
+  } finally {
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
+function TL_TestBossIntentRouting_PausedItemsRouteRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  try {
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_PAUSED_SUMMARY_1",
+      kind: "context_lookup",
+      status: "active",
+      contact_query: "Dana",
+      topic_id: "topic_documents_needed",
+      resolved_contact_name: "Dana Banker",
+      resolved_topic_summary: "Missing documents"
+    });
+    TL_ActiveItem_PauseCurrent_(waId, "new_intent:list_pending");
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "show paused items"
+    }, null, {
+      intentFn: function(text) {
+        return {
+          intent: "list_paused_items",
+          route: "summary",
+          summary_kind: "paused_items",
+          capture_state: "",
+          confidence: 0.97,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: text,
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      }
+    });
+
+    return {
+      ok: String(reply || "").indexOf("פריטים מושהים") !== -1 &&
+        String(reply || "").indexOf("Dana Banker") !== -1 &&
+        String(reply || "").indexOf("resume 1") !== -1,
+      reply: reply
+    };
+  } finally {
+    TL_ActiveItem_Clear_(waId);
+    TL_ActiveItem_ClearPaused_(waId);
+  }
+}
+
+function TL_TestBossIntentRouting_ResumePausedItemByIndexRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  try {
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_RESUME_IDX_A",
+      kind: "context_lookup",
+      status: "active",
+      source_text: "show recent messages with Dana about documents",
+      contact_query: "Dana",
+      search_queries: [{ type: "name", value: "Dana" }],
+      topic_query: "documents",
+      topic_id: "topic_documents_needed",
+      resolved_contact_id: "CI_1",
+      resolved_contact_name: "Dana Banker",
+      resolved_topic_summary: "Missing documents"
+    });
+    TL_ActiveItem_PauseCurrent_(waId, "new_intent:list_pending");
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_RESUME_IDX_B",
+      kind: "contact_lookup",
+      status: "active",
+      source_text: "find Avi",
+      contact_query: "Avi",
+      search_queries: [{ type: "name", value: "Avi" }],
+      resolved_contact_id: "CI_2",
+      resolved_contact_name: "Avi Broker"
+    });
+    TL_ActiveItem_PauseCurrent_(waId, "new_intent:list_pending");
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "resume 2"
+    }, null, {
+      resolveContactFn: function(request) {
+        const query = String(request && request.contact_query || "").trim();
+        if (query === "Dana") {
+          return {
+            status: "resolved",
+            contact: {
+              contactId: "CI_1",
+              name: "Dana Banker",
+              phone1: "972501112233",
+              email: "dana@bank.example"
+            },
+            candidates: [],
+            queries: [{ type: "name", value: "Dana" }]
+          };
+        }
+        return {
+          status: "resolved",
+          contact: {
+            contactId: "CI_2",
+            name: "Avi Broker",
+            phone1: "972509998877",
+            email: "avi@broker.example"
+          },
+          candidates: [],
+          queries: [{ type: "name", value: "Avi" }]
+        };
+      },
+      topicLimit: 10
+    });
+
+    const active = TL_ActiveItem_Get_(waId);
+    return {
+      ok: String(reply || "").indexOf("חוזרת למה שהשארנו פתוח") !== -1 &&
+        !!active &&
+        active.item_id === "AI_RESUME_IDX_A" &&
         active.status === "active",
       reply: reply,
       active: active

@@ -18,6 +18,7 @@ const TL_MENU = {
   HELP_TRIGGERS: ["עזרה","help","מה אפשר לעשות","what can i do","what can i say"],
   CAPABILITY_TRIGGERS: ["מה את יכולה לעשות","מה אתה יכול לעשות","מה אפשר לעשות","what can you do","what can i do"],
   RESUME_TRIGGERS: ["continue","resume","continue previous","resume previous","continue previous lookup","back to previous","המשך","להמשיך","תמשיכי","תמשיך","חזרי לקודם","חזור לקודם","חזרי לבדיקה הקודמת","חזור לבדיקה הקודמת"],
+  PAUSED_ITEMS_TRIGGERS: ["show paused items","show paused work","what did we leave open","show parked items","show paused","פריטים מושהים","מה הושהה","מה השארנו פתוח","מה פתוח בהשהיה","הראה פריטים מושהים"],
   COST_TRIGGERS: ["עלות","cost","ai cost","עלות ai","עלות ה-ai","עלות של ai"],
   EXIT_TRIGGERS: ["יציאה","איפוס","בטל","cancel","exit","reset","stop"],
   STATE_KEY_PREFIX: "MENU_STATE_", // + wa_id
@@ -116,6 +117,11 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
   if (TL_MENU.COST_TRIGGERS.some(function(t) { return text === t; }) || TL_Menu_IsAiCostQuery_(rawText)) {
     TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
     return TL_AI_BuildMonthToDateSpendReport_();
+  }
+
+  if (TL_Menu_IsPausedItemsQuery_(rawText)) {
+    TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
+    return TL_Menu_BuildPausedItemsSummary_(bossWaId);
   }
 
   // Check triggers
@@ -389,8 +395,9 @@ function TL_Menu_HandleManageWorkChoice_(waId, choice) {
   if (choice === "8") return TL_Menu_BuildOpenTasksSummary_();
   if (choice === "9") return TL_Menu_BuildBlockedTasksSummary_();
   if (choice === "10") return TL_Menu_BuildTopicCandidatesSummary_(waId);
-  if (choice === "11") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
-  if (choice === "12") return TL_Menu_BuildMenuReply_();
+  if (choice === "11") return TL_Menu_BuildPausedItemsSummary_(waId);
+  if (choice === "12") return TL_Menu_OpenSubmenu_(waId, TL_MENU_STATES.ROOT);
+  if (choice === "13") return TL_Menu_BuildMenuReply_();
   return TL_Menu_BuildManageWorkMenu_();
 }
 
@@ -569,8 +576,9 @@ function TL_Menu_BuildManageWorkMenu_() {
     "8. משימות פתוחות",
     "9. משימות חסומות",
     "10. מועמדי נושא לקידום",
-    "11. חזרה לתפריט קודם",
-    "12. חזרה לתפריט ראשי",
+    "11. פריטים מושהים",
+    "12. חזרה לתפריט קודם",
+    "13. חזרה לתפריט ראשי",
     "0. יציאה / איפוס",
     "שלח את מספר האפשרות שתבחר"
   ]);
@@ -1346,7 +1354,9 @@ function TL_Menu_PauseActiveItemForNewIntent_(waId, intent) {
 
 function TL_Menu_TryResumePausedItem_(waId, rawText, options) {
   if (!TL_Menu_IsResumePausedCommand_(rawText)) return null;
-  if (typeof TL_ActiveItem_ResumeLatest_ !== "function") return null;
+  const resumeIndex = TL_Menu_ParseResumePausedIndex_(rawText);
+  if (resumeIndex > 0 && typeof TL_ActiveItem_ResumeByIndex_ !== "function") return null;
+  if (resumeIndex <= 0 && typeof TL_ActiveItem_ResumeLatest_ !== "function") return null;
   const active = typeof TL_ActiveItem_Get_ === "function" ? TL_ActiveItem_Get_(waId) : null;
   if (active && active.item_id) {
     return TL_Menu_T_(
@@ -1354,7 +1364,9 @@ function TL_Menu_TryResumePausedItem_(waId, rawText, options) {
       "There is already an open lookup. You can continue it or reset first."
     );
   }
-  const resumed = TL_ActiveItem_ResumeLatest_(waId);
+  const resumed = resumeIndex > 0
+    ? TL_ActiveItem_ResumeByIndex_(waId, resumeIndex)
+    : TL_ActiveItem_ResumeLatest_(waId);
   if (!resumed || !resumed.resumed || !resumed.item) {
     return TL_Menu_T_(
       "אין כרגע פריט מושהה להמשיך ממנו.",
@@ -1399,7 +1411,22 @@ function TL_Menu_TryResumePausedItem_(waId, rawText, options) {
 function TL_Menu_IsResumePausedCommand_(text) {
   const normalized = String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
   if (!normalized) return false;
+  if (/^(?:resume|continue|המשך|להמשיך|תמשיך|תמשיכי)\s+\d{1,2}$/.test(normalized)) return true;
   return TL_MENU.RESUME_TRIGGERS.some(function(trigger) {
+    return normalized === String(trigger || "").trim().toLowerCase();
+  });
+}
+
+function TL_Menu_ParseResumePausedIndex_(text) {
+  const normalized = String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const match = normalized.match(/^(?:resume|continue|המשך|להמשיך|תמשיך|תמשיכי)\s+(\d{1,2})$/);
+  return match && match[1] ? Number(match[1]) : 0;
+}
+
+function TL_Menu_IsPausedItemsQuery_(text) {
+  const normalized = String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized) return false;
+  return TL_MENU.PAUSED_ITEMS_TRIGGERS.some(function(trigger) {
     return normalized === String(trigger || "").trim().toLowerCase();
   });
 }
@@ -1413,6 +1440,7 @@ function TL_Menu_RenderSummaryKind_(summaryKind, waId) {
     case "approvals": return TL_Menu_BuildAwaitingApprovalSummary_(waId);
     case "next_steps": return TL_Menu_BuildSuggestedNextSteps_();
     case "topic_candidates": return TL_Menu_BuildTopicCandidatesSummary_(waId);
+    case "paused_items": return TL_Menu_BuildPausedItemsSummary_(waId);
     case "draft_replies": return TL_Menu_BuildDraftRepliesSummary_(waId);
     case "waiting_on_others": return TL_Menu_BuildWaitingOnOthersSummary_();
     case "followups": return TL_Menu_BuildFollowupsSummary_();
@@ -3165,6 +3193,54 @@ function TL_Menu_BuildDraftRepliesSummary_(waId) {
       (approvalStatus === "draft" || approvalStatus === "awaiting_approval" || recordClass === "proposal");
   }, TL_MENU.MAX_PENDING_SUMMARY);
   return TL_Menu_attachApprovalPacketHint_(waId, TL_Menu_BuildSummaryBlock_("טיוטות לתגובה", rows, "אין כרגע טיוטות תגובה פתוחות."), "drafts");
+}
+
+function TL_Menu_BuildPausedItemsSummary_(waId) {
+  const paused = typeof TL_ActiveItem_GetPaused_ === "function"
+    ? TL_ActiveItem_GetPaused_(waId)
+    : [];
+  if (!paused.length) {
+    return TL_Menu_T_(
+      "אין כרגע פריטים מושהים.",
+      "There are no paused items right now."
+    );
+  }
+  const lines = [
+    TL_Menu_T_("פריטים מושהים", "Paused items")
+  ];
+  paused.slice(0, 5).forEach(function(item, idx) {
+    lines.push(String(idx + 1) + ". " + TL_Menu_BuildPausedItemLabel_(item));
+  });
+  lines.push("");
+  lines.push(TL_Menu_T_(
+    "כדי לחזור לאחד מהם, שלח: המשך 2 או resume 2",
+    "To resume one, send: resume 2"
+  ));
+  return lines.join("\n");
+}
+
+function TL_Menu_BuildPausedItemLabel_(item) {
+  const kind = String(item && item.kind || "").trim().toLowerCase();
+  const contact = String(item && (item.resolved_contact_name || item.contact_query) || "").trim();
+  const topic = String(item && (item.resolved_topic_summary || item.topic_id || item.topic_query) || "").trim();
+  const draft = String(item && item.source_text || "").trim();
+  if (kind === "outbound_draft") {
+    return [contact || TL_Menu_T_("טיוטה", "Draft"), TL_Menu_T_("טיוטת שליחה", "Outbound draft")].filter(Boolean).join(" | ");
+  }
+  if (kind === "capture_item") {
+    const captureKind = String(item && item.capture_kind || "").trim().toLowerCase();
+    const due = String(item && (item.due_label || item.task_due) || "").trim();
+    return [
+      captureKind === "reminder" ? TL_Menu_T_("תזכורת", "Reminder") : TL_Menu_T_("משימה", "Task"),
+      draft || contact,
+      due
+    ].filter(Boolean).join(" | ");
+  }
+  return [
+    contact,
+    topic,
+    draft
+  ].filter(Boolean).join(" | ") || TL_Menu_T_("פריט מושהה", "Paused item");
 }
 
 function TL_Menu_BuildTopicCandidatesSummary_(waId) {
