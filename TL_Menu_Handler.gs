@@ -158,7 +158,7 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
   }
 
   const intent = TL_Menu_PopCachedIntent_(bossWaId, rawText) || TL_Menu_RecognizeBossIntent_(rawText, options);
-  const routed = TL_Menu_HandleBossIntent_(ev, inboxRow, intent);
+  const routed = TL_Menu_HandleBossIntent_(ev, inboxRow, intent, options);
   if (routed) return routed;
 
   // Unknown free-form text falls through without a forced menu reply.
@@ -1061,7 +1061,7 @@ function TL_Menu_BossIntentCacheKey_(waId, text) {
   return "MENU_INTENT_" + bossWaId + "_" + normalized.slice(0, 120);
 }
 
-function TL_Menu_HandleBossIntent_(ev, inboxRow, intent) {
+function TL_Menu_HandleBossIntent_(ev, inboxRow, intent, options) {
   const bossWaId = String(ev && ev.from ? ev.from : "").trim();
   const normalized = TL_AI_normalizeBossIntent_(intent || {});
   if (!normalized || normalized.intent === "unknown") return null;
@@ -1081,7 +1081,7 @@ function TL_Menu_HandleBossIntent_(ev, inboxRow, intent) {
 
   if (normalized.route === "summary") {
     TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
-    return TL_Menu_HandleSummaryIntent_(normalized, bossWaId, ev);
+    return TL_Menu_HandleSummaryIntent_(normalized, bossWaId, ev, options);
   }
 
   if (normalized.route === "capture") {
@@ -1157,6 +1157,9 @@ function TL_Menu_OpenMenuTarget_(waId, intent) {
 function TL_Menu_HandleSummaryIntent_(intent, waId, ev, options) {
   const analysis = TL_Menu_AnalyzeReadOnlySummaryIntent_(intent, waId, ev, options);
   const summaryKind = String(analysis && analysis.summary_kind || intent && intent.summary_kind || "").trim().toLowerCase();
+  if (summaryKind === "contact_lookup") {
+    return TL_Menu_BuildContactLookupSummary_(intent, ev, analysis, options);
+  }
   const rendered = TL_Menu_RenderSummaryKind_(summaryKind, waId);
   const preamble = String(analysis && analysis.reply_preamble || "").trim();
   if (preamble && rendered) return [preamble, "", rendered].join("\n\n");
@@ -1237,6 +1240,79 @@ function TL_Menu_AnalyzeReadOnlySummaryIntent_(intent, waId, ev, options) {
     }
     return fallback;
   }
+}
+
+function TL_Menu_BuildContactLookupSummary_(intent, ev, analysis, options) {
+  const opts = options || {};
+  const sourceText = String(ev && ev.text || intent && intent.parameters && intent.parameters.query || "").trim();
+  const lookup = typeof TL_AI_ExtractBossContactLookup_ === "function"
+    ? TL_AI_ExtractBossContactLookup_(sourceText, {
+        contactLookupFn: opts.contactLookupFn
+      })
+    : {
+        contact_query: sourceText,
+        search_queries: []
+      };
+  const resolveFn = opts.resolveContactFn || TL_Contacts_ResolveRequest_;
+  if (typeof resolveFn !== "function") {
+    return TL_Menu_T_(
+      "חיפוש אנשי קשר לא זמין כרגע.",
+      "Contact lookup is not available right now."
+    );
+  }
+
+  const resolved = resolveFn({
+    rawText: sourceText,
+    query: String(lookup.contact_query || sourceText).trim(),
+    contact_query: String(lookup.contact_query || "").trim(),
+    search_queries: Array.isArray(lookup.search_queries) ? lookup.search_queries.slice() : []
+  }, { channel: "" }, opts.contacts || null);
+
+  const preamble = String(
+    lookup.reply_preamble ||
+    analysis && analysis.reply_preamble ||
+    TL_Menu_T_("בודקת את איש הקשר שביקשת.", "Checking the contact you asked for.")
+  ).trim();
+  const status = String(resolved && resolved.status || "").trim().toLowerCase();
+  const candidates = Array.isArray(resolved && resolved.candidates) ? resolved.candidates : [];
+  const queries = Array.isArray(resolved && resolved.queries) ? resolved.queries : [];
+
+  if (status === "resolved" && resolved.contact) {
+    const contact = resolved.contact;
+    const bits = [
+      String(contact.name || "").trim(),
+      String(contact.org || "").trim(),
+      String(contact.role || "").trim(),
+      String(contact.phone1 || contact.phone2 || "").trim(),
+      String(contact.email || "").trim()
+    ].filter(Boolean);
+    return [
+      preamble,
+      "",
+      TL_Menu_T_("מצאתי התאמה אחת:", "I found one match:"),
+      bits.join(" | ")
+    ].join("\n");
+  }
+
+  if (status === "ambiguous" && candidates.length) {
+    return [
+      preamble,
+      "",
+      TL_Menu_T_("מצאתי כמה התאמות אפשריות:", "I found a few possible matches:"),
+      candidates.slice(0, 3).map(function(item, index) {
+        return (index + 1) + ". " + TL_Menu_DescribeContactCandidate_(item);
+      }).join("\n")
+    ].join("\n");
+  }
+
+  return [
+    preamble,
+    "",
+    TL_Menu_T_("לא מצאתי התאמה ברורה לאיש הקשר הזה.", "I couldn't find a clear match for that contact."),
+    queries.length ? (TL_Menu_T_("ניסיתי לחפש לפי: ", "I searched using: ") + queries.map(function(item) {
+      return String(item.type || "") + "=" + String(item.value || "");
+    }).join(", ")) : ""
+  ].filter(Boolean).join("\n");
 }
 
 function TL_Menu_IsAiCostQuery_(text) {

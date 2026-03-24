@@ -8,12 +8,74 @@ function TL_TestBossIntentRouting_RunAll() {
   return {
     recognition: TL_TestBossIntentRouting_RecognitionRun(),
     capabilities_route: TL_TestBossIntentRouting_CapabilitiesRouteRun(),
+    contact_lookup_route: TL_TestBossIntentRouting_ContactLookupRouteRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
     topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
     reminders_route: TL_TestBossIntentRouting_ListRemindersRouteRun(),
     out_of_scope: TL_TestBossIntentRouting_OutOfScopeRun()
   };
+}
+
+function TL_TestBossIntentRouting_ContactLookupRouteRun() {
+  const reply = TL_Menu_HandleBossMessage_({
+    from: TL_TestBossIntentRouting_getBossPhone_(),
+    text: "find Dana banker"
+  }, null, {
+    intentFn: function(text) {
+      return {
+        intent: "find_contact",
+        route: "summary",
+        summary_kind: "contact_lookup",
+        capture_state: "",
+        confidence: 0.95,
+        needs_clarification: "false",
+        reply: "",
+        parameters: {
+          query: text,
+          capture_kind: "",
+          capture_mode: "",
+          time_hint: "",
+          target: "Dana"
+        }
+      };
+    },
+    contactLookupFn: function() {
+      return {
+        contact_query: "Dana",
+        search_queries: [
+          { type: "name", value: "Dana" },
+          { type: "org", value: "bank" }
+        ],
+        reply_preamble: "בודקת את איש הקשר שביקשת."
+      };
+    },
+    resolveContactFn: function() {
+      return {
+        status: "resolved",
+        contact: {
+          name: "Dana Banker",
+          org: "Leumi",
+          role: "Banker",
+          phone1: "972501112233",
+          email: "dana@bank.example"
+        },
+        candidates: [],
+        queries: [
+          { type: "name", value: "Dana" },
+          { type: "org", value: "bank" }
+        ]
+      };
+    }
+  });
+
+  const output = {
+    ok: String(reply || "").indexOf("מצאתי התאמה אחת") !== -1 &&
+      String(reply || "").indexOf("Dana Banker") !== -1,
+    reply: reply
+  };
+  Logger.log("TL_TestBossIntentRouting_ContactLookupRouteRun: %s", JSON.stringify(output, null, 2));
+  return output;
 }
 
 function TL_TestBossIntentRouting_CapabilitiesRouteRun() {
