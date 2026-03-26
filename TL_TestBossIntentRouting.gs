@@ -37,6 +37,518 @@ function TL_TestBossIntentRouting_RunAll() {
   };
 }
 
+function TL_TestBossMenuContract_RunAll() {
+  return {
+    cold_start_menu: TL_TestBossMenuContract_ColdStartMenuRun(),
+    non_boss_ignored: TL_TestBossMenuContract_NonBossIgnoredRun(),
+    reply_category_filters: TL_TestBossMenuContract_ReplyCategoryFiltersRun(),
+    opportunity_scoring: TL_TestBossMenuContract_OpportunityScoringRun(),
+    opportunity_draft_copy_ready: TL_TestBossMenuContract_OpportunityDraftCopyReadyRun(),
+    opportunity_channel_switch: TL_TestBossMenuContract_OpportunityChannelSwitchRun(),
+    enrich_crm_numeric_precedence: TL_TestBossMenuContract_EnrichCrmNumericPrecedenceRun(),
+    enrich_crm_candidate_selection: TL_TestBossMenuContract_EnrichCrmCandidateSelectionRun(),
+    menu_pauses_active_item: TL_TestBossMenuContract_MenuPausesActiveItemRun(),
+    resume_open_packet: TL_TestBossMenuContract_ResumeOpenPacketRun(),
+    explicit_edit_required: TL_TestBossMenuContract_ExplicitEditRequiredRun(),
+    opportunities_manual_send: TL_TestBossMenuContract_OpportunitiesManualSendRun(),
+    ui_language_follows_settings: TL_TestBossMenuContract_UiLanguageFollowsSettingsRun()
+  };
+}
+
+function TL_TestBossMenuContract_ColdStartMenuRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ResetSession_(waId);
+  try {
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "hi there"
+    }, null, {
+      intentFn: function() {
+        return {
+          intent: "find_context",
+          route: "summary",
+          summary_kind: "context_lookup",
+          capture_state: "",
+          confidence: 0.99,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: "hi there",
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      }
+    });
+    return {
+      ok: String(reply || "").indexOf("DealWise") !== -1 &&
+        String(reply || "").indexOf("1. 💬 Reply") !== -1 &&
+        String(reply || "").indexOf("4. ❓ Help") !== -1,
+      reply: reply
+    };
+  } finally {
+    TL_Menu_ResetSession_(waId);
+  }
+}
+
+function TL_TestBossMenuContract_NonBossIgnoredRun() {
+  const bossWaId = TL_TestBossIntentRouting_getBossPhone_();
+  const nonBossWaId = "972500001234";
+  TL_Menu_ResetSession_(bossWaId);
+  return {
+    ok: TL_Menu_ShouldHandleText_(nonBossWaId, "hello") === false &&
+      TL_Menu_ShouldHandleText_(nonBossWaId, "menu") === false,
+    bossWaId: bossWaId,
+    nonBossWaId: nonBossWaId
+  };
+}
+
+function TL_TestBossMenuContract_ReplyCategoryFiltersRun() {
+  const replyWhatsApp = { channel: "whatsapp", captureKind: "", actionKind: "send_whatsapp" };
+  const replyEmail = { channel: "email", captureKind: "", actionKind: "send_email" };
+  const outboundDraft = { channel: "whatsapp", captureKind: "whatsapp", actionKind: "send_whatsapp" };
+  const reminder = { channel: "whatsapp", captureKind: "reminder", actionKind: "approve_reminder" };
+  return {
+    ok: TL_Menu_MatchesApprovalCategory_(replyWhatsApp, "reply") === true &&
+      TL_Menu_MatchesApprovalCategory_(replyEmail, "reply") === true &&
+      TL_Menu_MatchesApprovalCategory_(outboundDraft, "reply") === false &&
+      TL_Menu_MatchesApprovalCategory_(reminder, "reply") === false,
+    replyWhatsApp: TL_Menu_MatchesApprovalCategory_(replyWhatsApp, "reply"),
+    replyEmail: TL_Menu_MatchesApprovalCategory_(replyEmail, "reply"),
+    outboundDraft: TL_Menu_MatchesApprovalCategory_(outboundDraft, "reply"),
+    reminder: TL_Menu_MatchesApprovalCategory_(reminder, "reply")
+  };
+}
+
+function TL_TestBossMenuContract_OpportunityScoringRun() {
+  const hot = {
+    contactId: "CRM_HOT",
+    name: "Dana",
+    phone1: "972501111111",
+    currentState: "Interested in the quote.",
+    nextAction: "Follow up about pricing.",
+    businessSummary: "Asked twice about pricing.",
+    lastContactAt: "2026-03-20T10:00:00Z"
+  };
+  const cold = {
+    contactId: "CRM_COLD",
+    name: "Avi",
+    phone1: "972502222222",
+    currentState: "",
+    nextAction: "",
+    businessSummary: "",
+    lastContactAt: "2026-03-25T10:00:00Z"
+  };
+  const hotScore = TL_Menu_ScoreOpportunity_(hot, new Date("2026-03-26T10:00:00Z"));
+  const coldScore = TL_Menu_ScoreOpportunity_(cold, new Date("2026-03-26T10:00:00Z"));
+  return {
+    ok: hotScore.score > coldScore.score &&
+      hotScore.score > 0 &&
+      String(hotScore.reason || "").length > 0,
+    hotScore: hotScore,
+    coldScore: coldScore
+  };
+}
+
+function TL_TestBossMenuContract_OpportunityDraftCopyReadyRun() {
+  const englishDraft = TL_Menu_BuildOpportunityDraft_({
+    name: "Noam",
+    currentState: "Interested in the quote.",
+    nextAction: "Follow up on pricing.",
+    businessSummary: "Asked about pricing."
+  }, {}, "whatsapp", "English");
+  const hebrewDraft = TL_Menu_BuildOpportunityDraft_({
+    name: "דוד",
+    currentState: "מעוניין להתקדם",
+    nextAction: "לחזור לגבי הצעת המחיר",
+    businessSummary: "ביקש הצעת מחיר"
+  }, {}, "email", "Hebrew");
+  return {
+    ok: String(englishDraft || "").indexOf("Hi Noam") !== -1 &&
+      String(englishDraft || "").indexOf("just checking in") !== -1 &&
+      String(hebrewDraft || "").indexOf("Subject: המשך לגבי") !== -1 &&
+      String(hebrewDraft || "").indexOf("רק רציתי לבדוק איתך") !== -1,
+    englishDraft: englishDraft,
+    hebrewDraft: hebrewDraft
+  };
+}
+
+function TL_TestBossMenuContract_OpportunityChannelSwitchRun() {
+  const items = TL_Menu_BuildOpportunityPacketItems_([{
+    contact: {
+      contactId: "CRM_OPP_1",
+      name: "Dana",
+      phone1: "972501111111",
+      email: "dana@example.com",
+      currentState: "Interested in the quote.",
+      nextAction: "Follow up on pricing."
+    },
+    channel: "whatsapp",
+    reason: "There is a recommended next action.",
+    context: {},
+    replyLanguage: "English",
+    draft: "Hi Dana just checking in about your last conversation."
+  }]);
+  const switched = TL_Menu_OpportunitySwitchChannel_(items[0], "email");
+  return {
+    ok: switched.changed === true &&
+      String(switched.item.currentChannel || "") === "email" &&
+      String(switched.item.recipientDestination || "") === "dana@example.com" &&
+      String(switched.item.proposal || "").indexOf("Subject:") === 0,
+    item: switched.item
+  };
+}
+
+function TL_TestBossMenuContract_EnrichCrmNumericPrecedenceRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ResetSession_(waId);
+  try {
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_ENRICH_LOOKUP_1",
+      kind: "contact_lookup",
+      capture_kind: "contact_enrichment",
+      status: "active",
+      row_number: 12,
+      source_text: "add a note about the contractor",
+      candidate_contacts: [{
+        contactId: "CRM_1",
+        name: "Moshe Contractor",
+        phone1: "972501111111"
+      }]
+    });
+    return {
+      ok: TL_Menu_ShouldPreferActiveItemNumericReply_(waId, "1") === true,
+      prefer: TL_Menu_ShouldPreferActiveItemNumericReply_(waId, "1")
+    };
+  } finally {
+    TL_Menu_ResetSession_(waId);
+  }
+}
+
+function TL_TestBossMenuContract_EnrichCrmCandidateSelectionRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ResetSession_(waId);
+  try {
+    const reply = TL_Menu_ContinueContactEnrichmentLookup_(waId, {
+      item_id: "AI_ENRICH_LOOKUP_2",
+      kind: "contact_lookup",
+      capture_kind: "contact_enrichment",
+      row_number: 55,
+      source_text: "add that he is price sensitive",
+      contact_query: "the contractor",
+      enrichment_note_type: "business",
+      enrichment_note_text: "He is price sensitive.",
+      candidate_contacts: [{
+        contactId: "CRM_1",
+        name: "Moshe Contractor",
+        phone1: "972501111111",
+        email: "moshe@example.com"
+      }, {
+        contactId: "CRM_2",
+        name: "Yael Designer",
+        phone1: "972502222222",
+        email: "yael@example.com"
+      }]
+    }, "2", {
+      getInboxRowFn: function(rowNumber) {
+        return {
+          values: {
+            phone_number_id: "PNID_1",
+            row_number: rowNumber
+          }
+        };
+      },
+      annotateCaptureFn: function() {
+        return true;
+      },
+      createContactEnrichmentProposalFn: function(bossId, rowNumber, sourceValues, captureText, extraction, contact) {
+        return {
+          sent: false,
+          reply: [
+            bossId,
+            rowNumber,
+            captureText,
+            extraction.note_text,
+            contact.contactId,
+            contact.name,
+            sourceValues.phone_number_id
+          ].join("|")
+        };
+      }
+    });
+    return {
+      ok: String(reply || "") === [
+        waId,
+        55,
+        "add that he is price sensitive",
+        "He is price sensitive.",
+        "CRM_2",
+        "Yael Designer",
+        "PNID_1"
+      ].join("|"),
+      reply: reply
+    };
+  } finally {
+    TL_Menu_ResetSession_(waId);
+  }
+}
+
+function TL_TestBossMenuContract_MenuPausesActiveItemRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ResetSession_(waId);
+  try {
+    TL_ActiveItem_Set_(waId, {
+      item_id: "AI_MENU_PAUSE_1",
+      kind: "context_lookup",
+      status: "active",
+      source_text: "show recent messages with Dana",
+      contact_query: "Dana",
+      resolved_contact_name: "Dana Banker"
+    });
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "menu"
+    }, null);
+    const active = TL_ActiveItem_Get_(waId);
+    const paused = TL_ActiveItem_GetPaused_(waId);
+    return {
+      ok: String(reply || "").indexOf("DealWise") !== -1 &&
+        String(reply || "").indexOf("1. 💬 Reply") !== -1 &&
+        !active &&
+        paused.length >= 1 &&
+        String(paused[0].item_id || "") === "AI_MENU_PAUSE_1" &&
+        String(paused[0].pause_reason || "") === "menu_command",
+      reply: reply,
+      paused: paused
+    };
+  } finally {
+    TL_Menu_ResetSession_(waId);
+  }
+}
+
+function TL_TestBossMenuContract_ResumeOpenPacketRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ResetSession_(waId);
+  try {
+    const row = TL_TestBossIntentRouting_seedRow_({
+      root_id: "root_menu_resume_packet_" + Utilities.getUuid(),
+      record_class: "proposal",
+      approval_required: "true",
+      approval_status: "awaiting_approval",
+      execution_status: "proposal_ready",
+      task_status: "proposal_ready",
+      ai_summary: "Reply to Dana about the document.",
+      ai_proposal: "Dana, I will send the document shortly."
+    });
+    TL_Menu_StoreDecisionPacket_(waId, "capture", [{
+      key: "packet_item_resume",
+      rowNumber: row.rowNumber,
+      recordId: "packet_item_resume",
+      rootId: row.rootId,
+      recordClass: "proposal",
+      summary: "Reply to Dana about the document.",
+      proposal: "Dana, I will send the document shortly.",
+      sender: TL_TestBossIntentRouting_getDisplayPhone_(),
+      senderLabel: "DealWise",
+      receiver: "972501112233",
+      channel: "whatsapp",
+      channelLabel: "whatsapp",
+      messageType: "text",
+      subject: "",
+      topicId: "",
+      topicSummary: "",
+      rawSnippet: "Need to reply to Dana.",
+      suggestedAction: "reply_now",
+      captureKind: "whatsapp",
+      captureTitle: "",
+      contactId: "CI_1",
+      approvalStatus: "awaiting_approval",
+      executionStatus: "proposal_ready",
+      taskStatus: "proposal_ready",
+      similarRepliesUsed: 0,
+      historyDepth: 0,
+      duePreview: "",
+      dueLabel: "",
+      isUrgent: false,
+      isHigh: false,
+      actionKind: "send_whatsapp",
+      recipientQuery: "Dana",
+      recipientName: "Dana Banker",
+      recipientDestination: "972501112233",
+      resolutionStatus: "resolved"
+    }]);
+    TL_Menu_BuildDecisionPacketOneByOneReply_(TL_Menu_GetDecisionPacket_(waId));
+
+    const menuReply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "menu"
+    }, null);
+    const resumeReply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "resume"
+    }, null);
+    return {
+      ok: String(menuReply || "").indexOf("DealWise") !== -1 &&
+        String(menuReply || "").indexOf("1. 💬 Reply") !== -1 &&
+        String(resumeReply || "").indexOf("חוזרת לזרימה הפתוחה") !== -1 &&
+        String(resumeReply || "").indexOf("סקירה אחד-אחד") !== -1,
+      menuReply: menuReply,
+      resumeReply: resumeReply
+    };
+  } finally {
+    TL_Menu_ResetSession_(waId);
+  }
+}
+
+function TL_TestBossMenuContract_ExplicitEditRequiredRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ResetSession_(waId);
+  try {
+    const row = TL_TestBossIntentRouting_seedRow_({
+      root_id: "root_menu_explicit_edit_" + Utilities.getUuid(),
+      record_class: "proposal",
+      approval_required: "true",
+      approval_status: "awaiting_approval",
+      execution_status: "proposal_ready",
+      task_status: "proposal_ready",
+      ai_summary: "Reply to Dana about the document.",
+      ai_proposal: "Dana, I will send the document shortly."
+    });
+    TL_Menu_StoreDecisionPacket_(waId, "capture", [{
+      key: "packet_item_edit",
+      rowNumber: row.rowNumber,
+      recordId: "packet_item_edit",
+      rootId: row.rootId,
+      recordClass: "proposal",
+      summary: "Reply to Dana about the document.",
+      proposal: "Dana, I will send the document shortly.",
+      sender: TL_TestBossIntentRouting_getDisplayPhone_(),
+      senderLabel: "DealWise",
+      receiver: "972501112233",
+      channel: "whatsapp",
+      channelLabel: "whatsapp",
+      messageType: "text",
+      subject: "",
+      topicId: "",
+      topicSummary: "",
+      rawSnippet: "Need to reply to Dana.",
+      suggestedAction: "reply_now",
+      captureKind: "whatsapp",
+      captureTitle: "",
+      contactId: "CI_1",
+      approvalStatus: "awaiting_approval",
+      executionStatus: "proposal_ready",
+      taskStatus: "proposal_ready",
+      similarRepliesUsed: 0,
+      historyDepth: 0,
+      duePreview: "",
+      dueLabel: "",
+      isUrgent: false,
+      isHigh: false,
+      actionKind: "send_whatsapp",
+      recipientQuery: "Dana",
+      recipientName: "Dana Banker",
+      recipientDestination: "972501112233",
+      resolutionStatus: "resolved"
+    }]);
+    TL_Menu_BuildDecisionPacketOneByOneReply_(TL_Menu_GetDecisionPacket_(waId));
+
+    const reply = TL_Menu_HandleBossMessage_({
+      from: waId,
+      text: "Dana, make it 15 minutes."
+    }, null, {
+      intentFn: function() {
+        return {
+          intent: "unknown",
+          route: "none",
+          summary_kind: "none",
+          capture_state: "",
+          confidence: 0.2,
+          needs_clarification: "false",
+          reply: "",
+          parameters: {
+            query: "",
+            capture_kind: "",
+            capture_mode: "",
+            time_hint: "",
+            target: ""
+          }
+        };
+      }
+    });
+    const packet = TL_Menu_GetDecisionPacket_(waId);
+    const current = packet && packet.items ? packet.items[0] : null;
+    return {
+      ok: String(reply || "").indexOf("סקירה אחד-אחד") !== -1 &&
+        !!current &&
+        String(current.proposal || "") === "Dana, I will send the document shortly.",
+      reply: reply,
+      current: current
+    };
+  } finally {
+    TL_Menu_ResetSession_(waId);
+  }
+}
+
+function TL_TestBossMenuContract_OpportunitiesManualSendRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  TL_Menu_ResetSession_(waId);
+  try {
+    const items = TL_Menu_BuildOpportunityPacketItems_([{
+      contact: {
+        contactId: "CRM_OPP_MANUAL_1",
+        name: "Dana",
+        phone1: "972501111111",
+        email: "dana@example.com",
+        currentState: "Interested in the quote.",
+        nextAction: "Follow up on pricing."
+      },
+      channel: "whatsapp",
+      reason: "There is a recommended next action in the CRM.",
+      context: {},
+      replyLanguage: "English",
+      draft: "Hi Dana just checking in about your last conversation."
+    }]);
+    const packet = {
+      kind: "opportunity",
+      stage: "one_by_one",
+      cursor: 0,
+      items: items
+    };
+    const reply = [
+      TL_Menu_T_("הזדמנויות", "Opportunities"),
+      TL_Menu_T_(
+        "במצב הזה אני מציגה הזדמנות אחת בכל פעם. העתיקו את הנוסח, שלחו ידנית מהערוץ העסקי שלכם, ואז עברו להזדמנות הבאה.",
+        "In this mode I show one opportunity at a time. Copy the draft, send it manually from your business channel, then move to the next opportunity."
+      ),
+      TL_Menu_BuildOpportunityPacketReply_(packet, items[0], "")
+    ].filter(Boolean).join("\n\n");
+    return {
+      ok: String(reply || "").indexOf("העתיקו") !== -1 &&
+        String(reply || "").indexOf("ידנית") !== -1 &&
+        String(reply || "").indexOf("1. ") !== -1,
+      reply: reply
+    };
+  } finally {
+    TL_Menu_ResetSession_(waId);
+  }
+}
+
+function TL_TestBossMenuContract_UiLanguageFollowsSettingsRun() {
+  const waId = TL_TestBossIntentRouting_getBossPhone_();
+  const expected = TL_Language_BossUiLanguage_();
+  const englishProbe = TL_Menu_DetectUiLanguage_("hello", waId);
+  const hebrewProbe = TL_Menu_DetectUiLanguage_("שלום", waId);
+  return {
+    ok: englishProbe === expected && hebrewProbe === expected,
+    expected: expected,
+    englishProbe: englishProbe,
+    hebrewProbe: hebrewProbe
+  };
+}
+
 function TL_TestBossIntentRouting_ActiveItemContinuationRun() {
   const waId = TL_TestBossIntentRouting_getBossPhone_();
   try {
@@ -153,7 +665,8 @@ function TL_TestBossIntentRouting_ActiveItemPauseReplaceRun() {
     const active = TL_ActiveItem_Get_(waId);
     const paused = TL_ActiveItem_GetPaused_(waId);
     return {
-      ok: String(reply || "").indexOf("מה אני יכולה לעשות עבורך") !== -1 &&
+      ok: String(reply || "").indexOf("עזרה") !== -1 &&
+        String(reply || "").indexOf("הצג הזדמנויות עם נוסח מוכן להעתקה") !== -1 &&
         !active &&
         paused.length >= 1 &&
         paused[0].item_id === "AI_CONT_2" &&
@@ -1494,8 +2007,8 @@ function TL_TestBossIntentRouting_CapabilitiesRouteRun() {
   });
 
   const output = {
-    ok: String(reply || "").indexOf("מה אני יכולה לעשות עבורך") !== -1 &&
-      String(reply || "").indexOf("ניהול משימות") !== -1,
+    ok: String(reply || "").indexOf("עזרה") !== -1 &&
+      String(reply || "").indexOf("הצג הזדמנויות עם נוסח מוכן להעתקה") !== -1,
     reply: reply
   };
   Logger.log("TL_TestBossIntentRouting_CapabilitiesRouteRun: %s", JSON.stringify(output, null, 2));

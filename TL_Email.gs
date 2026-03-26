@@ -915,15 +915,24 @@ function TL_Email_SendApproved(opts) {
       lastAction: "EMAIL_SEND",
       lastActionAt: sentAtIso
     });
-    TL_Email_appendInboxVersion_(item.rowNumber, {
-      approval_required: "true",
-      approval_status: "approved",
-      execution_status: dryRun ? "dry_run_sent" : "sent",
-      raw_payload_ref: sentPayload,
-      notes: TL_Email_appendNote_(TL_Orchestrator_value_(item.values, "notes"), "email_sent")
-    }, dryRun ? "email_send_dry_run" : "email_send");
-    result.sent++;
-  }
+      TL_Email_appendInboxVersion_(item.rowNumber, {
+        approval_required: "true",
+        approval_status: "approved",
+        execution_status: dryRun ? "dry_run_sent" : "sent",
+        raw_payload_ref: sentPayload,
+        notes: TL_Email_appendNote_(TL_Orchestrator_value_(item.values, "notes"), "email_sent")
+      }, dryRun ? "email_send_dry_run" : "email_send");
+      if (typeof TL_Contacts_ApplyOutboundWriteback_ === "function") {
+        TL_Contacts_ApplyOutboundWriteback_(String(snapshot.payload.contactId || snapshot.contactId || to).trim(), {
+          display_name: String(snapshot.payload.contactName || "").trim(),
+          email: to,
+          summary: String(approval.summary || payload.subject || subject).trim(),
+          outbound_text: body,
+          last_contact_at: sentAtIso
+        });
+      }
+      result.sent++;
+    }
 
   TL_Email_logExecution_("TL_Email_SendApproved", result);
   return result;

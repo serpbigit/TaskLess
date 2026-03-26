@@ -119,6 +119,22 @@ function TL_ActiveItem_normalize_(waId, item) {
   const nowIso = new Date().toISOString();
   const safe = item && typeof item === "object" ? item : {};
   const existingOpenedAt = String(safe.opened_at || "").trim();
+  const candidateContacts = Array.isArray(safe.candidate_contacts) ? safe.candidate_contacts.slice(0, 5).map(function(contact) {
+    const row = contact && typeof contact === "object" ? contact : {};
+    return {
+      contactId: String(row.contactId || row.crmId || row.contact_id || "").trim(),
+      crmId: String(row.crmId || row.contactId || row.contact_id || "").trim(),
+      name: String(row.name || row.displayName || "").trim(),
+      displayName: String(row.displayName || row.name || "").trim(),
+      phone1: String(row.phone1 || "").trim(),
+      phone2: String(row.phone2 || "").trim(),
+      email: String(row.email || "").trim(),
+      org: String(row.org || "").trim(),
+      role: String(row.role || "").trim()
+    };
+  }).filter(function(contact) {
+    return String(contact.contactId || "").trim() || String(contact.name || "").trim();
+  }) : [];
   return {
     item_id: String(safe.item_id || ("AI_" + Utilities.getUuid())).trim(),
     wa_id: String(waId || safe.wa_id || "").trim(),
@@ -141,7 +157,12 @@ function TL_ActiveItem_normalize_(waId, item) {
     recipient_destination: String(safe.recipient_destination || "").trim(),
     resolution_status: String(safe.resolution_status || "").trim().toLowerCase(),
     task_due: String(safe.task_due || "").trim(),
-    due_label: String(safe.due_label || "").trim()
+    due_label: String(safe.due_label || "").trim(),
+    candidate_contacts: candidateContacts,
+    enrichment_note_type: String(safe.enrichment_note_type || "").trim().toLowerCase(),
+    enrichment_note_text: String(safe.enrichment_note_text || "").trim(),
+    enrichment_summary: String(safe.enrichment_summary || "").trim(),
+    enrichment_proposal: String(safe.enrichment_proposal || "").trim()
   };
 }
 

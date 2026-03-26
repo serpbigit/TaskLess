@@ -23,7 +23,11 @@ const TL_SCHEMA = {
   ],
   CONTACTS_HEADERS: [
     "contact_id","name","alias","org","website","phone1","phone2","email","role","tags","last_note","last_enriched_at",
-    "source_system","source_id","phone1_normalized","phone2_normalized","email_normalized","labels","sync_status","last_synced_at","notes_internal"
+    "source_system","source_id","phone1_normalized","phone2_normalized","email_normalized","labels","sync_status","last_synced_at","notes_internal",
+    "crm_id","display_name","identity_terms","phones","emails","personal_summary","business_summary","current_state","next_action","last_contact_at","last_updated"
+  ],
+  CONTACT_IDENTITIES_HEADERS: [
+    "identity_id","crm_id","identity_type","raw_value","normalized_value","label","source","link_status","last_seen_at"
   ],
   CONTACT_ENRICHMENTS_HEADERS: [
     "timestamp","contact_id","contact_name","note_type","note_text","source","linked_record_id","topic_id","notes"
@@ -49,6 +53,7 @@ const TL_SCHEMA = {
     "INBOX",
     "ARCHIVE",
     "CONTACTS",
+    "CONTACT_IDENTITIES",
     "CONTACT_ENRICHMENTS",
     "TOPICS",
     "SETTINGS",
@@ -81,6 +86,8 @@ const TL_SCHEMA = {
     ["EMAIL_PULL_MAX_THREADS","20","maximum Gmail threads pulled per scheduled run"],
     ["EMAIL_TRIAGE_ENABLED","true","triage newly pulled email threads into revision queue"],
     ["EMAIL_TRIAGE_BATCH_SIZE","5","maximum pulled email rows to triage per scheduled run"],
+    ["WHATSAPP_GROUP_QUIET_MINUTES","8","silence needed before sealing an inbound WhatsApp burst into one reply item"],
+    ["WHATSAPP_GROUP_MAX_MINUTES","20","maximum total length of one grouped inbound WhatsApp burst before starting a new one"],
     ["thread_window_minutes","120","minutes to keep messages in same root/topic"],
     ["reply_mode","consolidated","consolidated|per_message"],
     ["status_cache_enabled","true","buffer unmatched statuses and merge later"],
@@ -94,6 +101,7 @@ function TL_EnsureSchema() {
   ensureTab_(ss, "INBOX", TL_SCHEMA.INBOX_HEADERS, false);
   ensureTab_(ss, "ARCHIVE", TL_SCHEMA.INBOX_HEADERS, false);
   ensureTab_(ss, "CONTACTS", TL_SCHEMA.CONTACTS_HEADERS, false);
+  ensureTab_(ss, "CONTACT_IDENTITIES", TL_SCHEMA.CONTACT_IDENTITIES_HEADERS, false);
   ensureTab_(ss, "CONTACT_ENRICHMENTS", TL_SCHEMA.CONTACT_ENRICHMENTS_HEADERS, false);
   ensureTab_(ss, "TOPICS", TL_SCHEMA.TOPICS_HEADERS, false);
   ensureTab_(ss, "SETTINGS", TL_SCHEMA.SETTINGS_HEADERS, false);
@@ -107,6 +115,7 @@ function TL_ResetSchema(forceClear) {
   ensureTab_(ss, "INBOX", TL_SCHEMA.INBOX_HEADERS, !!forceClear);
   ensureTab_(ss, "ARCHIVE", TL_SCHEMA.INBOX_HEADERS, !!forceClear);
   ensureTab_(ss, "CONTACTS", TL_SCHEMA.CONTACTS_HEADERS, !!forceClear);
+  ensureTab_(ss, "CONTACT_IDENTITIES", TL_SCHEMA.CONTACT_IDENTITIES_HEADERS, !!forceClear);
   ensureTab_(ss, "CONTACT_ENRICHMENTS", TL_SCHEMA.CONTACT_ENRICHMENTS_HEADERS, !!forceClear);
   ensureTab_(ss, "TOPICS", TL_SCHEMA.TOPICS_HEADERS, !!forceClear);
   ensureTab_(ss, "SETTINGS", TL_SCHEMA.SETTINGS_HEADERS, !!forceClear);

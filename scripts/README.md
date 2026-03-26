@@ -10,5 +10,7 @@ Usage from `C:\dev\gas\TaskLess`:
 ```powershell
 .\scripts\clasp.ps1 push
 .\scripts\clasp.ps1 deploy --deploymentId AKfycbzIq0DUr6h8zXelBVn_mXHR7k0DIg97AL5jvLfyIZrFhEotITNkDpbviGXW8xpr9wo --description "session-context-and-contact-sync"
+.\scripts\run-gas-test.ps1 TL_TestBossMenuContract_RunAll
+.\scripts\run-gas-test.ps1 TL_TestContacts_RunAll
 ```
 

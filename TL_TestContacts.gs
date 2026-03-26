@@ -8,10 +8,17 @@ function TL_TestContacts_RunAll() {
   return {
     match_by_phone: TL_TestContacts_MatchByPhoneRun(),
     preserve_manual_fields: TL_TestContacts_PreserveManualFieldsRun(),
+    dealwise_shape: TL_TestContacts_DealWiseShapeRun(),
+    identity_rows: TL_TestContacts_IdentityRowsRun(),
+    summary_merge: TL_TestContacts_SummaryMergeRun(),
+    manual_enrichment_patch: TL_TestContacts_ManualEnrichmentPatchRun(),
+    outbound_patch: TL_TestContacts_OutboundPatchRun(),
+    resolve_email_domain: TL_TestContacts_ResolveEmailDomainRun(),
     sync_mode_filter: TL_TestContacts_SyncModeFilterRun(),
     phone_candidate_split: TL_TestContacts_PhoneCandidateSplitRun(),
     replace_error_phone: TL_TestContacts_ReplaceErrorPhoneRun(),
     resolve_search_queries: TL_TestContacts_ResolveSearchQueriesRun(),
+    resolve_identity_terms: TL_TestContacts_ResolveIdentityTermsRun(),
     resolve_request_email: TL_TestContacts_ResolveRequestEmailRun(),
     resolve_request_ambiguous: TL_TestContacts_ResolveRequestAmbiguousRun(),
     topic_owners: TL_TestContacts_TopicOwnersRun(),
@@ -109,13 +116,177 @@ function TL_TestContacts_PreserveManualFieldsRun() {
 
   return {
     ok: merged.contact_id === "CI_manual_1" &&
+      merged.crm_id === "CI_manual_1" &&
+      merged.display_name === "David Cohen" &&
       merged.alias === "Dave" &&
       merged.tags === "vip" &&
       merged.last_note === "manual note" &&
       merged.org === "Acme" &&
       merged.role === "CEO" &&
+      String(merged.phones || "").indexOf("972509999999") !== -1 &&
+      String(merged.emails || "").indexOf("david@example.com") !== -1 &&
       merged.labels.indexOf("Clients") !== -1,
     merged: merged
+  };
+}
+
+function TL_TestContacts_DealWiseShapeRun() {
+  const contact = TL_Contacts_buildSearchContactFromRow_({
+    crm_id: "CRM_1",
+    display_name: "Moshe Cohen",
+    identity_terms: "Moshe\nמשה\nmy contractor",
+    phones: "972541111111\n972542222222",
+    emails: "moshe@example.com\nmoshe.work@example.com",
+    personal_summary: "Has a daughter who got married recently.",
+    business_summary: "Contractor for home renovation.",
+    current_state: "Interested in next project.",
+    next_action: "Follow up next week."
+  });
+
+  return {
+    ok: contact.contactId === "CRM_1" &&
+      contact.name === "Moshe Cohen" &&
+      contact.phone1 === "972541111111" &&
+      contact.phone2 === "972542222222" &&
+      contact.email === "moshe@example.com" &&
+      contact.identityTerms.indexOf("my contractor") !== -1 &&
+      contact.businessSummary === "Contractor for home renovation.",
+    contact: contact
+  };
+}
+
+function TL_TestContacts_IdentityRowsRun() {
+  const rows = TL_Contacts_buildIdentityRowsForContact_({
+    crm_id: "CRM_2",
+    display_name: "Dana Banker",
+    identity_terms: "Dana\nדנה\nthe banker",
+    phones: "972501111111",
+    emails: "dana@example.com",
+    source_system: "google_contacts",
+    source_id: "people/c123",
+    last_updated: "2026-03-26T10:00:00Z"
+  });
+  const types = rows.map(function(item) { return String(item.identity_type || ""); });
+  return {
+    ok: rows.length >= 5 &&
+      types.indexOf("term") !== -1 &&
+      types.indexOf("phone") !== -1 &&
+      types.indexOf("email") !== -1 &&
+      types.indexOf("source_ref") !== -1,
+    rows: rows
+  };
+}
+
+function TL_TestContacts_SummaryMergeRun() {
+  const merged = TL_Contacts_mergeSummaryText_(
+    "Asked about pricing and delivery.",
+    "Asked about pricing and delivery."
+  );
+  const appended = TL_Contacts_mergeSummaryText_(
+    "Asked about pricing and delivery.",
+    "Wants installation next week."
+  );
+  return {
+    ok: merged === "Asked about pricing and delivery." &&
+      appended.indexOf("Wants installation next week.") !== -1,
+    merged: merged,
+    appended: appended
+  };
+}
+
+function TL_TestContacts_ManualEnrichmentPatchRun() {
+  const row = TL_Contacts_buildNewRow_({
+    crm_id: "CRM_3",
+    display_name: "Yael",
+    identity_terms: "Yael",
+    phones: "972541111999",
+    emails: "yael@example.com",
+    personal_summary: "",
+    business_summary: "Interested in kitchen renovation.",
+    current_state: "Waiting for quote.",
+    next_action: "",
+    last_contact_at: "",
+    last_updated: "2026-03-26T08:00:00Z"
+  }, "2026-03-26T08:00:00Z");
+  const patch = TL_Contacts_buildManualEnrichmentWritebackPatch_({
+    display_name: "Yael",
+    note_type: "family_event",
+    note_text: "Her daughter got married recently.",
+    last_updated: "2026-03-26T09:00:00Z"
+  });
+  const updated = TL_Contacts_applyPatchToRow_(row, patch, "2026-03-26T09:00:00Z");
+
+  return {
+    ok: updated.personal_summary.indexOf("daughter got married") !== -1 &&
+      updated.business_summary.indexOf("Interested in kitchen renovation.") !== -1 &&
+      updated.last_note.indexOf("daughter got married") !== -1 &&
+      updated.last_enriched_at === "2026-03-26T09:00:00Z",
+    updated: updated
+  };
+}
+
+function TL_TestContacts_OutboundPatchRun() {
+  const row = TL_Contacts_buildNewRow_({
+    crm_id: "CRM_4",
+    display_name: "Noam",
+    identity_terms: "Noam",
+    phones: "972542220000",
+    emails: "noam@example.com",
+    personal_summary: "",
+    business_summary: "Asked about pricing.",
+    current_state: "Interested.",
+    next_action: "Prepare quote.",
+    last_contact_at: "",
+    last_updated: "2026-03-26T08:00:00Z"
+  }, "2026-03-26T08:00:00Z");
+  const patch = TL_Contacts_buildOutboundWritebackPatch_({
+    email: "noam@example.com",
+    summary: "Followed up after sending pricing details.",
+    outbound_text: "Hi Noam, sending the pricing details here.",
+    last_contact_at: "2026-03-26T09:15:00Z"
+  }, "English");
+  const updated = TL_Contacts_applyPatchToRow_(row, patch, "2026-03-26T09:15:00Z");
+
+  return {
+    ok: updated.business_summary.indexOf("Followed up after sending pricing details.") !== -1 &&
+      updated.current_state === "Waiting for reply." &&
+      updated.next_action === "Wait for reply and check whether follow-up is needed." &&
+      updated.last_contact_at === "2026-03-26T09:15:00Z",
+    updated: updated
+  };
+}
+
+function TL_TestContacts_ResolveEmailDomainRun() {
+  const contacts = [
+    TL_Contacts_buildSearchContactFromRow_({
+      crm_id: "CRM_DOM_1",
+      display_name: "Leah",
+      identity_terms: "Leah\ncontractor",
+      phones: "972541010101",
+      emails: "leah@gmail.com",
+      business_summary: "Contractor"
+    }),
+    TL_Contacts_buildSearchContactFromRow_({
+      crm_id: "CRM_DOM_2",
+      display_name: "Ronen",
+      identity_terms: "Ronen",
+      phones: "972542020202",
+      emails: "ronen@company.com",
+      business_summary: "Designer"
+    })
+  ];
+  const result = TL_Contacts_ResolveRequest_({
+    rawText: "the contractor from gmail",
+    extraction: {
+      search_queries: [
+        { type: "identity_term", value: "contractor" },
+        { type: "email_domain", value: "gmail.com" }
+      ]
+    }
+  }, { channel: "" }, contacts);
+  return {
+    ok: !!(result && result.contact && result.contact.contactId === "CRM_DOM_1"),
+    result: result
   };
 }
 
@@ -261,6 +432,34 @@ function TL_TestContacts_ResolveSearchQueriesRun() {
     resolved: result && result.contact ? result.contact.contactId : "",
     firstCandidate: result && result.candidates && result.candidates[0] ? result.candidates[0].contactId : "",
     queries: result && result.queries ? result.queries : []
+  };
+}
+
+function TL_TestContacts_ResolveIdentityTermsRun() {
+  const contacts = [
+    TL_Contacts_buildSearchContactFromRow_({
+      crm_id: "CRM_REL_1",
+      display_name: "Yaakov Installer",
+      identity_terms: "Yaakov\nיעקב\nthe installer\nmy son",
+      phones: "972503333333",
+      emails: "yaakov@example.com",
+      business_summary: "Installer for windows."
+    })
+  ];
+
+  const result = TL_Contacts_resolveBySearchHints_({
+    rawText: "find my son",
+    extraction: {
+      contact_query: "my son",
+      search_queries: [
+        { type: "relationship", value: "my son" }
+      ]
+    }
+  }, contacts);
+
+  return {
+    ok: !!(result && result.contact && result.contact.contactId === "CRM_REL_1"),
+    result: result
   };
 }
 
@@ -449,10 +648,25 @@ function TL_TestContacts_OutboundCardFormatRun() {
     proposal: "I'll be back in an hour."
   });
 
+  const expectedLanguage = typeof TL_Language_BossUiLanguage_ === "function"
+    ? TL_Language_BossUiLanguage_()
+    : "Hebrew";
+  const expectsHebrew = typeof TL_Language_IsHebrew_ === "function"
+    ? TL_Language_IsHebrew_(expectedLanguage)
+    : String(expectedLanguage || "").toLowerCase() === "hebrew";
+
   return {
-    ok: emailBody.indexOf("Draft Email to David Cohen | david@example.com") !== -1 &&
-      emailBody.indexOf("Subject: Good job") !== -1 &&
-      waBody.indexOf("Draft WhatsApp to David Cohen | 972506847373") !== -1,
+    ok: emailBody.indexOf("David Cohen | david@example.com") !== -1 &&
+      emailBody.indexOf("Good job") !== -1 &&
+      waBody.indexOf("David Cohen | 972506847373") !== -1 &&
+      (expectsHebrew
+        ? (emailBody.indexOf("טיוטת אימייל אל") !== -1 &&
+          emailBody.indexOf("נושא: Good job") !== -1 &&
+          waBody.indexOf("טיוטת WhatsApp אל") !== -1)
+        : (emailBody.indexOf("Draft Email to") !== -1 &&
+          emailBody.indexOf("Subject: Good job") !== -1 &&
+          waBody.indexOf("Draft WhatsApp to") !== -1)),
+    expectedLanguage: expectedLanguage,
     emailBody: emailBody,
     waBody: waBody
   };

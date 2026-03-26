@@ -62,6 +62,21 @@ Each queue item should show:
 - recent history
 - suggested reply
 
+## Boss Interaction Boundary
+
+The Boss menu/router is a separate operating surface layered on top of the same WhatsApp coexist number.
+
+It must be gated by Boss identity recognition and should reuse the existing Boss settings logic.
+
+Rules:
+- only Boss-originated messages enter menu/navigation flows
+- non-Boss messages must stay in the normal communication pipeline
+- the Boss can always interrupt any current Boss flow with `menu`
+- interrupted Boss work should be paused and resumable
+- arbitrary Boss free text should not be treated as a new intent unless the current state expects free-text input
+
+This separation is important so client conversations are not polluted by the Boss operating model.
+
 ### 6. CRM Writeback
 
 CRM updates should happen after:
@@ -86,8 +101,15 @@ MVP output:
 - why now
 - suggested next step
 - suggested outreach draft
+- preferred send path
 
 Do not overbuild forecasting/value models in MVP.
+
+MVP delivery rule:
+- opportunity reasoning is Boss-facing and should use the Boss settings language
+- the suggested outreach draft should default to the client's language when possible
+- proactive opportunity outreach should default to copy-paste/manual send from the user's business WhatsApp or email
+- do not make WhatsApp opportunity auto-send the default, especially when the 24-hour window may require a template
 
 ## Runtime Naming
 

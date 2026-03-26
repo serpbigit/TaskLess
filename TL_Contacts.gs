@@ -108,6 +108,10 @@ function TL_Contacts_SyncGoogleContacts(options) {
     }
   }
 
+  if (!dryRun) {
+    TL_Contacts_RebuildIdentitySheet_();
+  }
+
   TL_Contacts_logSyncResult_(result);
   result.sample = result.sample.slice(0, 10);
   TL_Contacts_logRunnerResult_("TL_Contacts_SyncGoogleContacts", result);
@@ -139,7 +143,8 @@ function TL_Contacts_headers_() {
   }
   return [
     "contact_id","name","alias","org","website","phone1","phone2","email","role","tags","last_note","last_enriched_at",
-    "source_system","source_id","phone1_normalized","phone2_normalized","email_normalized","labels","sync_status","last_synced_at","notes_internal"
+    "source_system","source_id","phone1_normalized","phone2_normalized","email_normalized","labels","sync_status","last_synced_at","notes_internal",
+    "crm_id","display_name","identity_terms","phones","emails","personal_summary","business_summary","current_state","next_action","last_contact_at","last_updated"
   ];
 }
 
@@ -191,15 +196,22 @@ function TL_Contacts_mapGooglePerson_(person, groupNames, nowIso) {
   const emails = TL_Contacts_pickValues_(person.emailAddresses, "value").map(function(value) {
     return TL_Contacts_normalizeEmail_(value);
   }).filter(Boolean);
+  const nameTerms = TL_Contacts_extractNameTerms_(person.names);
   const organizations = person.organizations || [];
   const urls = TL_Contacts_pickValues_(person.urls, "value");
   const labels = TL_Contacts_extractLabels_(person.memberships, groupNames);
   const org = organizations.length ? String(organizations[0].name || "").trim() : "";
   const role = organizations.length ? String(organizations[0].title || "").trim() : "";
-
-  return {
+  const displayName = TL_Contacts_pickDisplayName_(person.names);
+  const identityTerms = TL_Contacts_mergeMultiValueLists_([
+    nameTerms,
+    org ? [org] : [],
+    role ? [role] : [],
+    labels
+  ]);
+  const row = {
     contact_id: "GC_" + personId,
-    name: TL_Contacts_pickDisplayName_(person.names),
+    name: displayName,
     alias: "",
     org: org,
     website: urls.length ? urls[0] : "",
@@ -218,8 +230,20 @@ function TL_Contacts_mapGooglePerson_(person, groupNames, nowIso) {
     labels: labels.join(", "),
     sync_status: "synced",
     last_synced_at: nowIso,
-    notes_internal: "google_contact_id=" + personId
+    notes_internal: "google_contact_id=" + personId,
+    crm_id: "GC_" + personId,
+    display_name: displayName,
+    identity_terms: TL_Contacts_stringifyMultiValueField_(identityTerms),
+    phones: TL_Contacts_stringifyMultiValueField_(phones),
+    emails: TL_Contacts_stringifyMultiValueField_(emails),
+    personal_summary: "",
+    business_summary: TL_Contacts_composeBusinessSummary_(org, role, urls),
+    current_state: "",
+    next_action: "",
+    last_contact_at: "",
+    last_updated: nowIso
   };
+  return TL_Contacts_attachLegacyAliases_(row);
 }
 
 function TL_Contacts_normalizeSyncMode_(value) {
@@ -229,8 +253,8 @@ function TL_Contacts_normalizeSyncMode_(value) {
 }
 
 function TL_Contacts_profileKind_(mapped) {
-  const hasPhone = !!String((mapped && (mapped.phone1_normalized || mapped.phone2_normalized || mapped.phone1 || mapped.phone2)) || "").trim();
-  const hasEmail = !!String((mapped && (mapped.email_normalized || mapped.email)) || "").trim();
+  const hasPhone = TL_Contacts_extractPhonesFromRow_(mapped).length > 0;
+  const hasEmail = TL_Contacts_extractEmailsFromRow_(mapped).length > 0;
   if (hasPhone && hasEmail) return "both";
   if (hasPhone) return "phone_only";
   if (hasEmail) return "email_only";
@@ -350,6 +374,20 @@ function TL_Contacts_pickDisplayName_(names) {
   return "No Name";
 }
 
+function TL_Contacts_extractNameTerms_(names) {
+  const out = [];
+  (names || []).forEach(function(item) {
+    const display = String(item && item.displayName || "").trim();
+    const given = String(item && item.givenName || "").trim();
+    const family = String(item && item.familyName || "").trim();
+    [display, given, family, [given, family].filter(Boolean).join(" ")].forEach(function(value) {
+      if (!value) return;
+      if (out.indexOf(value) === -1) out.push(value);
+    });
+  });
+  return out;
+}
+
 function TL_Contacts_pickValues_(items, fieldName) {
   const out = [];
   (items || []).forEach(function(item) {
@@ -459,26 +497,23 @@ function TL_Contacts_rowValuesToObject_(headers, values) {
   for (let i = 0; i < headers.length; i++) {
     out[String(headers[i] || "")] = values[i];
   }
-  return out;
+  return TL_Contacts_attachLegacyAliases_(out);
 }
 
 function TL_Contacts_indexExistingRow_(index, row, rowNumber) {
-  const sourceId = String(row.source_id || "").trim();
-  const phones = [
-    TL_Contacts_normalizePhoneField_(row.phone1_normalized || row.phone1),
-    TL_Contacts_normalizePhoneField_(row.phone2_normalized || row.phone2)
-  ].filter(Boolean);
-  const email = TL_Contacts_normalizeEmail_(row.email_normalized || row.email);
+  const sourceId = String(row && row.source_id || "").trim();
+  const phones = TL_Contacts_extractPhonesFromRow_(row);
+  const emails = TL_Contacts_extractEmailsFromRow_(row);
 
   if (sourceId) index.bySourceId[sourceId] = { rowNumber: rowNumber, row: row };
   phones.forEach(function(phone) {
     if (!index.byPhone[phone]) index.byPhone[phone] = [];
     index.byPhone[phone].push({ rowNumber: rowNumber, row: row });
   });
-  if (email) {
+  emails.forEach(function(email) {
     if (!index.byEmail[email]) index.byEmail[email] = [];
     index.byEmail[email].push({ rowNumber: rowNumber, row: row });
-  }
+  });
 }
 
 function TL_Contacts_matchExistingRow_(mapped, existing) {
@@ -488,16 +523,16 @@ function TL_Contacts_matchExistingRow_(mapped, existing) {
   }
 
   const candidates = {};
-  [mapped.phone1_normalized, mapped.phone2_normalized].filter(Boolean).forEach(function(phone) {
+  TL_Contacts_extractPhonesFromRow_(mapped).forEach(function(phone) {
     (existing.byPhone[phone] || []).forEach(function(item) {
       candidates["row_" + item.rowNumber] = item;
     });
   });
-  if (mapped.email_normalized) {
-    (existing.byEmail[mapped.email_normalized] || []).forEach(function(item) {
+  TL_Contacts_extractEmailsFromRow_(mapped).forEach(function(email) {
+    (existing.byEmail[email] || []).forEach(function(item) {
       candidates["row_" + item.rowNumber] = item;
     });
-  }
+  });
 
   const matches = Object.keys(candidates).map(function(key) { return candidates[key]; });
   if (matches.length === 1) return matches[0];
@@ -506,36 +541,71 @@ function TL_Contacts_matchExistingRow_(mapped, existing) {
 }
 
 function TL_Contacts_mergeRow_(existingRow, mapped, nowIso) {
-  const merged = Object.assign({}, existingRow || {});
-  merged.contact_id = String(existingRow && existingRow.contact_id ? existingRow.contact_id : mapped.contact_id);
-  merged.name = TL_Contacts_chooseSyncValue_(existingRow && existingRow.name, mapped.name);
-  merged.org = TL_Contacts_chooseSyncValue_(existingRow && existingRow.org, mapped.org);
-  merged.website = TL_Contacts_chooseSyncValue_(existingRow && existingRow.website, mapped.website);
-  merged.phone1 = TL_Contacts_choosePhoneSlot_(existingRow && existingRow.phone1, mapped.phone1);
-  merged.phone2 = TL_Contacts_choosePhoneSlot_(existingRow && existingRow.phone2, mapped.phone2, merged.phone1);
-  merged.email = TL_Contacts_chooseSyncValue_(existingRow && existingRow.email, mapped.email);
-  merged.role = TL_Contacts_chooseSyncValue_(existingRow && existingRow.role, mapped.role);
-  merged.alias = String(existingRow && existingRow.alias ? existingRow.alias : "");
-  merged.tags = String(existingRow && existingRow.tags ? existingRow.tags : "");
-  merged.last_note = String(existingRow && existingRow.last_note ? existingRow.last_note : "");
-  merged.last_enriched_at = String(existingRow && existingRow.last_enriched_at ? existingRow.last_enriched_at : "");
-  merged.source_system = mapped.source_system;
-  merged.source_id = mapped.source_id;
-  merged.phone1_normalized = TL_Contacts_normalizePhoneField_(merged.phone1 || mapped.phone1_normalized);
-  merged.phone2_normalized = TL_Contacts_normalizePhoneField_(merged.phone2 || mapped.phone2_normalized);
-  merged.email_normalized = TL_Contacts_normalizeEmail_(merged.email || mapped.email_normalized);
-  merged.labels = TL_Contacts_mergeCsvValues_(existingRow && existingRow.labels, mapped.labels);
+  const existingSafe = TL_Contacts_attachLegacyAliases_(existingRow || {});
+  const mappedSafe = TL_Contacts_attachLegacyAliases_(mapped || {});
+  const merged = Object.assign({}, existingSafe || {});
+  const mergedPhones = TL_Contacts_mergeMultiValueLists_([
+    TL_Contacts_extractPhonesFromRow_(existingSafe),
+    TL_Contacts_extractPhonesFromRow_(mappedSafe)
+  ]);
+  const mergedEmails = TL_Contacts_mergeMultiValueLists_([
+    TL_Contacts_extractEmailsFromRow_(existingSafe),
+    TL_Contacts_extractEmailsFromRow_(mappedSafe)
+  ]);
+  const mergedIdentityTerms = TL_Contacts_mergeMultiValueLists_([
+    TL_Contacts_extractIdentityTermsFromRow_(existingSafe),
+    TL_Contacts_extractIdentityTermsFromRow_(mappedSafe)
+  ]);
+  merged.crm_id = TL_Contacts_rowContactId_(existingSafe) || TL_Contacts_rowContactId_(mappedSafe);
+  merged.contact_id = merged.crm_id;
+  merged.display_name = TL_Contacts_chooseSyncValue_(existingSafe.display_name || existingSafe.name, mappedSafe.display_name || mappedSafe.name);
+  merged.name = merged.display_name;
+  merged.org = TL_Contacts_chooseSyncValue_(existingSafe.org, mappedSafe.org);
+  merged.website = TL_Contacts_chooseSyncValue_(existingSafe.website, mappedSafe.website);
+  merged.role = TL_Contacts_chooseSyncValue_(existingSafe.role, mappedSafe.role);
+  merged.alias = String(existingSafe.alias || "").trim();
+  merged.tags = String(existingSafe.tags || "").trim();
+  merged.last_note = String(existingSafe.last_note || "").trim();
+  merged.last_enriched_at = String(existingSafe.last_enriched_at || "").trim();
+  merged.source_system = TL_Contacts_chooseSyncValue_(existingSafe.source_system, mappedSafe.source_system);
+  merged.source_id = TL_Contacts_chooseSyncValue_(existingSafe.source_id, mappedSafe.source_id);
+  merged.labels = TL_Contacts_mergeCsvValues_(existingSafe.labels, mappedSafe.labels);
   merged.sync_status = "synced";
   merged.last_synced_at = nowIso;
-  merged.notes_internal = TL_Contacts_mergeInternalNotes_(existingRow && existingRow.notes_internal, mapped.notes_internal);
-  return merged;
+  merged.notes_internal = TL_Contacts_mergeInternalNotes_(existingSafe.notes_internal, mappedSafe.notes_internal);
+  merged.identity_terms = TL_Contacts_stringifyMultiValueField_(mergedIdentityTerms);
+  merged.phones = TL_Contacts_stringifyMultiValueField_(mergedPhones);
+  merged.emails = TL_Contacts_stringifyMultiValueField_(mergedEmails);
+  merged.personal_summary = String(existingSafe.personal_summary || "").trim();
+  merged.business_summary = TL_Contacts_chooseSyncValue_(
+    existingSafe.business_summary,
+    mappedSafe.business_summary || TL_Contacts_composeBusinessSummary_(mappedSafe.org, mappedSafe.role, [mappedSafe.website])
+  );
+  merged.current_state = String(existingSafe.current_state || "").trim();
+  merged.next_action = String(existingSafe.next_action || "").trim();
+  merged.last_contact_at = String(existingSafe.last_contact_at || "").trim();
+  merged.last_updated = nowIso;
+  return TL_Contacts_attachLegacyAliases_(merged);
 }
 
 function TL_Contacts_buildNewRow_(mapped, nowIso) {
-  const row = Object.assign({}, mapped);
+  const row = TL_Contacts_attachLegacyAliases_(Object.assign({}, mapped));
   row.last_synced_at = nowIso;
   row.sync_status = "synced";
-  return row;
+  row.crm_id = TL_Contacts_rowContactId_(row);
+  row.contact_id = row.crm_id;
+  row.display_name = TL_Contacts_rowDisplayName_(row);
+  row.name = row.display_name;
+  row.identity_terms = TL_Contacts_stringifyMultiValueField_(TL_Contacts_extractIdentityTermsFromRow_(row));
+  row.phones = TL_Contacts_stringifyMultiValueField_(TL_Contacts_extractPhonesFromRow_(row));
+  row.emails = TL_Contacts_stringifyMultiValueField_(TL_Contacts_extractEmailsFromRow_(row));
+  row.personal_summary = String(row.personal_summary || "").trim();
+  row.business_summary = String(row.business_summary || "").trim();
+  row.current_state = String(row.current_state || "").trim();
+  row.next_action = String(row.next_action || "").trim();
+  row.last_contact_at = String(row.last_contact_at || "").trim();
+  row.last_updated = nowIso;
+  return TL_Contacts_attachLegacyAliases_(row);
 }
 
 function TL_Contacts_chooseSyncValue_(existingValue, mappedValue) {
@@ -591,6 +661,157 @@ function TL_Contacts_normalizeStringArray_(value) {
   return single ? [single] : [];
 }
 
+function TL_Contacts_parseMultiValueField_(value) {
+  if (Array.isArray(value)) return TL_Contacts_normalizeStringArray_(value);
+  return String(value || "")
+    .split(/\r?\n|[|;,]+/)
+    .map(function(item) { return String(item || "").trim(); })
+    .filter(Boolean);
+}
+
+function TL_Contacts_stringifyMultiValueField_(value) {
+  return TL_Contacts_mergeMultiValueLists_([TL_Contacts_parseMultiValueField_(value)]).join("\n");
+}
+
+function TL_Contacts_mergeMultiValueLists_(lists) {
+  const seen = {};
+  const out = [];
+  (lists || []).forEach(function(list) {
+    TL_Contacts_parseMultiValueField_(list).forEach(function(item) {
+      const key = String(item || "").trim().toLowerCase();
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      out.push(String(item || "").trim());
+    });
+  });
+  return out;
+}
+
+function TL_Contacts_composeBusinessSummary_(org, role, urls) {
+  const bits = [];
+  if (org) bits.push("Organization: " + org);
+  if (role) bits.push("Role: " + role);
+  if (Array.isArray(urls) && urls.length) bits.push("Website: " + String(urls[0] || "").trim());
+  return bits.join(" | ");
+}
+
+function TL_Contacts_extractPhonesFromRow_(row) {
+  const safe = row || {};
+  return TL_Contacts_mergeMultiValueLists_([
+    TL_Contacts_parseMultiValueField_(safe.phones),
+    [safe.phone1, safe.phone2],
+    [safe.phone1_normalized, safe.phone2_normalized]
+  ]).map(function(item) {
+    return TL_Contacts_normalizePhoneField_(item);
+  }).filter(Boolean);
+}
+
+function TL_Contacts_extractEmailsFromRow_(row) {
+  const safe = row || {};
+  return TL_Contacts_mergeMultiValueLists_([
+    TL_Contacts_parseMultiValueField_(safe.emails),
+    [safe.email, safe.email_normalized]
+  ]).map(function(item) {
+    return TL_Contacts_normalizeEmail_(item);
+  }).filter(Boolean);
+}
+
+function TL_Contacts_extractIdentityTermsFromRow_(row) {
+  const safe = row || {};
+  return TL_Contacts_mergeMultiValueLists_([
+    TL_Contacts_parseMultiValueField_(safe.identity_terms),
+    [safe.display_name, safe.name, safe.alias],
+    TL_Contacts_parseMultiValueField_(safe.labels),
+    [safe.org, safe.role]
+  ]);
+}
+
+function TL_Contacts_rowContactId_(row) {
+  return String(row && (row.crm_id || row.contact_id) || "").trim();
+}
+
+function TL_Contacts_rowDisplayName_(row) {
+  return String(row && (row.display_name || row.name) || "").trim();
+}
+
+function TL_Contacts_attachLegacyAliases_(row) {
+  const safe = Object.assign({}, row || {});
+  const crmId = TL_Contacts_rowContactId_(safe);
+  const displayName = TL_Contacts_rowDisplayName_(safe);
+  const phones = TL_Contacts_extractPhonesFromRow_(safe);
+  const emails = TL_Contacts_extractEmailsFromRow_(safe);
+  const identityTerms = TL_Contacts_extractIdentityTermsFromRow_(safe);
+  safe.crm_id = crmId;
+  safe.display_name = displayName;
+  safe.identity_terms = TL_Contacts_stringifyMultiValueField_(identityTerms);
+  safe.phones = TL_Contacts_stringifyMultiValueField_(phones);
+  safe.emails = TL_Contacts_stringifyMultiValueField_(emails);
+  safe.contact_id = crmId;
+  safe.name = displayName;
+  safe.alias = safe.alias !== undefined ? String(safe.alias || "").trim() : identityTerms.filter(function(term) {
+    return TL_Contacts_normalizeSearchText_(term) !== TL_Contacts_normalizeSearchText_(displayName);
+  }).slice(0, 3).join(", ");
+  safe.phone1 = phones[0] || String(safe.phone1 || "").trim();
+  safe.phone2 = phones[1] || String(safe.phone2 || "").trim();
+  safe.email = emails[0] || String(safe.email || "").trim();
+  safe.phone1_normalized = TL_Contacts_normalizePhoneField_(safe.phone1 || phones[0] || "");
+  safe.phone2_normalized = TL_Contacts_normalizePhoneField_(safe.phone2 || phones[1] || "");
+  safe.email_normalized = TL_Contacts_normalizeEmail_(safe.email || emails[0] || "");
+  if (safe.last_updated === undefined) safe.last_updated = String(safe.last_synced_at || "").trim();
+  return safe;
+}
+
+function TL_Contacts_buildSearchContactFromRow_(row) {
+  const safe = TL_Contacts_attachLegacyAliases_(row);
+  const identityTerms = TL_Contacts_extractIdentityTermsFromRow_(safe);
+  const phones = TL_Contacts_extractPhonesFromRow_(safe);
+  const emails = TL_Contacts_extractEmailsFromRow_(safe);
+  const displayName = TL_Contacts_rowDisplayName_(safe);
+  const personalSummary = String(safe.personal_summary || "").trim();
+  const businessSummary = String(safe.business_summary || "").trim();
+  const currentState = String(safe.current_state || "").trim();
+  const nextAction = String(safe.next_action || "").trim();
+  const notesInternal = String(safe.notes_internal || "").trim();
+  return {
+    contactId: TL_Contacts_rowContactId_(safe),
+    crmId: TL_Contacts_rowContactId_(safe),
+    name: displayName,
+    displayName: displayName,
+    alias: String(safe.alias || "").trim(),
+    identityTerms: identityTerms,
+    phones: phones,
+    emails: emails,
+    org: String(safe.org || "").trim(),
+    role: String(safe.role || "").trim(),
+    tags: String(safe.tags || "").trim(),
+    labels: String(safe.labels || "").trim(),
+    email: emails[0] || "",
+    phone1: phones[0] || "",
+    phone2: phones[1] || "",
+    notesInternal: notesInternal,
+    personalSummary: personalSummary,
+    businessSummary: businessSummary,
+    currentState: currentState,
+    nextAction: nextAction,
+    lastContactAt: String(safe.last_contact_at || "").trim(),
+    lastUpdated: String(safe.last_updated || "").trim(),
+    phone1Norm: phones[0] || "",
+    phone2Norm: phones[1] || "",
+    emailNorm: emails[0] || "",
+    nameNorm: TL_Contacts_normalizeSearchText_(displayName),
+    aliasNorm: TL_Contacts_normalizeSearchText_(String(safe.alias || "").trim()),
+    identityTermsNorm: identityTerms.map(TL_Contacts_normalizeSearchText_).filter(Boolean),
+    orgNorm: TL_Contacts_normalizeSearchText_(String(safe.org || "").trim()),
+    roleNorm: TL_Contacts_normalizeSearchText_(String(safe.role || "").trim()),
+    tagsNorm: TL_Contacts_normalizeSearchText_(String(safe.tags || "").trim()),
+    labelsNorm: TL_Contacts_normalizeSearchText_(String(safe.labels || "").trim()),
+    personalSummaryNorm: TL_Contacts_normalizeSearchText_(personalSummary),
+    businessSummaryNorm: TL_Contacts_normalizeSearchText_(businessSummary),
+    currentStateNorm: TL_Contacts_normalizeSearchText_(currentState),
+    nextActionNorm: TL_Contacts_normalizeSearchText_(nextAction)
+  };
+}
+
 function TL_Contacts_readSearchContacts_() {
   const out = [];
   try {
@@ -605,40 +826,10 @@ function TL_Contacts_readSearchContacts_() {
     const idx = {};
     headers.forEach(function(header, index) { idx[String(header || "")] = index; });
     rows.forEach(function(row) {
-      const contactId = String(row[idx.contact_id] || "").trim();
-      const name = String(row[idx.name] || "").trim();
-      if (!contactId || !name) return;
-      const alias = String(row[idx.alias] || "").trim();
-      const org = String(row[idx.org] || "").trim();
-      const role = String(row[idx.role] || "").trim();
-      const tags = String(row[idx.tags] || "").trim();
-      const labels = String(row[idx.labels] || "").trim();
-      const email = String(row[idx.email] || "").trim();
-      const phone1 = String(row[idx.phone1] || "").trim();
-      const phone2 = String(row[idx.phone2] || "").trim();
-      const notesInternal = String(row[idx.notes_internal] || "").trim();
-      out.push({
-        contactId: contactId,
-        name: name,
-        alias: alias,
-        org: org,
-        role: role,
-        tags: tags,
-        labels: labels,
-        email: email,
-        phone1: phone1,
-        phone2: phone2,
-        notesInternal: notesInternal,
-        phone1Norm: TL_Contacts_normalizePhoneField_(row[idx.phone1_normalized] || phone1 || ""),
-        phone2Norm: TL_Contacts_normalizePhoneField_(row[idx.phone2_normalized] || phone2 || ""),
-        emailNorm: TL_Contacts_normalizeEmail_(row[idx.email_normalized] || email || ""),
-        nameNorm: TL_Contacts_normalizeSearchText_(name),
-        aliasNorm: TL_Contacts_normalizeSearchText_(alias),
-        orgNorm: TL_Contacts_normalizeSearchText_(org),
-        roleNorm: TL_Contacts_normalizeSearchText_(role),
-        tagsNorm: TL_Contacts_normalizeSearchText_(tags),
-        labelsNorm: TL_Contacts_normalizeSearchText_(labels)
-      });
+      const rowObj = TL_Contacts_rowValuesToObject_(headers, row);
+      const contact = TL_Contacts_buildSearchContactFromRow_(rowObj);
+      if (!contact.contactId || !contact.name) return;
+      out.push(contact);
     });
   } catch (err) {}
   return out;
@@ -652,8 +843,11 @@ function TL_Contacts_buildSearchHints_(rawText, extraction) {
   const nameHints = [];
   const phoneHints = [];
   const emailHints = [];
+  const emailDomainHints = [];
   const relationshipHints = [];
   const orgHints = [];
+  const roleHints = [];
+  const identityHints = [];
 
   TL_Contacts_normalizeStringArray_(data.name_hints).forEach(function(item) {
     TL_Contacts_pushUniqueHint_(nameHints, item);
@@ -664,16 +858,34 @@ function TL_Contacts_buildSearchHints_(rawText, extraction) {
   TL_Contacts_normalizeStringArray_(data.email_hints).forEach(function(item) {
     TL_Contacts_pushUniqueHint_(emailHints, TL_Contacts_normalizeEmail_(item));
   });
+  TL_Contacts_normalizeStringArray_(data.email_domain_hints).forEach(function(item) {
+    TL_Contacts_pushUniqueHint_(emailDomainHints, String(item || "").trim().toLowerCase().replace(/^@/, ""));
+  });
   TL_Contacts_normalizeStringArray_(data.relationship_hints).forEach(function(item) {
     TL_Contacts_pushUniqueHint_(relationshipHints, item);
   });
   TL_Contacts_normalizeStringArray_(data.org_hints).forEach(function(item) {
     TL_Contacts_pushUniqueHint_(orgHints, item);
   });
+  TL_Contacts_normalizeStringArray_(data.role_hints).forEach(function(item) {
+    TL_Contacts_pushUniqueHint_(roleHints, item);
+  });
+  TL_Contacts_normalizeStringArray_(data.identity_hints).forEach(function(item) {
+    TL_Contacts_pushUniqueHint_(identityHints, item);
+  });
 
   const emailMatches = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
   emailMatches.forEach(function(item) {
-    TL_Contacts_pushUniqueHint_(emailHints, TL_Contacts_normalizeEmail_(item));
+    const normalizedEmail = TL_Contacts_normalizeEmail_(item);
+    TL_Contacts_pushUniqueHint_(emailHints, normalizedEmail);
+    const domain = normalizedEmail.indexOf("@") !== -1 ? normalizedEmail.split("@").pop() : "";
+    if (domain) TL_Contacts_pushUniqueHint_(emailDomainHints, domain);
+  });
+
+  const domainMatches = raw.match(/(?:@)?[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  domainMatches.forEach(function(item) {
+    const cleaned = String(item || "").trim().toLowerCase().replace(/^@/, "");
+    if (cleaned && cleaned.indexOf(".") !== -1) TL_Contacts_pushUniqueHint_(emailDomainHints, cleaned);
   });
 
   const phoneMatches = raw.match(/\d[\d\-\s().]{1,}\d/g) || [];
@@ -695,6 +907,7 @@ function TL_Contacts_buildSearchHints_(rawText, extraction) {
         normalizedQuery.split(" ").forEach(function(token) {
           if (!token) return;
           TL_Contacts_pushUniqueHint_(nameHints, token);
+          TL_Contacts_pushUniqueHint_(identityHints, token);
           if (token.length >= 3) TL_Contacts_pushUniqueHint_(nameHints, token.slice(0, 3));
         });
       }
@@ -706,14 +919,17 @@ function TL_Contacts_buildSearchHints_(rawText, extraction) {
     nameHints: nameHints,
     phoneHints: phoneHints.filter(function(item) { return String(item || "").length >= 3; }),
     emailHints: emailHints,
+    emailDomainHints: emailDomainHints,
     relationshipHints: relationshipHints.map(TL_Contacts_normalizeSearchText_).filter(Boolean),
-    orgHints: orgHints.map(TL_Contacts_normalizeSearchText_).filter(Boolean)
+    orgHints: orgHints.map(TL_Contacts_normalizeSearchText_).filter(Boolean),
+    roleHints: roleHints.map(TL_Contacts_normalizeSearchText_).filter(Boolean),
+    identityHints: identityHints.map(TL_Contacts_normalizeSearchText_).filter(Boolean)
   };
 }
 
 function TL_Contacts_normalizeSearchQueryType_(value) {
   const v = String(value || "").trim().toLowerCase();
-  const allowed = ["name", "name_prefix", "phone_fragment", "email", "relationship", "org"];
+  const allowed = ["name", "name_prefix", "phone_fragment", "email", "email_domain", "relationship", "org", "role", "identity_term"];
   return allowed.indexOf(v) !== -1 ? v : "";
 }
 
@@ -756,9 +972,13 @@ function TL_Contacts_findTopicOwners_(topicId, options, contactsOverride) {
   return (contacts || []).map(function(contact) {
     const handledTopics = TL_Contacts_contactHandledTopics_(contact);
     const routingRole = String(TL_Contacts_parseInternalNotesMap_(contact && contact.notesInternal || contact && contact.notes_internal || "").routing_role || "").trim();
+    const hasTopicOwnership = handledTopics.indexOf(normalizedTopicId) !== -1;
+    const tagText = String(contact && contact.tags || "").toLowerCase();
+    const hasTopicTag = tagText.indexOf(normalizedTopicId.toLowerCase()) !== -1;
     let score = 0;
-    if (handledTopics.indexOf(normalizedTopicId) !== -1) score += 200;
-    if (String(contact && contact.tags || "").toLowerCase().indexOf(normalizedTopicId.toLowerCase()) !== -1) score += 40;
+    if (hasTopicOwnership) score += 200;
+    if (hasTopicTag) score += 40;
+    if (!hasTopicOwnership && !hasTopicTag) return null;
     if (String(contact && contact.role || "").trim()) score += 5;
     if (String(contact && contact.org || "").trim()) score += 5;
     if (score <= 0) return null;
@@ -809,8 +1029,11 @@ function TL_Contacts_buildSearchQueries_(rawText, extraction) {
     if (digits.length >= 3) pushQuery("phone_fragment", digits);
   });
   TL_Contacts_normalizeStringArray_(data.email_hints).forEach(function(item) { pushQuery("email", TL_Contacts_normalizeEmail_(item)); });
+  TL_Contacts_normalizeStringArray_(data.email_domain_hints).forEach(function(item) { pushQuery("email_domain", String(item || "").trim().toLowerCase().replace(/^@/, "")); });
   TL_Contacts_normalizeStringArray_(data.relationship_hints).forEach(function(item) { pushQuery("relationship", item); });
   TL_Contacts_normalizeStringArray_(data.org_hints).forEach(function(item) { pushQuery("org", item); });
+  TL_Contacts_normalizeStringArray_(data.role_hints).forEach(function(item) { pushQuery("role", item); });
+  TL_Contacts_normalizeStringArray_(data.identity_hints).forEach(function(item) { pushQuery("identity_term", item); });
 
   const hints = TL_Contacts_buildSearchHints_(rawText, extraction);
   (hints.nameHints || []).forEach(function(item, idx) {
@@ -818,8 +1041,11 @@ function TL_Contacts_buildSearchQueries_(rawText, extraction) {
   });
   (hints.phoneHints || []).forEach(function(item) { pushQuery("phone_fragment", item); });
   (hints.emailHints || []).forEach(function(item) { pushQuery("email", item); });
+  (hints.emailDomainHints || []).forEach(function(item) { pushQuery("email_domain", item); });
   (hints.relationshipHints || []).forEach(function(item) { pushQuery("relationship", item); });
   (hints.orgHints || []).forEach(function(item) { pushQuery("org", item); });
+  (hints.roleHints || []).forEach(function(item) { pushQuery("role", item); });
+  (hints.identityHints || []).forEach(function(item) { pushQuery("identity_term", item); });
 
   return out.slice(0, 12);
 }
@@ -936,17 +1162,32 @@ function TL_Contacts_destinationForChannel_(contact, channel) {
 function TL_Contacts_scoreSearchCandidate_(contact, query) {
   const reasons = [];
   let score = 0;
-  const phoneFields = [String(contact && contact.phone1Norm || ""), String(contact && contact.phone2Norm || "")].filter(Boolean);
-  const emailField = String(contact && contact.emailNorm || "").trim();
+  const phoneFields = TL_Contacts_mergeMultiValueLists_([
+    [String(contact && contact.phone1Norm || ""), String(contact && contact.phone2Norm || "")],
+    contact && contact.phones
+  ]).map(function(item) {
+    return TL_Contacts_normalizePhoneField_(item);
+  }).filter(Boolean);
+  const emailFields = TL_Contacts_mergeMultiValueLists_([
+    [String(contact && contact.emailNorm || "")],
+    contact && contact.emails
+  ]).map(function(item) {
+    return TL_Contacts_normalizeEmail_(item);
+  }).filter(Boolean);
   const nameFields = [
     TL_Contacts_normalizeSearchText_(contact && contact.name || ""),
     TL_Contacts_normalizeSearchText_(contact && contact.alias || "")
-  ].filter(Boolean);
+  ].concat(Array.isArray(contact && contact.identityTermsNorm) ? contact.identityTermsNorm : []).filter(Boolean);
   const contextFields = [
     TL_Contacts_normalizeSearchText_(contact && contact.org || ""),
     TL_Contacts_normalizeSearchText_(contact && contact.role || ""),
-    TL_Contacts_normalizeSearchText_(contact && contact.tags || "")
-  ].filter(Boolean);
+    TL_Contacts_normalizeSearchText_(contact && contact.tags || ""),
+    TL_Contacts_normalizeSearchText_(contact && contact.labels || ""),
+    TL_Contacts_normalizeSearchText_(contact && contact.personalSummary || ""),
+    TL_Contacts_normalizeSearchText_(contact && contact.businessSummary || ""),
+    TL_Contacts_normalizeSearchText_(contact && contact.currentState || ""),
+    TL_Contacts_normalizeSearchText_(contact && contact.nextAction || "")
+  ].concat(Array.isArray(contact && contact.identityTermsNorm) ? contact.identityTermsNorm : []).filter(Boolean);
   const kind = String(query && query.type || "").trim().toLowerCase();
   const rawValue = String(query && query.value || "").trim();
   const value = kind === "email" ? TL_Contacts_normalizeEmail_(rawValue)
@@ -968,14 +1209,28 @@ function TL_Contacts_scoreSearchCandidate_(contact, query) {
       }
     });
   } else if (kind === "email") {
-    if (emailField === value) {
-      score += 150;
-      reasons.push("exact_email:" + value);
-    } else if (emailField && emailField.indexOf(value) !== -1) {
-      score += 70;
-      reasons.push("partial_email:" + value);
-    }
-  } else if (kind === "relationship" || kind === "org") {
+    emailFields.forEach(function(emailField) {
+      if (emailField === value) {
+        score += 150;
+        reasons.push("exact_email:" + value);
+      } else if (emailField && emailField.indexOf(value) !== -1) {
+        score += 70;
+        reasons.push("partial_email:" + value);
+      }
+    });
+  } else if (kind === "email_domain") {
+    emailFields.forEach(function(emailField) {
+      const domain = emailField.indexOf("@") !== -1 ? emailField.split("@").pop() : "";
+      if (!domain) return;
+      if (domain === value) {
+        score += 90;
+        reasons.push("exact_email_domain:" + value);
+      } else if (domain.indexOf(value) !== -1) {
+        score += 45;
+        reasons.push("partial_email_domain:" + value);
+      }
+    });
+  } else if (kind === "relationship" || kind === "org" || kind === "role" || kind === "identity_term") {
     contextFields.forEach(function(field) {
       if (!field) return;
       if (field === value) {
@@ -1079,6 +1334,339 @@ function TL_Contacts_appendRowObject_(sheet, headers, rowObj) {
 function TL_Contacts_reindexRow_(existing, rowObj, rowNumber) {
   if (!existing) return;
   TL_Contacts_indexExistingRow_(existing, rowObj, rowNumber);
+}
+
+function TL_Contacts_BackfillDealWiseFields_() {
+  const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+  if (!sheetId) return { ok: false, reason: "missing_sheet_id" };
+  const ss = SpreadsheetApp.openById(sheetId);
+  const sh = ss.getSheetByName("CONTACTS");
+  if (!sh || sh.getLastRow() < 2) return { ok: true, updated: 0 };
+  const headers = TL_Contacts_headers_();
+  const values = sh.getRange(2, 1, sh.getLastRow() - 1, headers.length).getValues();
+  let updated = 0;
+  values.forEach(function(rowValues, index) {
+    const row = TL_Contacts_rowValuesToObject_(headers, rowValues);
+    const normalized = TL_Contacts_buildNewRow_(row, String(row.last_updated || row.last_synced_at || new Date().toISOString()).trim());
+    if (!TL_Contacts_rowsEqual_(row, normalized, headers)) {
+      TL_Contacts_writeRowObject_(sh, headers, index + 2, normalized);
+      updated++;
+    }
+  });
+  const identityResult = TL_Contacts_RebuildIdentitySheet_();
+  return {
+    ok: true,
+    updated: updated,
+    identities: identityResult
+  };
+}
+
+function TL_Contacts_RebuildIdentitySheet_() {
+  const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+  if (!sheetId) return { ok: false, reason: "missing_sheet_id" };
+  const ss = SpreadsheetApp.openById(sheetId);
+  const contactsSheet = ss.getSheetByName("CONTACTS");
+  if (!contactsSheet) return { ok: false, reason: "missing_contacts_sheet" };
+  let identitySheet = ss.getSheetByName("CONTACT_IDENTITIES");
+  if (!identitySheet) identitySheet = ss.insertSheet("CONTACT_IDENTITIES");
+
+  const contactHeaders = TL_Contacts_headers_();
+  const identityHeaders = typeof TL_SCHEMA !== "undefined" && TL_SCHEMA.CONTACT_IDENTITIES_HEADERS
+    ? TL_SCHEMA.CONTACT_IDENTITIES_HEADERS.slice()
+    : ["identity_id","crm_id","identity_type","raw_value","normalized_value","label","source","link_status","last_seen_at"];
+  const rows = contactsSheet.getLastRow() >= 2
+    ? contactsSheet.getRange(2, 1, contactsSheet.getLastRow() - 1, contactHeaders.length).getValues()
+    : [];
+  const identityRows = [];
+
+  rows.forEach(function(values) {
+    const row = TL_Contacts_rowValuesToObject_(contactHeaders, values);
+    TL_Contacts_buildIdentityRowsForContact_(row).forEach(function(identityRow) {
+      identityRows.push(identityHeaders.map(function(header) {
+        return identityRow[header] !== undefined ? identityRow[header] : "";
+      }));
+    });
+  });
+
+  identitySheet.clearContents();
+  identitySheet.getRange(1, 1, 1, identityHeaders.length).setValues([identityHeaders]);
+  identitySheet.setFrozenRows(1);
+  if (identityRows.length) {
+    identitySheet.getRange(2, 1, identityRows.length, identityHeaders.length).setValues(identityRows);
+  }
+  return { ok: true, rows: identityRows.length };
+}
+
+function TL_Contacts_buildIdentityRowsForContact_(row) {
+  const safe = TL_Contacts_attachLegacyAliases_(row);
+  const crmId = TL_Contacts_rowContactId_(safe);
+  if (!crmId) return [];
+  const source = String(safe.source_system || "contacts").trim();
+  const seen = {};
+  const out = [];
+  const nowIso = String(safe.last_updated || safe.last_synced_at || new Date().toISOString()).trim();
+
+  function push(identityType, rawValue, normalizedValue, label, sourceValue) {
+    const raw = String(rawValue || "").trim();
+    const normalized = String(normalizedValue || "").trim();
+    if (!raw || !normalized) return;
+    const key = (identityType + "::" + normalized).toLowerCase();
+    if (seen[key]) return;
+    seen[key] = true;
+    out.push({
+      identity_id: "ID_" + crmId + "_" + String(out.length + 1),
+      crm_id: crmId,
+      identity_type: identityType,
+      raw_value: raw,
+      normalized_value: normalized,
+      label: String(label || "").trim(),
+      source: String(sourceValue || source).trim(),
+      link_status: "linked",
+      last_seen_at: nowIso
+    });
+  }
+
+  TL_Contacts_extractIdentityTermsFromRow_(safe).forEach(function(term) {
+    push("term", term, TL_Contacts_normalizeSearchText_(term), "identity term", "manual");
+  });
+  TL_Contacts_extractPhonesFromRow_(safe).forEach(function(phone) {
+    push("phone", phone, TL_Contacts_normalizePhoneField_(phone), "phone", source);
+  });
+  TL_Contacts_extractEmailsFromRow_(safe).forEach(function(email) {
+    push("email", email, TL_Contacts_normalizeEmail_(email), "email", source);
+  });
+  if (String(safe.source_id || "").trim()) {
+    push("source_ref", String(safe.source_id || "").trim(), String(safe.source_id || "").trim(), "source", source);
+  }
+
+  return out;
+}
+
+function TL_Contacts_crmLanguage_(overrideLanguage) {
+  const explicit = String(overrideLanguage || "").trim();
+  if (explicit) return explicit;
+  if (typeof TLW_getSetting_ === "function") {
+    return String(TLW_getSetting_("AI_DEFAULT_LANGUAGE") || "Hebrew").trim() || "Hebrew";
+  }
+  return "Hebrew";
+}
+
+function TL_Contacts_internalText_(hebrewText, englishText, overrideLanguage) {
+  const language = TL_Contacts_crmLanguage_(overrideLanguage);
+  if (typeof TL_Language_IsHebrew_ === "function") {
+    return TL_Language_IsHebrew_(language) ? String(hebrewText || "").trim() : String(englishText || hebrewText || "").trim();
+  }
+  return /^he/i.test(language) ? String(hebrewText || "").trim() : String(englishText || hebrewText || "").trim();
+}
+
+function TL_Contacts_excerpt_(value, limit) {
+  const max = Math.max(Number(limit || 160), 16);
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length <= max ? text : (text.slice(0, max - 1).trim() + "…");
+}
+
+function TL_Contacts_openContactsSheet_() {
+  const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+  if (!sheetId) return null;
+  const ss = SpreadsheetApp.openById(sheetId);
+  let sh = ss.getSheetByName("CONTACTS");
+  if (!sh) {
+    sh = ss.insertSheet("CONTACTS");
+    sh.getRange(1, 1, 1, TL_Contacts_headers_().length).setValues([TL_Contacts_headers_()]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function TL_Contacts_findRowByCrmId_(sheet, headers, crmId) {
+  if (!sheet || !crmId) return { rowNumber: 0, row: null };
+  const values = sheet.getLastRow() >= 2 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues() : [];
+  for (let i = 0; i < values.length; i++) {
+    const candidate = TL_Contacts_rowValuesToObject_(headers, values[i]);
+    if (TL_Contacts_rowContactId_(candidate) === crmId) {
+      return { rowNumber: i + 2, row: candidate };
+    }
+  }
+  return { rowNumber: 0, row: null };
+}
+
+function TL_Contacts_buildRuntimeBaseRow_(crmId, data, nowIso) {
+  const safe = data && typeof data === "object" ? data : {};
+  return TL_Contacts_buildNewRow_({
+    crm_id: crmId,
+    contact_id: crmId,
+    display_name: String(safe.display_name || safe.name || safe.phone || safe.email || crmId).trim(),
+    identity_terms: TL_Contacts_stringifyMultiValueField_(TL_Contacts_mergeMultiValueLists_([
+      TL_Contacts_parseMultiValueField_(safe.identity_terms),
+      [safe.display_name || safe.name || "", safe.phone || "", safe.email || ""]
+    ])),
+    phones: TL_Contacts_stringifyMultiValueField_(TL_Contacts_mergeMultiValueLists_([
+      TL_Contacts_parseMultiValueField_(safe.phones),
+      [safe.phone || ""]
+    ])),
+    emails: TL_Contacts_stringifyMultiValueField_(TL_Contacts_mergeMultiValueLists_([
+      TL_Contacts_parseMultiValueField_(safe.emails),
+      [safe.email || ""]
+    ])),
+    source_system: "dealwise_runtime",
+    source_id: crmId,
+    personal_summary: String(safe.personal_summary || "").trim(),
+    business_summary: String(safe.business_summary || safe.summary || "").trim(),
+    current_state: String(safe.current_state || "").trim(),
+    next_action: String(safe.next_action || "").trim(),
+    last_contact_at: String(safe.last_contact_at || "").trim(),
+    last_updated: nowIso
+  }, nowIso);
+}
+
+function TL_Contacts_applyPatchToRow_(row, patch, nowIso) {
+  const safeRow = TL_Contacts_attachLegacyAliases_(row || {});
+  const data = patch && typeof patch === "object" ? patch : {};
+  const updated = TL_Contacts_attachLegacyAliases_(Object.assign({}, safeRow, {
+    display_name: String(data.display_name || data.name || safeRow.display_name || safeRow.name || "").trim() || TL_Contacts_rowDisplayName_(safeRow),
+    identity_terms: TL_Contacts_stringifyMultiValueField_(TL_Contacts_mergeMultiValueLists_([
+      TL_Contacts_extractIdentityTermsFromRow_(safeRow),
+      TL_Contacts_parseMultiValueField_(data.identity_terms),
+      [data.display_name || data.name || "", data.phone || "", data.email || ""]
+    ])),
+    phones: TL_Contacts_stringifyMultiValueField_(TL_Contacts_mergeMultiValueLists_([
+      TL_Contacts_extractPhonesFromRow_(safeRow),
+      TL_Contacts_parseMultiValueField_(data.phones),
+      [data.phone || ""]
+    ])),
+    emails: TL_Contacts_stringifyMultiValueField_(TL_Contacts_mergeMultiValueLists_([
+      TL_Contacts_extractEmailsFromRow_(safeRow),
+      TL_Contacts_parseMultiValueField_(data.emails),
+      [data.email || ""]
+    ])),
+    personal_summary: TL_Contacts_mergeSummaryText_(safeRow.personal_summary, data.personal_summary || ""),
+    business_summary: TL_Contacts_mergeSummaryText_(safeRow.business_summary, data.business_summary || data.summary || ""),
+    current_state: String(data.current_state || safeRow.current_state || "").trim(),
+    next_action: String(data.next_action || safeRow.next_action || "").trim(),
+    last_contact_at: String(data.last_contact_at || safeRow.last_contact_at || "").trim(),
+    last_updated: nowIso
+  }));
+
+  if (String(data.source_type || "").trim() === "manual_enrichment") {
+    const noteSnippet = TL_Contacts_excerpt_(data.personal_summary || data.business_summary || data.summary || "", 200);
+    if (noteSnippet) {
+      updated.last_note = noteSnippet;
+      updated.last_enriched_at = nowIso;
+    }
+  }
+
+  return updated;
+}
+
+function TL_Contacts_ApplyCrmPatch_(contactId, payload) {
+  const crmId = String(contactId || "").trim();
+  if (!crmId) return { ok: false, reason: "missing_contact_id" };
+  const sh = TL_Contacts_openContactsSheet_();
+  if (!sh) return { ok: false, reason: "missing_sheet_id" };
+  const headers = TL_Contacts_headers_();
+  const located = TL_Contacts_findRowByCrmId_(sh, headers, crmId);
+  const data = payload && typeof payload === "object" ? payload : {};
+  const nowIso = String(data.last_updated || new Date().toISOString()).trim() || new Date().toISOString();
+  let row = located.row;
+  let rowNumber = located.rowNumber;
+  if (!row) {
+    row = TL_Contacts_buildRuntimeBaseRow_(crmId, data, nowIso);
+    TL_Contacts_appendRowObject_(sh, headers, row);
+    rowNumber = sh.getLastRow();
+  }
+  const updated = TL_Contacts_applyPatchToRow_(row, data, nowIso);
+  TL_Contacts_writeRowObject_(sh, headers, rowNumber, updated);
+  return { ok: true, rowNumber: rowNumber, crmId: crmId };
+}
+
+function TL_Contacts_buildGroupedInteractionPatch_(payload) {
+  const data = payload && typeof payload === "object" ? payload : {};
+  return {
+    source_type: "grouped_inbound",
+    display_name: String(data.display_name || data.name || "").trim(),
+    phone: String(data.phone || "").trim(),
+    email: String(data.email || "").trim(),
+    business_summary: String(data.business_summary || data.summary || "").trim(),
+    current_state: String(data.current_state || "").trim(),
+    next_action: String(data.next_action || "").trim(),
+    last_contact_at: String(data.last_contact_at || "").trim(),
+    last_updated: String(data.last_updated || "").trim()
+  };
+}
+
+function TL_Contacts_buildManualEnrichmentWritebackPatch_(payload) {
+  const data = payload && typeof payload === "object" ? payload : {};
+  const noteType = String(data.note_type || "general").trim().toLowerCase() || "general";
+  const noteText = String(data.note_text || data.summary || "").trim();
+  const personalTypes = {
+    personal_context: true,
+    family_event: true,
+    relationship_signal: true,
+    preference: true
+  };
+  const patch = {
+    source_type: "manual_enrichment",
+    display_name: String(data.display_name || data.name || "").trim(),
+    phone: String(data.phone || "").trim(),
+    email: String(data.email || "").trim(),
+    current_state: String(data.current_state || "").trim(),
+    next_action: String(data.next_action || "").trim(),
+    last_updated: String(data.last_updated || "").trim()
+  };
+
+  if (personalTypes[noteType]) patch.personal_summary = noteText;
+  else patch.business_summary = noteText;
+
+  if (noteType === "followup_context" && noteText && !patch.next_action) {
+    patch.next_action = noteText;
+  }
+
+  return patch;
+}
+
+function TL_Contacts_buildOutboundWritebackPatch_(payload, overrideLanguage) {
+  const data = payload && typeof payload === "object" ? payload : {};
+  const language = TL_Contacts_crmLanguage_(overrideLanguage);
+  const explicitSummary = String(data.summary || data.business_summary || "").trim();
+  const outboundText = TL_Contacts_excerpt_(data.outbound_text || data.body || data.proposal || data.text || "", 220);
+  const fallbackSummary = outboundText
+    ? (TL_Contacts_internalText_("נשלחה הודעה ללקוח: ", "Sent outbound message: ", language) + outboundText)
+    : "";
+  return {
+    source_type: "outbound",
+    display_name: String(data.display_name || data.name || "").trim(),
+    phone: String(data.phone || "").trim(),
+    email: String(data.email || "").trim(),
+    business_summary: explicitSummary || fallbackSummary,
+    current_state: String(data.current_state || TL_Contacts_internalText_("ממתינים לתגובה.", "Waiting for reply.", language)).trim(),
+    next_action: String(data.next_action || TL_Contacts_internalText_("להמתין לתגובה ולבדוק אם נדרש מעקב.", "Wait for reply and check whether follow-up is needed.", language)).trim(),
+    last_contact_at: String(data.last_contact_at || new Date().toISOString()).trim(),
+    last_updated: String(data.last_updated || new Date().toISOString()).trim()
+  };
+}
+
+function TL_Contacts_ApplyGroupedInteractionWriteback_(contactId, payload) {
+  return TL_Contacts_ApplyCrmPatch_(contactId, TL_Contacts_buildGroupedInteractionPatch_(payload));
+}
+
+function TL_Contacts_ApplyManualEnrichmentWriteback_(contactId, payload) {
+  return TL_Contacts_ApplyCrmPatch_(contactId, TL_Contacts_buildManualEnrichmentWritebackPatch_(payload));
+}
+
+function TL_Contacts_ApplyOutboundWriteback_(contactId, payload) {
+  return TL_Contacts_ApplyCrmPatch_(contactId, TL_Contacts_buildOutboundWritebackPatch_(payload));
+}
+
+function TL_Contacts_mergeSummaryText_(existingValue, nextValue) {
+  const existing = String(existingValue || "").trim();
+  const next = String(nextValue || "").trim();
+  if (!next) return existing;
+  if (!existing) return next.slice(0, 1200);
+  const existingNorm = TL_Contacts_normalizeSearchText_(existing);
+  const nextNorm = TL_Contacts_normalizeSearchText_(next);
+  if (!nextNorm || existingNorm.indexOf(nextNorm) !== -1) return existing.slice(0, 1200);
+  return (existing + " | " + next).slice(0, 1200);
 }
 
 function TL_Contacts_logSyncResult_(result) {

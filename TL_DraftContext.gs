@@ -114,32 +114,34 @@ function TL_DraftContext_resolveContact_(identity) {
   };
 
   try {
-    const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
-    if (!sheetId) return out;
-    const ss = SpreadsheetApp.openById(sheetId);
-    const sh = ss.getSheetByName("CONTACTS");
-    if (!sh || sh.getLastRow() < 2) return out;
-    const values = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
-    const headers = values[0];
-    const idx = {};
-    headers.forEach(function(header, index) { idx[String(header || "")] = index; });
-
-    for (let i = 1; i < values.length; i++) {
-      const row = values[i];
-      const rowContactId = String(row[idx.contact_id] || "").trim();
-      const rowName = String(row[idx.name] || "").trim();
-      const rowPhone1 = TL_Contacts_normalizePhoneField_(row[idx.phone1_normalized] || row[idx.phone1] || "");
-      const rowPhone2 = TL_Contacts_normalizePhoneField_(row[idx.phone2_normalized] || row[idx.phone2] || "");
-      const rowEmail = TL_Contacts_normalizeEmail_(row[idx.email_normalized] || row[idx.email] || "");
+    const contacts = typeof TL_Contacts_readSearchContacts_ === "function"
+      ? TL_Contacts_readSearchContacts_()
+      : [];
+    for (let i = 0; i < contacts.length; i++) {
+      const contact = contacts[i];
+      const rowContactId = String(contact && (contact.contactId || contact.crmId) || "").trim();
+      const rowName = String(contact && (contact.name || contact.displayName) || "").trim();
+      const phones = TL_Contacts_mergeMultiValueLists_([
+        [contact && contact.phone1, contact && contact.phone2],
+        contact && contact.phones
+      ]).map(function(value) {
+        return TL_Contacts_normalizePhoneField_(value);
+      }).filter(Boolean);
+      const emails = TL_Contacts_mergeMultiValueLists_([
+        [contact && contact.email],
+        contact && contact.emails
+      ]).map(function(value) {
+        return TL_Contacts_normalizeEmail_(value);
+      }).filter(Boolean);
       const matches = (targetContactId && rowContactId === targetContactId) ||
-        (targetPhone && (rowPhone1 === targetPhone || rowPhone2 === targetPhone)) ||
-        (targetEmail && rowEmail === targetEmail);
+        (targetPhone && phones.indexOf(targetPhone) !== -1) ||
+        (targetEmail && emails.indexOf(targetEmail) !== -1);
       if (!matches) continue;
       return {
         contactId: rowContactId || targetContactId,
         name: rowName,
-        phone: rowPhone1 || rowPhone2 || targetPhone,
-        email: rowEmail || targetEmail
+        phone: phones[0] || targetPhone,
+        email: emails[0] || targetEmail
       };
     }
   } catch (err) {}

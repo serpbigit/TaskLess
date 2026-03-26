@@ -252,21 +252,21 @@ function TL_AI_buildContactEnrichmentPrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Required JSON shape:",
-    '{"contact_query":"...","search_queries":[{"type":"name|name_prefix|phone_fragment|email|relationship|org","value":"..."}],"note_type":"personal_context|family_event|business_context|followup_context|preference|relationship_signal|general","note_text":"...","summary":"...","proposal":"..."}',
+    '{"contact_query":"...","search_queries":[{"type":"name|name_prefix|phone_fragment|email|email_domain|relationship|org|role|identity_term","value":"..."}],"note_type":"personal_context|family_event|business_context|followup_context|preference|relationship_signal|general","note_text":"...","summary":"...","proposal":"..."}',
     "Rules:",
-    "contact_query should be the person name, phone, or email mentioned by the Boss.",
+    "contact_query should be the person name, nickname, role, relationship, phone, email, or domain mentioned by the Boss.",
     "search_queries should be an ordered list of separate CONTACTS searches to try.",
-    "Prefer including both Hebrew and English spellings when useful, plus a short prefix and any phone fragment.",
+    "Prefer including both Hebrew and English spellings when useful, plus short prefixes, any phone fragment, any email fragment, and an email_domain when present.",
     "Do not combine name and phone into one search string. Return separate query objects.",
-    "Valid search query types are: name, name_prefix, phone_fragment, email, relationship, org.",
+    "Valid search query types are: name, name_prefix, phone_fragment, email, email_domain, relationship, org, role, identity_term.",
     "note_text should contain only the durable fact/context worth saving for future drafts.",
     "summary should be concise and mention the contact plus the saved context.",
     "proposal should be phrased as an approval sentence for adding contact memory/enrichment.",
     "If the Boss message does not clearly contain a contact enrichment request, return empty strings and note_type=general.",
     "Examples:",
     '{"contact_query":"David","search_queries":[{"type":"name","value":"David"},{"type":"name_prefix","value":"Dav"}],"note_type":"family_event","note_text":"I met David and his son has a wedding next week.","summary":"דוד: לבן שלו יש חתונה בשבוע הבא.","proposal":"להוסיף לדוד הערת קשר: לבן שלו יש חתונה בשבוע הבא."}',
-    '{"contact_query":"Sarah","search_queries":[{"type":"name","value":"Sarah"},{"type":"name_prefix","value":"Sar"}],"note_type":"business_context","note_text":"Waiting on the quote sent last week.","summary":"שרה: ממתינה להצעת המחיר שנשלחה בשבוע שעבר.","proposal":"להוסיף לשרה הקשר עסקי: ממתינה להצעת המחיר שנשלחה בשבוע שעבר."}',
-    '{"contact_query":"אופיר","search_queries":[{"type":"name","value":"אופיר"},{"type":"name","value":"Ofir"},{"type":"name_prefix","value":"אופ"},{"type":"phone_fragment","value":"963"}],"note_type":"general","note_text":"לחזור לאופיר לגבי הסיכום.","summary":"אופיר: לחזור לגבי הסיכום.","proposal":"להוסיף לאופיר תזכורת קשר: לחזור לגבי הסיכום."}',
+    '{"contact_query":"Sarah","search_queries":[{"type":"name","value":"Sarah"},{"type":"name_prefix","value":"Sar"},{"type":"email_domain","value":"gmail.com"}],"note_type":"business_context","note_text":"Waiting on the quote sent last week.","summary":"שרה: ממתינה להצעת המחיר שנשלחה בשבוע שעבר.","proposal":"להוסיף לשרה הקשר עסקי: ממתינה להצעת המחיר שנשלחה בשבוע שעבר."}',
+    '{"contact_query":"the contractor","search_queries":[{"type":"identity_term","value":"contractor"},{"type":"role","value":"installer"},{"type":"phone_fragment","value":"963"}],"note_type":"general","note_text":"לחזור אליו לגבי הסיכום.","summary":"איש הקשר: לחזור לגבי הסיכום.","proposal":"להוסיף לאיש הקשר תזכורת קשר: לחזור לגבי הסיכום."}',
     "Boss message:",
     String(inputText || "")
   ].join("\n");
@@ -280,19 +280,20 @@ function TL_AI_buildBossContactLookupPrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Required JSON shape:",
-    '{"contact_query":"...","search_queries":[{"type":"name|name_prefix|phone_fragment|email|relationship|org","value":"..."}],"reply_preamble":"..."}',
+    '{"contact_query":"...","search_queries":[{"type":"name|name_prefix|phone_fragment|email|email_domain|relationship|org|role|identity_term","value":"..."}],"reply_preamble":"..."}',
     "Rules:",
     "contact_query should be the person name, phone, email, role, or relationship the Boss is asking about.",
     "search_queries should be an ordered list of separate CONTACTS searches to try.",
     "Prefer including both Hebrew and English spellings when useful, plus a short prefix and any phone fragment.",
     "Do not combine name and phone into one search string. Return separate query objects.",
-    "Valid search query types are: name, name_prefix, phone_fragment, email, relationship, org.",
+    "Valid search query types are: name, name_prefix, phone_fragment, email, email_domain, relationship, org, role, identity_term.",
     "reply_preamble should be one short sentence in the Boss UI language describing that TaskLess is looking up the contact.",
     "Do not invent facts.",
     "Examples:",
     '{"contact_query":"David","search_queries":[{"type":"name","value":"David"},{"type":"name","value":"דוד"},{"type":"name_prefix","value":"Dav"}],"reply_preamble":"בודקת את איש הקשר דוד."}',
     '{"contact_query":"wife","search_queries":[{"type":"relationship","value":"wife"}],"reply_preamble":"בודקת את איש הקשר המתאים."}',
     '{"contact_query":"972506847373","search_queries":[{"type":"phone_fragment","value":"7373"}],"reply_preamble":"בודקת את איש הקשר לפי מספר הטלפון."}',
+    '{"contact_query":"gmail contractor","search_queries":[{"type":"email_domain","value":"gmail.com"},{"type":"identity_term","value":"contractor"}],"reply_preamble":"בודקת את איש הקשר לפי הרמזים שנתת."}',
     "Boss message:",
     String(inputText || "")
   ].join("\n");
@@ -392,6 +393,8 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Do not wrap the JSON in markdown fences.",
     "Examples:",
     '{"intent":"show_menu","route":"menu","summary_kind":"menu","capture_state":"","menu_target":"main","confidence":0.98,"needs_clarification":"false","reply":"פותח את התפריט הראשי.","parameters":{"query":"menu","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"show_menu","route":"menu","summary_kind":"menu","capture_state":"","menu_target":"main","confidence":0.97,"needs_clarification":"false","reply":"פותח את התפריט הראשי.","parameters":{"query":"take me back to the menu","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
+    '{"intent":"show_menu","route":"menu","summary_kind":"menu","capture_state":"","menu_target":"main","confidence":0.97,"needs_clarification":"false","reply":"פותח את התפריט הראשי.","parameters":{"query":"תחזירי אותי לתפריט","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"show_capabilities","route":"menu","summary_kind":"none","capture_state":"","menu_target":"capabilities","confidence":0.98,"needs_clarification":"false","reply":"מראה לך מה אני יכולה לעשות.","parameters":{"query":"what can you do","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"find_contact","route":"summary","summary_kind":"contact_lookup","capture_state":"","menu_target":"","confidence":0.94,"needs_clarification":"false","reply":"בודקת את איש הקשר שביקשת.","parameters":{"query":"find Dana","capture_kind":"","capture_mode":"","time_hint":"","target":"Dana"}}',
     '{"intent":"find_context","route":"summary","summary_kind":"context_lookup","capture_state":"","menu_target":"","confidence":0.94,"needs_clarification":"false","reply":"אוספת את ההקשר האחרון שביקשת.","parameters":{"query":"show recent messages with Dana","capture_kind":"","capture_mode":"","time_hint":"","target":"Dana"}}',
@@ -1741,7 +1744,7 @@ function TL_AI_normalizeStringArray_(value) {
 
 function TL_AI_normalizeSearchQueryType_(value) {
   const v = String(value || "").trim().toLowerCase();
-  const allowed = ["name", "name_prefix", "phone_fragment", "email", "relationship", "org"];
+  const allowed = ["name", "name_prefix", "phone_fragment", "email", "email_domain", "relationship", "org", "role", "identity_term"];
   return allowed.indexOf(v) !== -1 ? v : "name";
 }
 
