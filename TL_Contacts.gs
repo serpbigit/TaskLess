@@ -108,10 +108,6 @@ function TL_Contacts_SyncGoogleContacts(options) {
     }
   }
 
-  if (!dryRun) {
-    TL_Contacts_RebuildIdentitySheet_();
-  }
-
   TL_Contacts_logSyncResult_(result);
   result.sample = result.sample.slice(0, 10);
   TL_Contacts_logRunnerResult_("TL_Contacts_SyncGoogleContacts", result);
@@ -1353,48 +1349,14 @@ function TL_Contacts_BackfillDealWiseFields_() {
       updated++;
     }
   });
-  const identityResult = TL_Contacts_RebuildIdentitySheet_();
   return {
     ok: true,
-    updated: updated,
-    identities: identityResult
+    updated: updated
   };
 }
 
 function TL_Contacts_RebuildIdentitySheet_() {
-  const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
-  if (!sheetId) return { ok: false, reason: "missing_sheet_id" };
-  const ss = SpreadsheetApp.openById(sheetId);
-  const contactsSheet = ss.getSheetByName("CONTACTS");
-  if (!contactsSheet) return { ok: false, reason: "missing_contacts_sheet" };
-  let identitySheet = ss.getSheetByName("CONTACT_IDENTITIES");
-  if (!identitySheet) identitySheet = ss.insertSheet("CONTACT_IDENTITIES");
-
-  const contactHeaders = TL_Contacts_headers_();
-  const identityHeaders = typeof TL_SCHEMA !== "undefined" && TL_SCHEMA.CONTACT_IDENTITIES_HEADERS
-    ? TL_SCHEMA.CONTACT_IDENTITIES_HEADERS.slice()
-    : ["identity_id","crm_id","identity_type","raw_value","normalized_value","label","source","link_status","last_seen_at"];
-  const rows = contactsSheet.getLastRow() >= 2
-    ? contactsSheet.getRange(2, 1, contactsSheet.getLastRow() - 1, contactHeaders.length).getValues()
-    : [];
-  const identityRows = [];
-
-  rows.forEach(function(values) {
-    const row = TL_Contacts_rowValuesToObject_(contactHeaders, values);
-    TL_Contacts_buildIdentityRowsForContact_(row).forEach(function(identityRow) {
-      identityRows.push(identityHeaders.map(function(header) {
-        return identityRow[header] !== undefined ? identityRow[header] : "";
-      }));
-    });
-  });
-
-  identitySheet.clearContents();
-  identitySheet.getRange(1, 1, 1, identityHeaders.length).setValues([identityHeaders]);
-  identitySheet.setFrozenRows(1);
-  if (identityRows.length) {
-    identitySheet.getRange(2, 1, identityRows.length, identityHeaders.length).setValues(identityRows);
-  }
-  return { ok: true, rows: identityRows.length };
+  return { ok: true, skipped: true, reason: "contacts_only_schema" };
 }
 
 function TL_Contacts_buildIdentityRowsForContact_(row) {

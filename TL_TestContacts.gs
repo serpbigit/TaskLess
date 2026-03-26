@@ -9,7 +9,7 @@ function TL_TestContacts_RunAll() {
     match_by_phone: TL_TestContacts_MatchByPhoneRun(),
     preserve_manual_fields: TL_TestContacts_PreserveManualFieldsRun(),
     dealwise_shape: TL_TestContacts_DealWiseShapeRun(),
-    identity_rows: TL_TestContacts_IdentityRowsRun(),
+    contacts_only_schema: TL_TestContacts_ContactsOnlySchemaRun(),
     summary_merge: TL_TestContacts_SummaryMergeRun(),
     manual_enrichment_patch: TL_TestContacts_ManualEnrichmentPatchRun(),
     outbound_patch: TL_TestContacts_OutboundPatchRun(),
@@ -21,7 +21,6 @@ function TL_TestContacts_RunAll() {
     resolve_identity_terms: TL_TestContacts_ResolveIdentityTermsRun(),
     resolve_request_email: TL_TestContacts_ResolveRequestEmailRun(),
     resolve_request_ambiguous: TL_TestContacts_ResolveRequestAmbiguousRun(),
-    topic_owners: TL_TestContacts_TopicOwnersRun(),
     prepare_outbound_recipient: TL_TestContacts_PrepareOutboundRecipientRun(),
     outbound_card_format: TL_TestContacts_OutboundCardFormatRun()
   };
@@ -155,8 +154,8 @@ function TL_TestContacts_DealWiseShapeRun() {
   };
 }
 
-function TL_TestContacts_IdentityRowsRun() {
-  const rows = TL_Contacts_buildIdentityRowsForContact_({
+function TL_TestContacts_ContactsOnlySchemaRun() {
+  const row = TL_Contacts_buildNewRow_({
     crm_id: "CRM_2",
     display_name: "Dana Banker",
     identity_terms: "Dana\nדנה\nthe banker",
@@ -165,15 +164,16 @@ function TL_TestContacts_IdentityRowsRun() {
     source_system: "google_contacts",
     source_id: "people/c123",
     last_updated: "2026-03-26T10:00:00Z"
-  });
-  const types = rows.map(function(item) { return String(item.identity_type || ""); });
+  }, "2026-03-26T10:00:00Z");
+  const skipped = TL_Contacts_RebuildIdentitySheet_();
   return {
-    ok: rows.length >= 5 &&
-      types.indexOf("term") !== -1 &&
-      types.indexOf("phone") !== -1 &&
-      types.indexOf("email") !== -1 &&
-      types.indexOf("source_ref") !== -1,
-    rows: rows
+    ok: String(row.identity_terms || "").indexOf("the banker") !== -1 &&
+      String(row.phones || "").indexOf("972501111111") !== -1 &&
+      String(row.emails || "").indexOf("dana@example.com") !== -1 &&
+      skipped && skipped.ok === true &&
+      skipped.skipped === true,
+    row: row,
+    identity_sheet: skipped
   };
 }
 
@@ -460,44 +460,6 @@ function TL_TestContacts_ResolveIdentityTermsRun() {
   return {
     ok: !!(result && result.contact && result.contact.contactId === "CRM_REL_1"),
     result: result
-  };
-}
-
-function TL_TestContacts_TopicOwnersRun() {
-  const contacts = [
-    {
-      contactId: "GC_1",
-      name: "Dana Banker",
-      alias: "",
-      org: "Leumi",
-      role: "Banker",
-      tags: "bank",
-      email: "dana@example.com",
-      phone1: "972501111111",
-      phone2: "",
-      notesInternal: "handled_topics=topic_documents_needed,topic_bank_response\nrouting_role=banker"
-    },
-    {
-      contactId: "GC_2",
-      name: "Liat Insurance",
-      alias: "",
-      org: "Clal",
-      role: "Insurance Agent",
-      tags: "insurance",
-      email: "liat@example.com",
-      phone1: "972502222222",
-      phone2: "",
-      notesInternal: "handled_topics=topic_insurance\nrouting_role=insurance"
-    }
-  ];
-
-  const owners = TL_Contacts_findTopicOwners_("topic_documents_needed", { limit: 3 }, contacts);
-  return {
-    ok: owners.length === 1 &&
-      owners[0].contactId === "GC_1" &&
-      owners[0].routingRole === "banker" &&
-      owners[0].handledTopics.indexOf("topic_bank_response") !== -1,
-    owners: owners
   };
 }
 

@@ -151,34 +151,26 @@ function TL_DraftContext_resolveContact_(identity) {
 
 function TL_DraftContext_fetchEnrichments_(contact, options) {
   const out = [];
-  const contactId = String(contact && contact.contactId || "").trim();
-  if (!contactId) return out;
-  try {
-    const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
-    if (!sheetId) return out;
-    const ss = SpreadsheetApp.openById(sheetId);
-    const sh = ss.getSheetByName("CONTACT_ENRICHMENTS");
-    if (!sh || sh.getLastRow() < 2) return out;
-    const values = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
-    const headers = values[0];
-    const idx = {};
-    headers.forEach(function(header, index) { idx[String(header || "")] = index; });
-    const rows = values.slice(1).filter(function(row) {
-      return String(row[idx.contact_id] || "").trim() === contactId;
-    }).sort(function(a, b) {
-      return TL_DraftContext_safeDate_(b[idx.timestamp]).getTime() - TL_DraftContext_safeDate_(a[idx.timestamp]).getTime();
-    });
-    const limit = Number((options && options.enrichmentLimit) || TL_DRAFT_CONTEXT.ENRICHMENT_LIMIT);
-    rows.slice(0, limit).forEach(function(row) {
-      out.push({
-        timestamp: TL_DraftContext_safeDate_(row[idx.timestamp]).toISOString(),
-        noteType: String(row[idx.note_type] || "").trim(),
-        noteText: String(row[idx.note_text] || "").trim(),
-        source: String(row[idx.source] || "").trim()
-      });
-    });
-  } catch (err) {}
-  return out;
+  const safe = contact && typeof contact === "object" ? contact : {};
+  const nowIso = new Date().toISOString();
+  const personal = String(safe.personalSummary || safe.personal_summary || "").trim();
+  const business = String(safe.businessSummary || safe.business_summary || "").trim();
+  const state = String(safe.currentState || safe.current_state || "").trim();
+  const nextAction = String(safe.nextAction || safe.next_action || "").trim();
+  if (personal) {
+    out.push({ timestamp: nowIso, noteType: "personal_summary", noteText: personal, source: "contacts_row" });
+  }
+  if (business) {
+    out.push({ timestamp: nowIso, noteType: "business_summary", noteText: business, source: "contacts_row" });
+  }
+  if (state) {
+    out.push({ timestamp: nowIso, noteType: "current_state", noteText: state, source: "contacts_row" });
+  }
+  if (nextAction) {
+    out.push({ timestamp: nowIso, noteType: "next_action", noteText: nextAction, source: "contacts_row" });
+  }
+  const limit = Number((options && options.enrichmentLimit) || TL_DRAFT_CONTEXT.ENRICHMENT_LIMIT);
+  return out.slice(0, limit > 0 ? limit : TL_DRAFT_CONTEXT.ENRICHMENT_LIMIT);
 }
 
 function TL_DraftContext_fetchEmails_(contact, options) {
@@ -450,45 +442,7 @@ function TL_DraftContext_renderTopicExampleSection_(topicExamples) {
 }
 
 function TL_DraftContext_fetchTopics_(contact, options) {
-  const out = [];
-  try {
-    const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
-    if (!sheetId) return out;
-    const ss = SpreadsheetApp.openById(sheetId);
-    const sh = ss.getSheetByName("TOPICS");
-    if (!sh || sh.getLastRow() < 2) return out;
-    const values = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
-    const headers = values[0];
-    const idx = {};
-    headers.forEach(function(header, index) {
-      idx[String(header || "")] = index;
-    });
-
-    const preferredContactId = String(contact && contact.contactId || "").trim();
-    const rows = values.slice(1).map(function(row, index) {
-      return TL_DraftContext_topicRowToObject_(headers, row, index + 2);
-    }).filter(function(item) {
-      return !!String(item.topicId || "").trim();
-    }).sort(function(a, b) {
-      const aContactMatch = preferredContactId && String(a.contactId || "").trim() === preferredContactId ? 1 : 0;
-      const bContactMatch = preferredContactId && String(b.contactId || "").trim() === preferredContactId ? 1 : 0;
-      if (bContactMatch !== aContactMatch) return bContactMatch - aContactMatch;
-      const aUsage = Number(a.usageCount || 0);
-      const bUsage = Number(b.usageCount || 0);
-      if (bUsage !== aUsage) return bUsage - aUsage;
-      const aLast = TL_DraftContext_safeDate_(a.lastUsedAt).getTime();
-      const bLast = TL_DraftContext_safeDate_(b.lastUsedAt).getTime();
-      if (bLast !== aLast) return bLast - aLast;
-      return String(a.topicId || "").localeCompare(String(b.topicId || ""));
-    });
-
-    const limit = Number((options && options.topicLimit) || TL_DRAFT_CONTEXT.TOPIC_LIMIT);
-    rows.slice(0, limit > 0 ? limit : TL_DRAFT_CONTEXT.TOPIC_LIMIT).forEach(function(item) {
-      item.recentExamplesPreview = TL_DraftContext_preview_(String(item.recentExamplesJson || ""), 120);
-      out.push(item);
-    });
-  } catch (err) {}
-  return out;
+  return [];
 }
 
 function TL_DraftContext_topicRowToObject_(headers, row, rowNumber) {

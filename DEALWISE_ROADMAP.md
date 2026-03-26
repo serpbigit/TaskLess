@@ -21,9 +21,9 @@ Done when:
 
 ## Phase 2. Contact Model Upgrade
 - redesign `CONTACTS` into the DealWise person schema
-- add `CONTACT_IDENTITIES` for phones and emails
-- keep `CONTACT_ENRICHMENTS` append-only
-- support manual link and manual merge
+- keep phones, emails, and identity terms directly on the `CONTACTS` row
+- keep manual and automatic enrichment directly on the `CONTACTS` row
+- support safe lookup and manual resolution without adding extra CRM tabs
 
 Done when:
 - one person can own multiple phones and emails
@@ -54,7 +54,7 @@ Done when:
 ## Phase 5. Reply Context Rework
 - make same-person history the first retrieval source
 - use CRM summaries, recent WhatsApps, recent emails, and same-person approved replies
-- demote topics to optional metadata only
+- remove topics from the active MVP schema path
 - keep generic safe drafts when context is weak
 
 Done when:

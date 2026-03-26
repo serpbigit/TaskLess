@@ -8,7 +8,6 @@ The current codebase already contains strong reusable infrastructure:
 - Gmail ingest and send
 - Sheets schema/bootstrap
 - contact sync and lookup
-- append-only enrichment storage
 - approval packet UX
 - time-driven orchestrator workers
 - logging and smoke-test runners
@@ -32,11 +31,22 @@ The DealWise architecture should reuse those foundations and replace the old pro
 
 Primary active tables:
 - `CONTACTS` as the person CRM table
-- `CONTACT_IDENTITIES` as the multi-phone/multi-email mapping table
-- `CONTACT_ENRICHMENTS` as append-only durable memory
 - `INBOX` as the operational communication ledger
 - `SETTINGS`
 - `LOG`
+- `ARCHIVE`
+- `AI_Cost_Tracker`
+
+For the DealWise MVP, person memory should live directly on the `CONTACTS` row:
+- `identity_terms`
+- `phones`
+- `emails`
+- `personal_summary`
+- `business_summary`
+- `current_state`
+- `next_action`
+- `last_contact_at`
+- `last_updated`
 
 ### 4. Grouped Interaction Builder
 
@@ -118,4 +128,19 @@ The code still uses `TL_*.gs` runtime files.
 For now:
 - keep runtime naming stable
 - change product logic, sheets, prompts, and menus first
+
+## Active MVP Tabs
+
+Keep:
+- `INBOX`
+- `CONTACTS`
+- `SETTINGS`
+- `LOG`
+- `ARCHIVE`
+- `AI_Cost_Tracker`
+
+Do not rely on separate MVP tabs for:
+- contact identities
+- append-only enrichments
+- topic registry
 - rename internal file prefixes only after the DealWise MVP works end to end

@@ -123,7 +123,6 @@ function TL_Capabilities_BuildBossFacingSummary_() {
     "4. " + TL_Language_UiText_("להכין הודעות וטיוטות לאישור", "Prepare messages and drafts for approval"),
     "5. " + TL_Language_UiText_("לרכז מה פתוח, מה דחוף ומה ממתין לאישור", "Show what is open, urgent, or waiting for approval"),
     "6. " + TL_Language_UiText_("לשמור מידע חשוב על אנשי קשר", "Save important contact memory"),
-    "7. " + TL_Language_UiText_("לרכז מועמדי נושא ולשפר הקשר לתשובות עתידיות", "Review topic candidates and improve future reply context"),
     "",
     TL_Language_UiText_("אפשר פשוט לכתוב חופשי, למשל:", "You can also just ask naturally, for example:"),
     TL_Language_UiText_("\"תפתחי לי משימה להתקשר לדנה מחר\"", "\"Create a task to call Dana tomorrow\""),
@@ -145,40 +144,13 @@ function TL_Capabilities_registryDefs_() {
       description: "Read recent operational rows from the unified ledger."
     },
     {
-      id: "QUERY_TOPIC_REGISTRY",
-      category: "query",
-      fn: "TL_DraftContext_fetchTopics_",
-      approval_required: false,
-      reads: ["TOPICS"],
-      channels: [],
-      description: "Read customer-specific topic vocabulary from TOPICS."
-    },
-    {
-      id: "QUERY_TOPIC_EXAMPLES",
-      category: "query",
-      fn: "TL_DraftContext_fetchTopicExamples_",
-      approval_required: false,
-      reads: ["INBOX"],
-      channels: ["whatsapp","email"],
-      description: "Fetch recent same-topic examples for drafting context."
-    },
-    {
-      id: "QUERY_TOPIC_OWNERS",
-      category: "query",
-      fn: "TL_DraftContext_fetchTopicOwners_",
-      approval_required: false,
-      reads: ["CONTACTS"],
-      channels: [],
-      description: "Find likely contacts who usually handle the current topic."
-    },
-    {
       id: "QUERY_CONTACT_ENRICHMENTS",
       category: "query",
       fn: "TL_DraftContext_fetchEnrichments_",
       approval_required: false,
-      reads: ["CONTACT_ENRICHMENTS"],
+      reads: ["CONTACTS"],
       channels: [],
-      description: "Read recent durable relationship/context notes for a contact."
+      description: "Read the CRM memory fields stored directly on the contact row."
     },
     {
       id: "QUERY_CONTACTS_SEARCH",
@@ -212,7 +184,7 @@ function TL_Capabilities_registryDefs_() {
       category: "draft",
       fn: "TL_DraftContext_BuildForInboxRowValues_",
       approval_required: false,
-      reads: ["INBOX","CONTACT_ENRICHMENTS","TOPICS","CONTACTS"],
+      reads: ["INBOX","CONTACTS"],
       channels: ["whatsapp","email"],
       description: "Build compact drafting context for an INBOX record."
     },
@@ -221,7 +193,7 @@ function TL_Capabilities_registryDefs_() {
       category: "draft",
       fn: "TL_DraftContext_BuildForEmailSnapshot_",
       approval_required: false,
-      reads: ["INBOX","CONTACT_ENRICHMENTS","TOPICS","CONTACTS"],
+      reads: ["INBOX","CONTACTS"],
       channels: ["email"],
       description: "Build compact drafting context for an email thread snapshot."
     },
@@ -236,34 +208,14 @@ function TL_Capabilities_registryDefs_() {
       description: "Resolve recipient candidates and prepare destination fields for outbound capture items."
     },
     {
-      id: "UPSERT_TOPIC_REGISTRY",
-      category: "persist",
-      fn: "TL_Topics_PromoteCandidate_",
-      approval_required: true,
-      reads: ["INBOX","TOPICS"],
-      writes: ["TOPICS","INBOX"],
-      channels: [],
-      description: "Promote an approved topic candidate into TOPICS and update matching INBOX rows."
-    },
-    {
-      id: "DISMISS_TOPIC_CANDIDATE",
-      category: "persist",
-      fn: "TL_Topics_DismissCandidate_",
-      approval_required: true,
-      reads: ["INBOX"],
-      writes: ["INBOX"],
-      channels: [],
-      description: "Dismiss a topic candidate and clear it from matching INBOX rows."
-    },
-    {
       id: "WRITE_CONTACT_ENRICHMENT",
       category: "persist",
       fn: "TL_Menu_BuildContactEnrichmentProposalRow_",
       approval_required: true,
       reads: ["CONTACTS"],
-      writes: ["CONTACT_ENRICHMENTS","INBOX"],
+      writes: ["CONTACTS","INBOX"],
       channels: [],
-      description: "Prepare and persist approved contact enrichment notes."
+      description: "Prepare and persist approved contact memory directly into CONTACTS."
     },
     {
       id: "SEND_APPROVED_WHATSAPP",

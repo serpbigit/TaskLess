@@ -1396,90 +1396,10 @@ function TL_AI_buildTopicNotes_(existingNotes, topicDecision) {
 }
 
 function TL_AI_upsertTopicRegistry_(options) {
-  const opts = options || {};
-  const topicDecision = opts.topicDecision || {};
-  const values = opts.values || [];
-  const recordContext = opts.recordContext || {};
-  const topicId = String(topicDecision.topic_id || "").trim();
-  if (!topicId) {
-    return { ok: true, skipped: true, reason: "missing_registry_topic_id" };
-  }
-
-  const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
-  if (!sheetId) return { ok: false, reason: "missing_sheet_id" };
-  const ss = SpreadsheetApp.openById(sheetId);
-  let sh = ss.getSheetByName("TOPICS");
-  if (!sh) {
-    sh = ss.insertSheet("TOPICS");
-  }
-  const headers = TL_SCHEMA && TL_SCHEMA.TOPICS_HEADERS ? TL_SCHEMA.TOPICS_HEADERS : ["topic_id","contact_id","contact_name","topic_summary","last_used_at","usage_count","recent_examples_json","notes"];
-  const range = sh.getRange(1, 1, 1, headers.length);
-  const existingHeaders = range.getValues()[0];
-  const needsHeaders = existingHeaders.some(function(value, index) {
-    return String(value || "") !== String(headers[index] || "");
-  });
-  if (needsHeaders) {
-    range.setValues([headers]);
-    sh.setFrozenRows(1);
-  }
-
-  const normalizedKey = TL_AI_normalizeTopicSlug_(topicId).toLowerCase();
-  const rowCount = sh.getLastRow();
-  let rowNumber = 0;
-  if (rowCount >= 2) {
-    const valuesRange = sh.getRange(2, 1, rowCount - 1, headers.length).getValues();
-    for (let i = 0; i < valuesRange.length; i++) {
-      const rowTopicId = String(valuesRange[i][0] || "").trim();
-      if (TL_AI_normalizeTopicSlug_(rowTopicId).toLowerCase() === normalizedKey) {
-        rowNumber = i + 2;
-        break;
-      }
-    }
-  }
-
-  const contact = recordContext.contact || {};
-  const nowIso = String(opts.nowIso || new Date().toISOString()).trim() || new Date().toISOString();
-  const example = TL_AI_topicRegistryExampleFromValues_(values, topicDecision, opts.summary || topicDecision.topic_summary || "", opts.sourceLabel || "");
-  const existingRow = rowNumber ? sh.getRange(rowNumber, 1, 1, headers.length).getValues()[0] : [];
-  const nextContactId = String(recordContext.contactId || contact.contactId || existingRow[1] || "").trim();
-  const nextContactName = String(recordContext.contactName || contact.name || existingRow[2] || "").trim();
-  const nextTopicSummary = String(topicDecision.topic_summary || existingRow[3] || "").trim();
-  const prevUsage = Number(existingRow[5] || 0);
-  const nextUsage = rowNumber ? (isFinite(prevUsage) && prevUsage > 0 ? prevUsage + 1 : 1) : 1;
-  const prevExamplesJson = String(existingRow[6] || "[]").trim();
-  const nextExamplesJson = TL_AI_mergeTopicExamples_(prevExamplesJson, example);
-  const nextNotes = String(existingRow[7] || "").trim();
-  const row = [
-    topicId,
-    nextContactId,
-    nextContactName,
-    nextTopicSummary,
-    nowIso,
-    nextUsage,
-    nextExamplesJson,
-    nextNotes
-  ];
-
-  if (rowNumber) {
-    sh.getRange(rowNumber, 1, 1, headers.length).setValues([row]);
-    return {
-      ok: true,
-      rowNumber: rowNumber,
-      topic_id: topicId,
-      updated: true,
-      created: false,
-      registrySize: rowCount - 1
-    };
-  }
-
-  sh.appendRow(row);
   return {
     ok: true,
-    rowNumber: sh.getLastRow(),
-    topic_id: topicId,
-    updated: false,
-    created: true,
-    registrySize: sh.getLastRow() - 1
+    skipped: true,
+    reason: "contacts_only_schema"
   };
 }
 

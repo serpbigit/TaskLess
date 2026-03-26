@@ -26,15 +26,6 @@ const TL_SCHEMA = {
     "source_system","source_id","phone1_normalized","phone2_normalized","email_normalized","labels","sync_status","last_synced_at","notes_internal",
     "crm_id","display_name","identity_terms","phones","emails","personal_summary","business_summary","current_state","next_action","last_contact_at","last_updated"
   ],
-  CONTACT_IDENTITIES_HEADERS: [
-    "identity_id","crm_id","identity_type","raw_value","normalized_value","label","source","link_status","last_seen_at"
-  ],
-  CONTACT_ENRICHMENTS_HEADERS: [
-    "timestamp","contact_id","contact_name","note_type","note_text","source","linked_record_id","topic_id","notes"
-  ],
-  TOPICS_HEADERS: [
-    "topic_id","contact_id","contact_name","topic_summary","last_used_at","usage_count","recent_examples_json","notes"
-  ],
   SETTINGS_HEADERS: [
     "key","value","description"
   ],
@@ -53,9 +44,6 @@ const TL_SCHEMA = {
     "INBOX",
     "ARCHIVE",
     "CONTACTS",
-    "CONTACT_IDENTITIES",
-    "CONTACT_ENRICHMENTS",
-    "TOPICS",
     "SETTINGS",
     "LOG",
     "AI_Cost_Tracker"
@@ -101,9 +89,6 @@ function TL_EnsureSchema() {
   ensureTab_(ss, "INBOX", TL_SCHEMA.INBOX_HEADERS, false);
   ensureTab_(ss, "ARCHIVE", TL_SCHEMA.INBOX_HEADERS, false);
   ensureTab_(ss, "CONTACTS", TL_SCHEMA.CONTACTS_HEADERS, false);
-  ensureTab_(ss, "CONTACT_IDENTITIES", TL_SCHEMA.CONTACT_IDENTITIES_HEADERS, false);
-  ensureTab_(ss, "CONTACT_ENRICHMENTS", TL_SCHEMA.CONTACT_ENRICHMENTS_HEADERS, false);
-  ensureTab_(ss, "TOPICS", TL_SCHEMA.TOPICS_HEADERS, false);
   ensureTab_(ss, "SETTINGS", TL_SCHEMA.SETTINGS_HEADERS, false);
   ensureTab_(ss, "LOG", TL_SCHEMA.LOG_HEADERS, false);
   ensureTab_(ss, "AI_Cost_Tracker", TL_SCHEMA.AI_COST_TRACKER_HEADERS, false);
@@ -115,9 +100,6 @@ function TL_ResetSchema(forceClear) {
   ensureTab_(ss, "INBOX", TL_SCHEMA.INBOX_HEADERS, !!forceClear);
   ensureTab_(ss, "ARCHIVE", TL_SCHEMA.INBOX_HEADERS, !!forceClear);
   ensureTab_(ss, "CONTACTS", TL_SCHEMA.CONTACTS_HEADERS, !!forceClear);
-  ensureTab_(ss, "CONTACT_IDENTITIES", TL_SCHEMA.CONTACT_IDENTITIES_HEADERS, !!forceClear);
-  ensureTab_(ss, "CONTACT_ENRICHMENTS", TL_SCHEMA.CONTACT_ENRICHMENTS_HEADERS, !!forceClear);
-  ensureTab_(ss, "TOPICS", TL_SCHEMA.TOPICS_HEADERS, !!forceClear);
   ensureTab_(ss, "SETTINGS", TL_SCHEMA.SETTINGS_HEADERS, !!forceClear);
   ensureTab_(ss, "LOG", TL_SCHEMA.LOG_HEADERS, !!forceClear);
   ensureTab_(ss, "AI_Cost_Tracker", TL_SCHEMA.AI_COST_TRACKER_HEADERS, !!forceClear);

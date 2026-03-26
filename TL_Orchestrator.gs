@@ -2719,35 +2719,12 @@ function TL_ContactEnrichment_AppendFromInboxRow_(rowNumber, valuesOverride) {
 
     const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
     if (!sheetId) return { ok: false, reason: "missing_sheet_id" };
-    const ss = SpreadsheetApp.openById(sheetId);
-    let sh = ss.getSheetByName("CONTACT_ENRICHMENTS");
-    if (!sh) {
-      sh = ss.insertSheet("CONTACT_ENRICHMENTS");
-      sh.getRange(1, 1, 1, TL_SCHEMA.CONTACT_ENRICHMENTS_HEADERS.length).setValues([TL_SCHEMA.CONTACT_ENRICHMENTS_HEADERS]);
-      sh.setFrozenRows(1);
-    }
-
     const noteType = TL_ContactEnrichment_getNoteValue_(notes, "contact_enrichment_note_type") || "general";
+    const ss = SpreadsheetApp.openById(sheetId);
     const contactName = TL_ContactEnrichment_resolveContactName_(ss, contactId) || TL_ContactEnrichment_getNoteValue_(notes, "contact_enrichment_contact_name") || "";
     const noteText = TL_ContactEnrichment_getNoteValue_(notes, "contact_enrichment_note_text") ||
       String(TL_Orchestrator_value_(values, "ai_summary") || TL_Orchestrator_value_(values, "text") || "").trim();
     const source = "boss_manual";
-    const linkedRecordId = String(TL_Orchestrator_value_(values, "record_id") || TL_Orchestrator_value_(values, "event_id") || "").trim();
-    const topicId = String(TL_Orchestrator_value_(values, "topic_id") || "").trim();
-    const row = [
-      new Date().toISOString(),
-      contactId,
-      contactName,
-      noteType,
-      noteText,
-      source,
-      linkedRecordId,
-      topicId,
-      "source_row=" + String(rowNumber || 0)
-    ];
-    const range = sh.getRange(sh.getLastRow() + 1, 1, 1, row.length);
-    range.setNumberFormat("@");
-    range.setValues([row]);
     let crmWriteback = null;
     if (typeof TL_Contacts_ApplyManualEnrichmentWriteback_ === "function") {
       crmWriteback = TL_Contacts_ApplyManualEnrichmentWriteback_(contactId, {
@@ -2764,7 +2741,13 @@ function TL_ContactEnrichment_AppendFromInboxRow_(rowNumber, valuesOverride) {
         });
       }
     }
-    return { ok: true, rowNumber: sh.getLastRow(), contactId: contactId, crmWriteback: crmWriteback };
+    return {
+      ok: true,
+      contactId: contactId,
+      source: source,
+      contacts_only_schema: true,
+      crmWriteback: crmWriteback
+    };
   } catch (err) {
     try {
       TLW_logInfo_("contact_enrichment_append_error", {

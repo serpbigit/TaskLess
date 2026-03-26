@@ -28,6 +28,11 @@ These instructions are for coding agents, not end users.
 - Keep changes scoped to the active roadmap step.
 - Avoid broad cleanup outside the current target unless it directly reduces confusion or dead paths.
 
+## 4.1 Git Execution Rule
+- In this repo, treat git write operations as outside-sandbox by default.
+- Run `git add`, `git commit`, and `git push` with escalation instead of retrying them in the sandbox first.
+- Reason: sandboxed git writes have repeatedly failed on `.git` object/index updates in this workspace.
+
 ## 5. Product Priority
 - Communication-first CRM memory
 - Reply assistance

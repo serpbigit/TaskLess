@@ -3,6 +3,7 @@ function Helper_RunDealWiseSmokeSuite() {
     schema: Helper_RunDealWiseSchemaAndBackfill_(false),
     boss_menu_contract: Helper_RunDealWiseBossMenuTests_(false),
     contacts_tests: Helper_RunDealWiseContactTests_(false),
+    draft_context_tests: Helper_RunDealWiseDraftContextTests_(false),
     orchestrator_grouping: Helper_RunDealWiseGroupingTests_(false)
   };
   const summary = {
@@ -10,6 +11,7 @@ function Helper_RunDealWiseSmokeSuite() {
     schema: Helper_RunDealWiseSmokeSuite_summarizeSection_("schema", result.schema),
     boss_menu_contract: Helper_RunDealWiseSmokeSuite_summarizeSection_("boss_menu_contract", result.boss_menu_contract),
     contacts_tests: Helper_RunDealWiseSmokeSuite_summarizeSection_("contacts_tests", result.contacts_tests),
+    draft_context_tests: Helper_RunDealWiseSmokeSuite_summarizeSection_("draft_context_tests", result.draft_context_tests),
     orchestrator_grouping: Helper_RunDealWiseSmokeSuite_summarizeSection_("orchestrator_grouping", result.orchestrator_grouping)
   };
   Helper_RunDealWiseSmokeSuite_logSummary_("Helper_RunDealWiseSmokeSuite", summary);
@@ -88,8 +90,8 @@ function Helper_RunDealWiseContactTests() {
   return Helper_RunDealWiseContactTests_(true);
 }
 
-function Helper_RunDealWiseContactTest_TopicOwners() {
-  return Helper_RunDealWiseContactSingleTest_("topic_owners", TL_TestContacts_TopicOwnersRun);
+function Helper_RunDealWiseContactTest_ContactsOnlySchema() {
+  return Helper_RunDealWiseContactSingleTest_("contacts_only_schema", TL_TestContacts_ContactsOnlySchemaRun);
 }
 
 function Helper_RunDealWiseContactTest_PrepareOutboundRecipient() {
@@ -106,6 +108,18 @@ function Helper_RunDealWiseContactTest_ResolveRequestEmail() {
 
 function Helper_RunDealWiseContactTest_ResolveRequestAmbiguous() {
   return Helper_RunDealWiseContactSingleTest_("resolve_request_ambiguous", TL_TestContacts_ResolveRequestAmbiguousRun);
+}
+
+function Helper_RunDealWiseDraftContextTests() {
+  return Helper_RunDealWiseDraftContextTests_(true);
+}
+
+function Helper_RunDealWiseDraftContextTest_ContactRowMemory() {
+  return Helper_RunDealWiseDraftContextSingleTest_("contact_row_memory", TL_TestDraftContext_ContactRowMemoryRun);
+}
+
+function Helper_RunDealWiseDraftContextTest_ContactsOnlyTopicsDisabled() {
+  return Helper_RunDealWiseDraftContextSingleTest_("contacts_only_topics_disabled", TL_TestDraftContext_ContactsOnlyTopicsDisabledRun);
 }
 
 function Helper_RunDealWiseGroupingTests() {
@@ -235,6 +249,34 @@ function Helper_RunDealWiseContactSingleTest_(name, fn) {
   return summary;
 }
 
+function Helper_RunDealWiseDraftContextTests_(shouldLog) {
+  let result;
+  try {
+    result = typeof TL_TestDraftContext_RunAll === "function"
+      ? TL_TestDraftContext_RunAll()
+      : { ok: false, error: "missing TL_TestDraftContext_RunAll" };
+  } catch (err) {
+    result = { ok: false, error: String(err && err.message ? err.message : err) };
+  }
+  const summary = Helper_RunDealWiseSmokeSuite_summarizeSection_("draft_context_tests", result);
+  if (shouldLog) Helper_RunDealWiseSmokeSuite_logSummary_("Helper_RunDealWiseDraftContextTests", summary);
+  return summary;
+}
+
+function Helper_RunDealWiseDraftContextSingleTest_(name, fn) {
+  let result;
+  try {
+    result = typeof fn === "function"
+      ? fn()
+      : { ok: false, error: "missing runner " + String(name || "") };
+  } catch (err) {
+    result = { ok: false, error: String(err && err.message ? err.message : err) };
+  }
+  const summary = Helper_RunDealWiseSmokeSuite_summarizeSection_(String(name || "draft_context_test"), result);
+  Helper_RunDealWiseSmokeSuite_logSummary_("Helper_RunDealWiseDraftContextSingleTest_" + String(name || "unknown"), summary);
+  return summary;
+}
+
 function Helper_RunDealWiseGroupingTests_(shouldLog) {
   let result;
   try {
@@ -257,9 +299,6 @@ function Helper_RunDealWiseSmokeSuite_summarizeSection_(name, section) {
     if (!section.ok && section.error) out.error = String(section.error);
     if (section.updated !== undefined) out.updated = Number(section.updated || 0);
     if (section.rows && typeof section.rows === "number") out.rows = Number(section.rows || 0);
-    if (section.identities && typeof section.identities === "object" && section.identities.rows !== undefined) {
-      out.identity_rows = Number(section.identities.rows || 0);
-    }
     return out;
   }
   const checks = Object.keys(section);

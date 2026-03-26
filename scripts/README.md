@@ -14,3 +14,8 @@ Usage from `C:\dev\gas\TaskLess`:
 .\scripts\run-gas-test.ps1 TL_TestContacts_RunAll
 ```
 
+Git note for this workspace:
+
+- Run `git add`, `git commit`, and `git push` outside the sandbox by default.
+- Reason: sandboxed git writes have repeatedly failed on `.git` object/index updates in this repo.
+

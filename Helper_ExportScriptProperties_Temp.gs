@@ -49,6 +49,9 @@ function Temp_Helper_IsTransientScriptProperty_(key) {
     k.indexOf("MENU_PACKET_") === 0 ||
     k.indexOf("MENU_INTENT_") === 0 ||
     k.indexOf("TL_LATE_STATUS_") === 0 ||
+    k.indexOf("TL_REPLY_SENT_") === 0 ||
+    k.indexOf("TL_BOSS_LAST_") === 0 ||
+    k.indexOf("TL_EMAIL_LAST_") === 0 ||
     k.indexOf("TL_SEEN_") === 0 ||
     k === "TL_SEEN_CLEAN_COUNTER" ||
     k === "TL_EMAIL_LAST_PULL_AT" ||
