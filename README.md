@@ -1,25 +1,24 @@
-# TaskLess
+# DealWise
 
-TaskLess (a.k.a. BossAI) is a WhatsApp-first, human-in-the-loop AI chief of staff for solopreneurs. It continuously prepares operational work in the background, then helps the Boss act on it during cleanup, planning, and execution sessions.
+DealWise is a person-centric communication and CRM system focused on helping businesses close deals faster.
 
-## Key Documents
-- PRODUCT.md — product vision and long-term direction
-- ARCHITECTURE.md — system structure and routing model
-- OPERATIONAL.md — operational contract and canonical ledger schema
-- WORKFLOW.md — human/agent collaboration workflow for TaskLess development
-- FEATURES.md — feature definitions (when present)
-- RECONSTRUCTION.md — disaster recovery and rebuild steps
-- DEV_TASKS.md — current work/state ledger
-- AGENT.md — operating rules for AI coding agents
+Slogan: Automated CRM and communication that close deals faster.
 
-**AI agents must read AGENT.md before modifying the repository.**
+This repo currently reuses the TaskLess Apps Script runtime and infrastructure, but the active product direction is now DealWise.
 
-## Unified Ledger (Sheets)
-- INBOX: active operational records
-- ARCHIVE: historical records (same schema as INBOX)
-- CONTACTS: normalized contact entities
-- CONTACT_ENRICHMENTS: append-only biz/personal updates per contact
-- TOPICS: topic index to speed drafting/context
-- SETTINGS: runtime configuration (polling interval, batch sizes, feature flags)
-- LOG: technical/runtime logs
+## Active Docs
+- `DEALWISE_PRODUCT.md` — product truth and MVP boundaries
+- `DEALWISE_ARCHITECTURE.md` — target system shape and reusable platform pieces
+- `DEALWISE_ROADMAP.md` — active implementation roadmap
+- `DEALWISE_STATE.md` — current repo status and next recommended steps
+- `AGENT.md` — operating instructions for coding agents in this repo
 
+## Archive
+
+Old TaskLess-facing docs were moved to:
+
+- `docs/archive/taskless/`
+
+## Current Codebase Note
+
+The runtime still uses `TL_*.gs` file prefixes. That is intentional for now. Product docs and UX are pivoting first; runtime renaming can happen later after the DealWise MVP flow is stable.
