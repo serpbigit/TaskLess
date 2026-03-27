@@ -8,13 +8,14 @@ These instructions are for coding agents, not end users.
 
 ## 1. Sources of Truth
 - Repository files are authoritative; chat is not.
-- `DEALWISE_PRODUCT.md` is product truth.
-- `DEALWISE_ROADMAP.md` is the active implementation roadmap.
-- `DEALWISE_STATE.md` is the current repo state snapshot.
+- `DEALWISE_PRODUCT.md` is the canonical product truth.
+- `DEALWISE_ROADMAP.md` is a thin implementation helper, not product truth.
+- `DEALWISE_STATE.md` is the current repo state snapshot, not product truth.
 - `AGENT.md` defines agent workflow rules.
 
 ## 2. Session Bootstrap
-- At session start, read `DEALWISE_ROADMAP.md`, `DEALWISE_STATE.md`, and this file.
+- At session start, read `DEALWISE_PRODUCT.md` first.
+- Then read `DEALWISE_STATE.md` and this file.
 - Assume Windows PowerShell unless the user says otherwise.
 
 ## 3. Repo Direction
@@ -43,6 +44,14 @@ Deprioritized for MVP:
 - general task management
 - calendar-first flows
 - workflow-builder behavior
+
+## 5.1 Mandatory Product Fit Check
+- Before implementing a meaningful task, state which pillar it supports:
+  - Reply
+  - Enrich CRM
+  - Opportunities
+- State the user value it unlocks.
+- If the task does not clearly strengthen one of those three pillars, treat it as drift unless the user explicitly approves it.
 
 ## 6. Apps Script Deployment Rules
 

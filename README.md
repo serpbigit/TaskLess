@@ -6,12 +6,18 @@ Slogan: Automated CRM and communication that close deals faster.
 
 This repo currently reuses the existing Apps Script runtime and infrastructure, but the active product direction is now DealWise.
 
-## Active Docs
-- `DEALWISE_PRODUCT.md` — product truth and MVP boundaries
-- `DEALWISE_ARCHITECTURE.md` — target system shape and reusable platform pieces
-- `DEALWISE_ROADMAP.md` — active implementation roadmap
-- `DEALWISE_STATE.md` — current repo status and next recommended steps
-- `AGENT.md` — operating instructions for coding agents in this repo
+## Start Here
+
+Read:
+- [DEALWISE_PRODUCT.md](/C:/dev/gas/TaskLess/DEALWISE_PRODUCT.md)
+
+That is the canonical product definition.
+
+Supporting docs:
+- [DEALWISE_ARCHITECTURE.md](/C:/dev/gas/TaskLess/DEALWISE_ARCHITECTURE.md)
+- [DEALWISE_ROADMAP.md](/C:/dev/gas/TaskLess/DEALWISE_ROADMAP.md)
+- [DEALWISE_STATE.md](/C:/dev/gas/TaskLess/DEALWISE_STATE.md)
+- [AGENT.md](/C:/dev/gas/TaskLess/AGENT.md)
 
 ## Current Codebase Note
 

@@ -1,36 +1,36 @@
 # DealWise State
 
+This file is an operational repo snapshot only.
+
+It is not product truth.
+
+Product truth lives in:
+- [DEALWISE_PRODUCT.md](/C:/dev/gas/TaskLess/DEALWISE_PRODUCT.md)
+
 ## Current Repo Position
 
-This repo has pivoted in product direction from the earlier TaskLess concept to DealWise.
+The repo contains reusable Apps Script infrastructure from earlier work, especially:
+- WhatsApp webhook ingest
+- Gmail ingest/send
+- sheet bootstrap and settings
+- contact lookup and writeback
+- approval packet mechanics
+- orchestrator workers
+- test helpers
 
-The codebase still contains large reusable infrastructure from the earlier runtime, especially:
-- WhatsApp webhook handling
-- Gmail ingestion and send flows
-- Sheets bootstrap and settings
-- contact sync and lookup
-- contact CRM writeback
-- approval packets
-- orchestrator sweeps
+## Active Docs
 
-## Current Active Documentation
-- `README.md`
-- `DEALWISE_PRODUCT.md`
-- `DEALWISE_ARCHITECTURE.md`
-- `DEALWISE_ROADMAP.md`
-- `DEALWISE_STATE.md`
-- `AGENT.md`
+- [DEALWISE_PRODUCT.md](/C:/dev/gas/TaskLess/DEALWISE_PRODUCT.md) — canonical product definition
+- [DEALWISE_ARCHITECTURE.md](/C:/dev/gas/TaskLess/DEALWISE_ARCHITECTURE.md) — thin technical pointer
+- [DEALWISE_ROADMAP.md](/C:/dev/gas/TaskLess/DEALWISE_ROADMAP.md) — thin implementation order
+- [DEALWISE_STATE.md](/C:/dev/gas/TaskLess/DEALWISE_STATE.md) — repo snapshot
+- [AGENT.md](/C:/dev/gas/TaskLess/AGENT.md) — coding-agent operating rules
 
-## Recommended Next Implementation Step
+## Current Working Rule
 
-Run controlled live validation on the DealWise surface:
+If implementation work does not clearly strengthen:
+- Reply
+- Enrich CRM
+- Opportunities
 
-1. Boss menu flow: `Reply`, `Enrich CRM`, `Opportunities`
-2. grouped inbound WhatsApp reply queue
-3. CRM updates written directly into `CONTACTS`
-
-## Naming Note
-
-Runtime files still use `TL_*.gs`.
-
-That is acceptable for now. The highest-value work is to change behavior and user-facing language first, then rename internals later if the DealWise MVP stabilizes.
+then it is considered drift until explicitly approved.
