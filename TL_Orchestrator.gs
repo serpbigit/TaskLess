@@ -1,7 +1,7 @@
 /**
  * TL_Orchestrator
  *
- * Deterministic dispatcher for TaskLess v1.
+ * Deterministic dispatcher for DealWise.
  * The webhook path stays narrow; this layer sweeps bounded work on a timer.
  */
 
@@ -891,7 +891,7 @@ function TL_Orchestrator_buildThreadSynthesis_(thread, options) {
   } else if (useAi && typeof TL_AI_callPrompt_ === "function") {
     try {
       const prompt = [
-        "You are TaskLess.",
+        "You are DealWise.",
         "Return strict JSON only.",
         '{"summary":"...","proposal":"..."}',
         "Example JSON response:",
@@ -1566,7 +1566,7 @@ function TL_BossPolicy_maybeSendPacket_(kind, items, cfg, options, now, interval
 }
 
 function TL_BossPolicy_buildPacketText_(kind, items, cfg, now) {
-  const title = kind === "urgent" ? "TaskLess דחוף" : (kind === "decision" ? "TaskLess בקשת החלטה" : "TaskLess תקציר");
+  const title = kind === "urgent" ? "DealWise דחוף" : (kind === "decision" ? "DealWise בקשת החלטה" : "DealWise תקציר");
   const mode = "מצב=" + cfg.interruptLevel + "; פריטים=" + items.length;
   const lines = [title, mode];
   items.forEach(function(item, index) {

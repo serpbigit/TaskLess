@@ -1,5 +1,5 @@
 /**
- * TL_SchemaSetup - creates/updates TaskLess Sheets tabs and headers.
+ * TL_SchemaSetup - creates/updates DealWise Sheets tabs and headers.
  *
  * Usage:
  *   TL_EnsureSchema();                  // create missing tabs; set headers if empty

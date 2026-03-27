@@ -4,7 +4,7 @@
  * Canonical source text is Hebrew. When the Boss UI language is not Hebrew,
  * we translate the Hebrew UI text at runtime and cache the result.
  *
- * This layer is only for TaskLess system/menu/approval scaffolding.
+ * This layer is only for DealWise system/menu/approval scaffolding.
  * It should not be used to translate recipient-facing draft bodies.
  */
 
@@ -62,7 +62,7 @@ function TL_Language_UiText_(hebrewText, targetLanguage) {
 
 function TL_Language_TranslateUiText_(hebrewText, targetLanguage) {
   const prompt = [
-    "You translate TaskLess Boss-facing UI copy.",
+    "You translate DealWise Boss-facing UI copy.",
     "Source language: Hebrew.",
     "Target language: " + String(targetLanguage || "English"),
     "Return plain text only.",

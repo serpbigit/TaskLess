@@ -37,7 +37,7 @@ function TL_Log_append_(actor, eventType, payloadObj, taskId, batchId) {
 
 function TL_Menu_text_(ctx) {
   var lines = [
-    "TaskLess Menu",
+    "DealWise Menu",
     "1. Send a command",
     "2. Show open tasks",
     "3. Show future features"

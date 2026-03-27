@@ -19,7 +19,6 @@ These instructions are for coding agents, not end users.
 
 ## 3. Repo Direction
 - This repo is now for DealWise.
-- Old TaskLess docs are archived under `docs/archive/taskless/`.
 - Runtime file prefixes may remain `TL_*` temporarily while the DealWise MVP is being built.
 - Do not spend early cycles renaming runtime files unless the task explicitly requires it.
 

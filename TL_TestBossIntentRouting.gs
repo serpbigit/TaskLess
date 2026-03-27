@@ -30,7 +30,6 @@ function TL_TestBossIntentRouting_RunAll() {
     capture_item_discard_shortcut: TL_TestBossIntentRouting_CaptureItemDiscardShortcutRun(),
     draft_explanation_block: TL_TestBossIntentRouting_DraftExplanationBlockRun(),
     summary_route: TL_TestBossIntentRouting_ListApprovalsRouteRun(),
-    topic_candidates_route: TL_TestBossIntentRouting_TopicCandidatesRouteRun(),
     capture_route: TL_TestBossIntentRouting_CreateTaskRouteRun(),
     reminders_route: TL_TestBossIntentRouting_ListRemindersRouteRun(),
     out_of_scope: TL_TestBossIntentRouting_OutOfScopeRun()
@@ -2091,64 +2090,6 @@ function TL_TestBossIntentRouting_ListApprovalsRouteRun() {
   };
   Logger.log("TL_TestBossIntentRouting_ListApprovalsRouteRun: %s", JSON.stringify(output, null, 2));
   return output;
-}
-
-function TL_TestBossIntentRouting_TopicCandidatesRouteRun() {
-  const originalList = typeof TL_Topics_ListCandidateGroups_ === "function"
-    ? TL_Topics_ListCandidateGroups_
-    : null;
-  try {
-    TL_Topics_ListCandidateGroups_ = function() {
-      return [{
-        candidate: "topic_documents_needed",
-        summary: "Missing mortgage documents",
-        count: 2,
-        latestAt: "2026-03-24T10:00:00.000Z",
-        existingTopicId: "",
-        samples: [
-          { rowNumber: 2, recordId: "REC_1", channel: "whatsapp", direction: "incoming", summary: "Client says documents are still missing." }
-        ],
-        rowRefs: [
-          { rowNumber: 2, recordId: "REC_1", channel: "whatsapp", direction: "incoming", summary: "Client says documents are still missing." }
-        ]
-      }];
-    };
-
-    const reply = TL_Menu_HandleBossMessage_({
-      from: TL_TestBossIntentRouting_getBossPhone_(),
-      text: "show topic candidates"
-    }, null, {
-      intentFn: function(text) {
-        return {
-          intent: "list_topic_candidates",
-          route: "summary",
-          summary_kind: "topic_candidates",
-          capture_state: "",
-          confidence: 0.97,
-          needs_clarification: "false",
-          reply: "",
-          parameters: {
-            query: text,
-            capture_kind: "",
-            capture_mode: "",
-            time_hint: "",
-            target: ""
-          }
-        };
-      }
-    });
-
-    const output = {
-      ok: String(reply || "").indexOf("מועמדי נושא לקידום") !== -1 &&
-        String(reply || "").indexOf("קדם כנושא") !== -1,
-      reply: reply
-    };
-    Logger.log("TL_TestBossIntentRouting_TopicCandidatesRouteRun: %s", JSON.stringify(output, null, 2));
-    return output;
-  } finally {
-    TL_Menu_ClearDecisionPacket_(TL_TestBossIntentRouting_getBossPhone_());
-    TL_Topics_ListCandidateGroups_ = originalList;
-  }
 }
 
 function TL_TestBossIntentRouting_CreateTaskRouteRun() {

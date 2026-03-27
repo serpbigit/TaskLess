@@ -2,14 +2,14 @@
 
 ## Current Repo Position
 
-This repo has pivoted in product direction from TaskLess to DealWise.
+This repo has pivoted in product direction from the earlier TaskLess concept to DealWise.
 
-The codebase still contains large reusable infrastructure from TaskLess, especially:
+The codebase still contains large reusable infrastructure from the earlier runtime, especially:
 - WhatsApp webhook handling
 - Gmail ingestion and send flows
 - Sheets bootstrap and settings
 - contact sync and lookup
-- append-only contact enrichment
+- contact CRM writeback
 - approval packets
 - orchestrator sweeps
 
@@ -21,19 +21,13 @@ The codebase still contains large reusable infrastructure from TaskLess, especia
 - `DEALWISE_STATE.md`
 - `AGENT.md`
 
-## Archived Documentation
-
-Old TaskLess-facing docs were moved to:
-
-- `docs/archive/taskless/`
-
 ## Recommended Next Implementation Step
 
-Start with product-surface simplification:
+Run controlled live validation on the DealWise surface:
 
-1. reduce the menu to `Reply`, `Enrich CRM`, and `Opportunities`
-2. disable reminder/task/calendar-first flows
-3. redesign the CRM schema around person-centric records and identity linking
+1. Boss menu flow: `Reply`, `Enrich CRM`, `Opportunities`
+2. grouped inbound WhatsApp reply queue
+3. CRM updates written directly into `CONTACTS`
 
 ## Naming Note
 

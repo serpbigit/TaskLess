@@ -1,6 +1,6 @@
 /**
  * TL_Parse.gs
- * Minimal envelope parser for TaskLess POC.
+ * Minimal envelope parser for DealWise.
  */
 function TL_Parse_envelope_(raw) {
   try {

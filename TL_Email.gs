@@ -1055,7 +1055,7 @@ function TL_Email_buildTriagePrompt_(inputText, language, bossName, history, pay
       }).join("\n\n")
     : "";
   return [
-    "You are TaskLess, the email-side secretary assistant.",
+    "You are DealWise, the email-side communication assistant.",
     "Return strict JSON only.",
     "Boss UI language: " + String(language || "Hebrew"),
     "Draft reply language: " + String(replyLanguage || language || "Hebrew"),

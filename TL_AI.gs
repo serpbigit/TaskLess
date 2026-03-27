@@ -136,7 +136,7 @@ function TL_AI_BuildMonthToDateSpendReport_() {
     });
   }
   return [
-    "*TaskLess AI Report*",
+    "*DealWise AI Report*",
     "Model: " + TL_AI_COST.MODEL_NAME,
     "Month To Date Spend: ₪" + total.toFixed(2)
   ].join("\n");
@@ -144,7 +144,7 @@ function TL_AI_BuildMonthToDateSpendReport_() {
 
 function TL_AI_buildPrompt_(inputText, language, bossName, draftContextBrief, replyLanguage) {
   return [
-    "You are TaskLess, a business communication assistant.",
+    "You are DealWise, a business communication assistant.",
     "Return strict JSON only.",
     "Boss UI language: " + String(language || "Hebrew"),
     "Draft reply language: " + String(replyLanguage || language || "Hebrew"),
@@ -163,7 +163,7 @@ function TL_AI_buildPrompt_(inputText, language, bossName, draftContextBrief, re
 
 function TL_AI_buildTriagePrompt_(inputText, language, bossName, draftContextBrief, replyLanguage) {
   return [
-    "You are Amanda, the TaskLess AI assistant for business communication triage.",
+    "You are Amanda, the DealWise AI assistant for business communication triage.",
     "Analyze the incoming message and return strict JSON only.",
     "Boss UI language: " + String(language || "Hebrew"),
     "Draft reply language: " + String(replyLanguage || language || "Hebrew"),
@@ -212,7 +212,7 @@ function TL_AI_buildTriagePrompt_(inputText, language, bossName, draftContextBri
 
 function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
   return [
-    "You are TaskLess.",
+    "You are DealWise.",
     "Split one Boss capture into multiple proposed child records.",
     "Return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
@@ -246,7 +246,7 @@ function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
 
 function TL_AI_buildContactEnrichmentPrompt_(inputText, language, bossName) {
   return [
-    "You are TaskLess.",
+    "You are DealWise.",
     "Extract one manual contact enrichment request from a Boss message.",
     "Return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
@@ -274,7 +274,7 @@ function TL_AI_buildContactEnrichmentPrompt_(inputText, language, bossName) {
 
 function TL_AI_buildBossContactLookupPrompt_(inputText, language, bossName) {
   return [
-    "You are TaskLess.",
+    "You are DealWise.",
     "Extract one contact lookup request from a Boss message.",
     "Return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
@@ -287,7 +287,7 @@ function TL_AI_buildBossContactLookupPrompt_(inputText, language, bossName) {
     "Prefer including both Hebrew and English spellings when useful, plus a short prefix and any phone fragment.",
     "Do not combine name and phone into one search string. Return separate query objects.",
     "Valid search query types are: name, name_prefix, phone_fragment, email, email_domain, relationship, org, role, identity_term.",
-    "reply_preamble should be one short sentence in the Boss UI language describing that TaskLess is looking up the contact.",
+    "reply_preamble should be one short sentence in the Boss UI language describing that DealWise is looking up the contact.",
     "Do not invent facts.",
     "Examples:",
     '{"contact_query":"David","search_queries":[{"type":"name","value":"David"},{"type":"name","value":"דוד"},{"type":"name_prefix","value":"Dav"}],"reply_preamble":"בודקת את איש הקשר דוד."}',
@@ -301,7 +301,7 @@ function TL_AI_buildBossContactLookupPrompt_(inputText, language, bossName) {
 
 function TL_AI_buildBossContextLookupPrompt_(inputText, language, bossName) {
   return [
-    "You are TaskLess.",
+    "You are DealWise.",
     "Extract one recent-context lookup request from a Boss message.",
     "Return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
@@ -313,7 +313,7 @@ function TL_AI_buildBossContextLookupPrompt_(inputText, language, bossName) {
     "Use topic_query and optional topic_id when the Boss asks about an issue/topic such as documents, approval, meeting, payment, etc.",
     "You may return both contact_query and topic_query when both are relevant.",
     "topic_id should be a concrete topic slug only when the message clearly implies one. Otherwise leave it empty and use topic_query.",
-    "reply_preamble should be one short sentence in the Boss UI language describing that TaskLess is gathering recent context.",
+    "reply_preamble should be one short sentence in the Boss UI language describing that DealWise is gathering recent context.",
     "Do not invent facts.",
     "Examples:",
     '{"contact_query":"Dana","search_queries":[{"type":"name","value":"Dana"},{"type":"name_prefix","value":"Dan"}],"topic_query":"","topic_id":"","reply_preamble":"אוספת את ההקשר האחרון עם דנה."}',
@@ -327,7 +327,7 @@ function TL_AI_buildBossContextLookupPrompt_(inputText, language, bossName) {
 function TL_AI_buildOutboundRefinePrompt_(inputText, currentProposal, channel, recipientName, similarReplies, language, bossName, subject) {
   const examples = Array.isArray(similarReplies) ? similarReplies : [];
   return [
-    "You are TaskLess.",
+    "You are DealWise.",
     "Refine one outbound draft using the Boss instruction plus a few prior sent examples.",
     "Return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
@@ -362,14 +362,14 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     ? TL_Capabilities_BuildPromptBrief_()
     : "";
   return [
-    "You are TaskLess's Boss intent router.",
+    "You are DealWise's Boss intent router.",
     "Classify one Boss message into a single intent and return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Supported intents:",
-    "show_menu, help, show_capabilities, show_ai_cost, find_contact, find_context, find_similar_replies, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, list_topic_candidates, list_paused_items, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, create_contact_enrichment, out_of_scope, unknown",
+    "show_menu, help, show_capabilities, show_ai_cost, find_contact, find_context, find_similar_replies, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, list_paused_items, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, create_contact_enrichment, out_of_scope, unknown",
     "Return exactly one JSON object with this shape:",
-    '{"intent":"supported_intent_name","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|topic_candidates|paused_items|contact_lookup|context_lookup|similar_replies|menu|help|verticals|settings|reminders|tasks|ai_cost|none","capture_state":"TL_MENU_STATES value or empty string","menu_target":"main|capabilities|reminders|notes|schedule|tasks|manage_work|settings|verticals|help|none|","confidence":0.0,"needs_clarification":"true|false","reply":"string","parameters":{"query":"string","capture_kind":"string","capture_mode":"string","time_hint":"string","target":"string"}}',
+    '{"intent":"supported_intent_name","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|paused_items|contact_lookup|context_lookup|similar_replies|menu|help|verticals|settings|reminders|tasks|ai_cost|none","capture_state":"TL_MENU_STATES value or empty string","menu_target":"main|capabilities|reminders|notes|schedule|tasks|manage_work|settings|verticals|help|none|","confidence":0.0,"needs_clarification":"true|false","reply":"string","parameters":{"query":"string","capture_kind":"string","capture_mode":"string","time_hint":"string","target":"string"}}',
     "Field definitions:",
     "intent: choose exactly one supported intent name.",
     "route: menu for explicit menu/help navigation, summary for status/list views, capture for create/log/remind/enrich flows, none for out_of_scope or unknown.",
@@ -378,14 +378,14 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "menu_target: use when route=menu to indicate which submenu should open; otherwise empty string.",
     "confidence: decimal between 0 and 1.",
     "needs_clarification: true only when the request is genuinely ambiguous and should not be assumed.",
-    "reply: one short Hebrew sentence that tells the Boss what TaskLess is about to do.",
+    "reply: one short Hebrew sentence that tells the Boss what DealWise is about to do.",
     "parameters.query: compact normalized restatement of the request.",
     "parameters.capture_kind / capture_mode / time_hint / target: fill only when helpful, otherwise empty strings.",
     "Routing rules:",
     "Use summary routes for list/status questions.",
     "Use capture routes for create/add/log/remind/schedule requests.",
     "Prefer a specific capture_state when the message clearly matches a menu capture path.",
-    "Use out_of_scope when the message asks for weather, news, trivia, jokes, sports, or general chat outside TaskLess secretary capabilities.",
+    "Use out_of_scope when the message asks for weather, news, trivia, jokes, sports, or general chat outside DealWise communication and CRM capabilities.",
     "Return unknown only when the message is too ambiguous to classify and is not clearly out of scope.",
     "Validation rules:",
     "Always output all top-level keys and the full parameters object.",
@@ -404,7 +404,6 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     '{"intent":"list_approvals","route":"summary","summary_kind":"approvals","capture_state":"","menu_target":"manage_work","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את מה שממתין לאישור.","parameters":{"query":"approvals","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_pending","route":"summary","summary_kind":"pending","capture_state":"","menu_target":"manage_work","confidence":0.97,"needs_clarification":"false","reply":"מראה לך מה פתוח כרגע.","parameters":{"query":"clean my plate","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_attention","route":"summary","summary_kind":"attention","capture_state":"","menu_target":"manage_work","confidence":0.97,"needs_clarification":"false","reply":"מראה לך מה צריך תשומת לב.","parameters":{"query":"what needs attention","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
-    '{"intent":"list_topic_candidates","route":"summary","summary_kind":"topic_candidates","capture_state":"","menu_target":"manage_work","confidence":0.96,"needs_clarification":"false","reply":"מראה לך מועמדי נושא לקידום.","parameters":{"query":"topic candidates","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_paused_items","route":"summary","summary_kind":"paused_items","capture_state":"","menu_target":"manage_work","confidence":0.95,"needs_clarification":"false","reply":"מראה לך מה הושהה.","parameters":{"query":"show paused items","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"show_ai_cost","route":"summary","summary_kind":"ai_cost","capture_state":"","menu_target":"","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את עלות ה-AI המצטברת.","parameters":{"query":"ai cost","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"create_task_with_due","route":"capture","summary_kind":"none","capture_state":"CAPTURE_TASK_WITH_DUE","menu_target":"tasks","confidence":0.97,"needs_clarification":"false","reply":"קיבלתי, אכין משימה עם תאריך יעד.","parameters":{"query":"send proposal by Thursday","capture_kind":"task","capture_mode":"with_due","time_hint":"Thursday","target":""}}',
@@ -422,7 +421,7 @@ function TL_AI_buildBossReadOnlyTurnPrompt_(packet, language, bossName) {
     ? TL_BossTurn_BuildPromptBrief_(packet)
     : "";
   return [
-    "You are TaskLess's read-only Boss turn analyst.",
+    "You are DealWise's read-only Boss turn analyst.",
     "You are analyzing one Boss message plus the current state packet.",
     "This pass is read-only. Do not propose execution, sending, or state mutation.",
     "Return strict JSON only.",
@@ -430,13 +429,12 @@ function TL_AI_buildBossReadOnlyTurnPrompt_(packet, language, bossName) {
     "The Boss's name is: " + String(bossName || "Boss"),
     "Choose the best existing read-only summary surface and the most useful retrieval focus.",
     "Return exactly one JSON object with this shape:",
-    '{"summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|topic_candidates|paused_items|similar_replies|reminders|tasks|ai_cost|menu|help|verticals|settings|none","retrieval_focus":["pending_items|recent_records|recent_contacts|recent_threads|topic_candidates|paused_items|similar_replies"],"reply_preamble":"string","confidence":0.0}',
+    '{"summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|paused_items|similar_replies|reminders|tasks|ai_cost|menu|help|verticals|settings|none","retrieval_focus":["pending_items|recent_records|recent_contacts|recent_threads|paused_items|similar_replies"],"reply_preamble":"string","confidence":0.0}',
     "Rules:",
     "summary_kind must be one supported value only.",
     "retrieval_focus may include up to two values and should reflect the packet's retrieval_budget_max policy.",
-    "reply_preamble should be one short sentence in the Boss UI language describing what TaskLess is about to show.",
+    "reply_preamble should be one short sentence in the Boss UI language describing what DealWise is about to show.",
     "Prefer the smallest useful surface. Do not invent unsupported surfaces.",
-    "Use topic_candidates only when the Boss is clearly asking about topic candidates or topic promotion review.",
     "Use paused_items when the Boss is clearly asking what was paused, parked, or left open for later.",
     "Use similar_replies when the Boss is clearly asking for prior reply examples, similar drafts, or previous sent wording.",
     "Use approvals for things waiting on explicit approval.",
@@ -448,7 +446,6 @@ function TL_AI_buildBossReadOnlyTurnPrompt_(packet, language, bossName) {
     "Examples:",
     '{"summary_kind":"approvals","retrieval_focus":["pending_items","recent_records"],"reply_preamble":"מראה לך מה ממתין לאישור.","confidence":0.97}',
     '{"summary_kind":"attention","retrieval_focus":["recent_records"],"reply_preamble":"מראה לך מה צריך תשומת לב עכשיו.","confidence":0.93}',
-    '{"summary_kind":"topic_candidates","retrieval_focus":["topic_candidates"],"reply_preamble":"מראה לך מועמדי נושא פתוחים לסקירה.","confidence":0.96}',
     '{"summary_kind":"paused_items","retrieval_focus":["paused_items"],"reply_preamble":"מראה לך מה הושהה להמשך.","confidence":0.95}',
     '{"summary_kind":"similar_replies","retrieval_focus":["similar_replies"],"reply_preamble":"אוספת כמה תשובות דומות מהעבר.","confidence":0.95}',
     packetBrief ? packetBrief : "Current Boss turn packet: unavailable",
@@ -459,7 +456,7 @@ function TL_AI_buildBossReadOnlyTurnPrompt_(packet, language, bossName) {
 
 function TL_AI_buildTranscriptionPrompt_(language) {
   return [
-    "You are TaskLess, a business communication assistant.",
+    "You are DealWise, a business communication assistant.",
     "Transcribe the provided audio.",
     "Return strict JSON only.",
     "Language preference: " + String(language || "Hebrew"),
@@ -1526,7 +1523,6 @@ function TL_AI_bossSummaryKindFromIntent_(intent) {
     list_urgent: "attention",
     list_attention: "attention",
     list_next_steps: "next_steps",
-    list_topic_candidates: "topic_candidates",
     list_paused_items: "paused_items",
     list_draft_replies: "draft_replies",
     list_waiting_on_others: "waiting_on_others",
@@ -1574,14 +1570,14 @@ function TL_AI_bossMenuTargetFromIntent_(intent, summaryKind) {
   if (v === "show_verticals") return "verticals";
   if (summary === "reminders") return "reminders";
   if (summary === "tasks" || summary === "open_tasks" || summary === "blocked_tasks") return "tasks";
-  if (summary === "approvals" || summary === "pending" || summary === "attention" || summary === "next_steps" || summary === "topic_candidates" || summary === "paused_items" || summary === "draft_replies" || summary === "waiting_on_others" || summary === "followups") return "manage_work";
+  if (summary === "approvals" || summary === "pending" || summary === "attention" || summary === "next_steps" || summary === "paused_items" || summary === "draft_replies" || summary === "waiting_on_others" || summary === "followups") return "manage_work";
   return "";
 }
 
 function TL_AI_normalizeBossIntentName_(value) {
   const v = String(value || "").trim().toLowerCase();
   const allowed = [
-    "show_menu","help","show_capabilities","show_ai_cost","find_contact","find_context","find_similar_replies","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_attention","list_next_steps","list_topic_candidates","list_paused_items",
+    "show_menu","help","show_capabilities","show_ai_cost","find_contact","find_context","find_similar_replies","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_attention","list_next_steps","list_paused_items",
     "list_draft_replies","list_waiting_on_others","list_followups","list_open_tasks","list_blocked_tasks",
     "show_settings","show_verticals",
     "create_reminder_relative","create_reminder_datetime","create_reminder_recurring",
@@ -1603,12 +1599,12 @@ function TL_AI_normalizeBossIntentRoute_(value) {
 function TL_AI_normalizeBossSummaryKind_(value) {
   const v = String(value || "").trim().toLowerCase();
   if (v === "urgent") return "attention";
-  const allowed = ["pending","attention","approvals","next_steps","topic_candidates","paused_items","contact_lookup","context_lookup","similar_replies","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","ai_cost","none"];
+  const allowed = ["pending","attention","approvals","next_steps","paused_items","contact_lookup","context_lookup","similar_replies","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","ai_cost","none"];
   return allowed.indexOf(v) !== -1 ? v : "none";
 }
 
 function TL_AI_normalizeBossRetrievalFocus_(value) {
-  const allowed = ["pending_items","recent_records","recent_contacts","recent_threads","topic_candidates","paused_items","similar_replies"];
+  const allowed = ["pending_items","recent_records","recent_contacts","recent_threads","paused_items","similar_replies"];
   const arr = Array.isArray(value) ? value : (value ? [value] : []);
   const seen = {};
   return arr.map(function(item) {

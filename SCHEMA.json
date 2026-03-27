@@ -13,15 +13,7 @@
     },
     {
       "tab": "CONTACTS",
-      "headers": ["contact_id","name","alias","org","website","phone1","phone2","email","role","tags","last_note","last_enriched_at","source_system","source_id","phone1_normalized","phone2_normalized","email_normalized","labels","sync_status","last_synced_at","notes_internal"]
-    },
-    {
-      "tab": "CONTACT_ENRICHMENTS",
-      "headers": ["timestamp","contact_id","contact_name","note_type","note_text","source","linked_record_id","topic_id","notes"]
-    },
-    {
-      "tab": "TOPICS",
-      "headers": ["topic_id","contact_id","contact_name","topic_summary","last_used_at","usage_count","recent_examples_json","notes"]
+      "headers": ["contact_id","name","alias","org","website","phone1","phone2","email","role","tags","last_note","last_enriched_at","source_system","source_id","phone1_normalized","phone2_normalized","email_normalized","labels","sync_status","last_synced_at","notes_internal","crm_id","display_name","identity_terms","phones","emails","personal_summary","business_summary","current_state","next_action","last_contact_at","last_updated"]
     },
     {
       "tab": "SETTINGS",

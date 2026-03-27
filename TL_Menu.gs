@@ -5,7 +5,7 @@
  */
 function TL_Menu_text_(ctx) {
   var lines = [];
-  lines.push("TaskLess POC");
+  lines.push("DealWise POC");
   if (ctx && ctx.batchId) lines.push("Batch: " + ctx.batchId);
   if (ctx && ctx.taskId) lines.push("Task: " + ctx.taskId);
   lines.push("");

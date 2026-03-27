@@ -67,7 +67,7 @@ function TL_Capabilities_BuildPromptBrief_() {
   });
 
   const lines = [
-    "Current TaskLess capability packet:",
+    "Current DealWise capability packet:",
     "policy: stateless_ai_assumption=true | approval_required_for_external_execution=true | retrieval_budget_max=" + packet.policy.retrieval_budget_max + " | active_item_state_supported=true"
   ];
 
@@ -94,7 +94,7 @@ function TL_Capabilities_BuildHumanSummary_() {
   });
 
   const lines = [
-    "Current TaskLess capabilities",
+    "Current DealWise capabilities",
     "approval_required_for_external_execution=true",
     "retrieval_budget_max=" + packet.policy.retrieval_budget_max,
     ""
