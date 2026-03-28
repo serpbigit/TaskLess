@@ -1,377 +1,161 @@
 # DealWise Product Truth
 
-This is the canonical product document for DealWise.
+This file is the official product contract for DealWise.
 
-If implementation, testing, or planning contradict this file, this file wins.
+If code, tests, or planning disagree with this file, this file wins.
 
-## 1. What DealWise Is
+Operational behavior notes live in [DEALWISE_OPERATION_MANUAL.md](/C:/dev/gas/TaskLess/DEALWISE_OPERATION_MANUAL.md).
 
-DealWise is an automated CRM and messaging system that helps a business get clients closer to a finalized deal.
+## 1. Product Direction
 
-It does that by combining:
-- inbound communication understanding
-- CRM enrichment
-- AI-prepared reply drafting
-- opportunity surfacing
+DealWise is a boss-facing AI secretary for business owners.
 
-DealWise is not a general productivity assistant.
-
-## 2. Value Proposition
-
-People send the business WhatsApp messages and emails.
-
-DealWise turns that communication into:
+Its job is to turn communication into:
+- fast replies when a reply is genuinely needed
 - better CRM memory
-- faster high-quality replies
 - clearer next steps
-- proactive opportunities to move deals forward
+- better prioritization on active deals
 
-The main promise is:
+DealWise is not a generic assistant and not a general task manager.
 
-The boss should not need to reconstruct context from scratch before replying or deciding what to do next.
+## 2. Main Menu
 
-## 3. Core System Objects
+The main DealWise menu is:
+1. `Easy Replies`
+2. `Priority / Next Steps`
+3. `Manual Contact Update`
+4. `Help`
 
-### 3.1 Contact CRM
+Anything outside these four lanes is secondary or out of scope for the current product.
 
-`CONTACTS` is the CRM.
+## 3. Core Product Rules
 
-It stores the durable person/business memory, including:
-- identity terms
-- phones
-- emails
-- personal context
-- business context
-- current state
-- next action
-- last contact timing
+- AI should suggest replies only when a response is actually expected.
+- AI should not create reply work for FYI, reactions, acknowledgments, or low-signal messages.
+- FYI, status pings, and low-value updates may be stored for context, but should not be surfaced in boss-facing workflows by default.
+- AI should not invent commitments or deadlines the boss did not make.
+- Prefer neutral forward motion over invented promises like "I will send it today".
+- Reusable structured data should be stored in Google Sheets and reused, not repeatedly sent back to AI.
+- If the boss already replied manually in Gmail or WhatsApp, the system should detect that and suppress the stale pending reply item.
+- Conversation -> CRM enrichment -> score/state revision -> assisted reply is the core operating loop.
 
-This CRM can be enriched:
-- automatically from inbound communication
-- manually by the boss
+## 4. Main Menu Behavior
 
-### 3.2 Communication Sessions
+### 4.1 `Easy Replies`
 
-Inbound communication should be treated as meaningful business sessions, not raw fragments.
+Purpose:
+- clear only the messages that really need a reply
+- show one item at a time
+- keep the boss in a lightweight WhatsApp flow
 
-For MVP:
-- email is treated as a thread/session
-- WhatsApp is treated as a grouped burst/session over a quiet window
+Boss actions:
+1. approve
+2. edit
+3. discard
+4. next
+5. menu/help as needed
 
-Each session should get:
-- a business-relevant summary
-- a suggested next reply or action
-- CRM enrichment where appropriate
+Edit must stay lightweight:
+- one short text instruction, or
+- one voice note
 
-## 3.3 How DealWise Works
+### 4.2 `Priority / Next Steps`
 
-The operational loop is:
+Purpose:
+- show what deserves attention now
+- primarily from the contact CRM snapshot
+- include reply-related and non-reply-related progress items only when they truly deserve attention
 
-1. inbound email or WhatsApp communication arrives
-2. the communication is grouped into a meaningful session
-3. the system identifies the contact if possible, or creates one safely
-4. the session is summarized in business terms
-5. the contact CRM is enriched from that session
-6. a reply draft is prepared for the boss when a reply is needed
-7. approved outbound communication improves the CRM again
-8. the CRM is later used to surface proactive opportunities
+Examples:
+- send quote for 20k
+- follow up on pricing request
+- finalize contract revision
+- customer waiting on promised material
 
-This means the CRM and communication continuously improve each other.
+### 4.3 `Manual Contact Update`
 
-## 4. The 3 Core Product Pillars
+Purpose:
+- let the boss update CRM memory directly
+- add business or personal context without going through a reply flow
 
-### 4.1 Reply
+### 4.4 `Help`
 
-The boss can open Reply mode and go through pending inbound communication one by one.
+Purpose:
+- explain the current DealWise surface
+- keep the boss inside the defined operating lanes
 
-For each inbound session, DealWise should:
-- identify or create the contact
-- use the contact CRM
-- use recent same-person communication context
-- suggest the best reply draft
+## 5. Sheet Blueprint
 
-The boss should be able to:
-- approve
-- edit
-- archive
-- postpone
+Target tabs to maintain:
+1. `SETTINGS`
+2. `CONTACTS`
+3. `ACTIVITY`
+4. `LOG`
+5. `AI_Cost_Tracker`
 
-Primary value:
-- clear large inbound queues quickly with good reply quality
+Rules:
+- do not redefine or erase `SETTINGS` destructively
+- preserve useful existing tabs and operational infrastructure while migrating
+- the target model is `ACTIVITY`, even though current repo infrastructure still centers on `INBOX` and `ARCHIVE`
 
-### 4.2 Enrich CRM
+## 6. `CONTACTS` Contract
 
-DealWise should enrich the CRM from inbound sessions automatically.
+`CONTACTS` holds snapshot CRM state, not full history.
 
-Separately, the boss should be able to manually enrich a contact from the menu by:
-- finding the contact naturally
-- adding the new detail
-- saving it back into the CRM
+It is the main business-state sheet for the product.
 
-Primary value:
-- CRM becomes smarter over time without depending only on manual updates
+Lean direction:
+- identity: `contact_id`, `display_name`, `phone`, `email`
+- memory: `personal_history`, `business_history`
+- current state: `deal_stage`, `deal_score`, `priority_score`, `next_step_summary`, `next_step_due`, `waiting_on`, `open_loop_status`
+- activity summary: `last_signal_summary`, `last_signal_at`, `last_inbound_at`, `last_outbound_at`, `last_replied_at`, `unreplied_inbound_count`
 
-### 4.3 Opportunities
+Current design decision:
+- do not add a separate `NextSteps` tab yet
+- keep current next-step state on the contact row unless real task complexity forces a separate model later
 
-DealWise should scan the CRM and surface the best contacts to act on next.
+## 7. `ACTIVITY` Contract
 
-It should:
-- score and prioritize contacts
-- explain why now
-- suggest the next outreach
-- prepare draft copy for proactive communication
+`ACTIVITY` is the append-only communication and execution ledger.
 
-Primary value:
-- helps the business initiate the next move instead of only reacting to inbound messages
+It should hold:
+- inbound communication
+- grouped inbound interactions
+- outbound communication
+- AI drafts
+- approvals
+- revisions
+- execution history
 
-## 5. Boss Menu Contract
-
-The Boss is identified by the configured boss phone number.
-
-The main boss operating surface is intentionally small:
-- `Reply`
-- `Enrich CRM`
-- `Opportunities`
-- `Help`
-
-### 5.1 Reply
-
-Reply mode is for pending inbound communication sessions.
-
-It should:
-- present one pending session at a time
-- use the contact CRM plus recent same-person context
-- suggest the best reply draft
-- let the boss approve, edit, archive, or postpone
-
-This is the fastest path for clearing inbound communication.
-
-### 5.2 Enrich CRM
-
-Enrich CRM is for manual CRM updates initiated by the boss.
-
-It should:
-- find the intended contact naturally
-- let the boss add the relevant memory or business update
-- save it directly into the CRM
-
-This is not the same as reply handling. It is explicit CRM maintenance by the boss.
-
-### 5.3 Opportunities
-
-Opportunities is for proactive next-step work.
-
-It should:
-- scan the CRM
-- score who is worth acting on now
-- explain why
-- suggest outreach copy
-
-This is not an inbox-clearing mode. It is a proactive deal-advancement mode.
-
-### 5.4 Help
-
-Help explains the current surface and valid actions.
-
-It is support for the three pillars, not a separate product lane.
-
-## 6. Canonical Sheet Schema
-
-The active DealWise MVP sheet model is:
-- `INBOX`
-- `ARCHIVE`
-- `CONTACTS`
-- `SETTINGS`
-- `LOG`
-- `AI_Cost_Tracker`
-
-No other product schema should be treated as core DealWise truth unless this file is updated first.
-
-### 6.1 `CONTACTS` = CRM
-
-`CONTACTS` is the CRM and should stay the center of person/business memory.
-
-Current schema includes:
-- `contact_id`
-- `name`
-- `alias`
-- `org`
-- `website`
-- `phone1`
-- `phone2`
-- `email`
-- `role`
-- `tags`
-- `last_note`
-- `last_enriched_at`
-- `source_system`
-- `source_id`
-- `phone1_normalized`
-- `phone2_normalized`
-- `email_normalized`
-- `labels`
-- `sync_status`
-- `last_synced_at`
-- `notes_internal`
-- `crm_id`
-- `display_name`
-- `identity_terms`
-- `phones`
-- `emails`
-- `personal_summary`
-- `business_summary`
-- `current_state`
-- `next_action`
-- `last_contact_at`
-- `last_updated`
-
-The DealWise-critical CRM fields are:
-- `display_name`
-- `identity_terms`
-- `phones`
-- `emails`
-- `personal_summary`
-- `business_summary`
-- `current_state`
-- `next_action`
-- `last_contact_at`
-- `last_updated`
-
-### 6.2 `INBOX` = communication ledger
-
-`INBOX` is the operational ledger for inbound and outbound communication.
-
-Current schema includes fields such as:
-- identity and versioning:
-  - `timestamp`
-  - `root_id`
-  - `event_id`
-  - `parent_event_id`
-  - `record_id`
-  - `record_version`
-- communication shape:
-  - `record_class`
-  - `channel`
-  - `direction`
-  - `sender`
-  - `receiver`
-  - `message_id`
-  - `message_type`
-  - `text`
-- AI preparation:
-  - `ai_summary`
-  - `ai_proposal`
-  - `suggested_action`
-  - `priority_level`
-  - `importance_level`
-  - `urgency_flag`
-  - `needs_owner_now`
-- approval/execution:
-  - `approval_required`
-  - `approval_status`
-  - `execution_status`
-  - `task_status`
-- CRM linkage:
-  - `contact_id`
-- session/context helpers:
-  - `wa_group_id`
-  - `notes`
-  - `thread_id`
-  - `thread_subject`
-  - `latest_message_at`
-- media/external refs:
-  - `raw_payload_ref`
-  - `external_url`
-  - media fields
-
-For DealWise MVP, `INBOX` exists to support:
-- inbound grouping
-- reply preparation
-- outbound approval/send state
-- CRM enrichment from communication
-
-### 6.3 `ARCHIVE`
-
-`ARCHIVE` mirrors the `INBOX` schema for archived records.
-
-### 6.4 `SETTINGS`
-
-`SETTINGS` stores runtime configuration, including boss identity and communication settings.
-
-### 6.5 `LOG`
-
-`LOG` stores runtime logging and diagnostics.
-
-### 6.6 `AI_Cost_Tracker`
-
-`AI_Cost_Tracker` stores AI usage/cost tracking.
-
-## 7. In Scope Now
-
-In scope if it directly strengthens one of these:
-- Reply
-- Enrich CRM
-- Opportunities
-
-Examples of in-scope work:
-- better inbound grouping
-- better contact resolution
-- better CRM writeback
-- better reply drafting from CRM + same-person history
-- better opportunity scoring and opportunity draft preparation
-- better boss menu flows for those 3 pillars
-
-## 8. Out of Scope Unless Explicitly Approved
-
-These are not core DealWise MVP work unless explicitly justified:
-- generic task manager behavior
-- generic reminder system behavior
-- calendar-first product flows
-- broad personal productivity tooling
-- generic “assistant capabilities” that do not strengthen Reply, Enrich CRM, or Opportunities
-- workflow mechanics added only because they are technically possible
-
-Supporting mechanics are acceptable only if they directly help the 3 pillars.
-
-## 9. Product Fit Check
-
-Before any meaningful implementation, answer these 4 questions:
-
-1. Which pillar does this support:
-   - Reply
-   - Enrich CRM
-   - Opportunities
-2. What user value does it unlock?
-3. Why is it needed now?
-4. What is the smallest version that serves DealWise without expanding into a generic assistant?
-
-If these answers are weak, the work should not proceed.
-
-## 10. Current Build Priority
-
-Current priority order:
-
-1. Reply flow quality and reliability
-2. CRM enrichment quality and durability
-3. Opportunities mode quality and usefulness
-4. Supporting infrastructure only when it directly serves the three pillars
-
-## 11. Change-Control Rule
-
-To prevent drift:
-
-1. Product definition lives here, not across multiple docs.
-2. If behavior changes, this file must be updated first or together with the code.
-3. Supporting docs must not redefine the product.
-4. If a proposed task cannot be justified from this file, it should not be built.
-5. If implementation starts to feel “generically useful” but not clearly DealWise, stop and re-check this file.
-
-## 12. Acceptance Standard
-
-We are aligned only if the implemented system helps the boss do these 3 things well:
-
-1. reply quickly to inbound communication with strong drafts
-2. keep the CRM getting better automatically and manually
-3. find the best proactive opportunities to move deals forward
-
-If work is not clearly improving one of those, it is probably drift.
+`ACTIVITY` replaces the old conceptual role of `INBOX` as product truth.
+
+Main role:
+- support `Easy Replies`
+- provide drafting context
+- preserve communication and execution history
+
+`Priority / Next Steps` and `Manual Contact Update` should depend primarily on `CONTACTS`, with `ACTIVITY` used as supporting evidence when needed.
+
+## 8. Scoring Direction
+
+`deal_score` is dynamic from `1` to `100`.
+
+It reflects how much attention a contact deserves now, based on the latest meaningful business signal.
+
+It is not static lead quality.
+
+## 9. In Scope Now
+
+In scope:
+- CRM enrichment from conversations
+- score/state revision from meaningful signals
+- `Easy Replies`
+- `Priority / Next Steps`
+- `Manual Contact Update`
+- safety and schema work directly required for these lanes
+
+Out of scope unless explicitly approved:
+- generic assistant capabilities
+- generic task-manager expansion
+- calendar-first product work
+- product lanes that do not strengthen reply, CRM, or deal progress
