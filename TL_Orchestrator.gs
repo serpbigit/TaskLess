@@ -10,6 +10,7 @@ const TL_ORCHESTRATOR = {
   DEFAULT_BATCH_SIZE: 5,
   DEFAULT_SCAN_ROWS: 400,
   DEFAULT_QUIET_WINDOW_MINUTES: 120,
+  WHATSAPP_GROUP_RECORD_CLASS: "grouped_inbound",
   WHATSAPP_GROUP_QUIET_MINUTES: 8,
   WHATSAPP_GROUP_MAX_MINUTES: 20,
   DEFAULT_POST_INGEST_MINUTES: 1,
@@ -183,6 +184,11 @@ function TL_Automation_IsEnabled_() {
   const raw = String(TLW_getSetting_("AUTOMATION_ENABLED") || "").trim().toLowerCase();
   if (!raw) return true;
   return !(raw === "false" || raw === "0" || raw === "no");
+}
+
+function TL_Orchestrator_isReplyDraftRecordClass_(recordClass) {
+  const normalized = String(recordClass || "").trim().toLowerCase();
+  return normalized === "proposal" || normalized === String(TL_ORCHESTRATOR.WHATSAPP_GROUP_RECORD_CLASS || "grouped_inbound").trim().toLowerCase();
 }
 
 function TL_Repair_Run(batchSize) {
@@ -566,7 +572,7 @@ function TL_Approval_RunUnlocked_(batchSize) {
     const recordClass = TL_Orchestrator_value_(values, "record_class").toLowerCase();
     const proposal = TL_Orchestrator_value_(values, "ai_proposal");
     const approvalStatus = TL_Orchestrator_value_(values, "approval_status").toLowerCase();
-    if (recordClass !== "proposal" || !proposal) {
+    if (!TL_Orchestrator_isReplyDraftRecordClass_(recordClass) || !proposal) {
       continue;
     }
     if (approvalStatus === "approved" || approvalStatus === "awaiting_approval" || approvalStatus === "sent" || approvalStatus === "executed") {
@@ -797,62 +803,15 @@ function TL_Reminder_RunDueUnlocked_(batchSize, options) {
 }
 
 function TL_Send_RunApprovedUnlocked_(batchSize, options) {
-  const limit = TL_Orchestrator_normalizeBatchSize_(batchSize);
-  const sendFn = options && typeof options.sendFn === "function" ? options.sendFn : TLW_sendText_;
-  const rows = TL_Orchestrator_readRecentRows_(TL_ORCHESTRATOR.DEFAULT_SCAN_ROWS);
   const result = {
     ok: true,
     scanned: 0,
     sent: 0,
     skipped: 0,
-    failed: 0
+    failed: 0,
+    locked: true,
+    reason: "emergency_manual_send_only"
   };
-
-  for (let i = rows.length - 1; i >= 0 && result.scanned < limit; i--) {
-    const item = rows[i];
-    const values = item.values;
-    const recordClass = TL_Orchestrator_value_(values, "record_class").toLowerCase();
-    const approvalStatus = TL_Orchestrator_value_(values, "approval_status").toLowerCase();
-    const executionStatus = TL_Orchestrator_value_(values, "execution_status").toLowerCase();
-    const proposal = TL_Orchestrator_value_(values, "ai_proposal") || TL_Orchestrator_value_(values, "text");
-    if (recordClass !== "proposal" || approvalStatus !== "approved" || executionStatus === "sent" || executionStatus === "sending" || !proposal) {
-      continue;
-    }
-
-    const phoneNumberId = TL_Orchestrator_value_(values, "phone_number_id");
-    const toWaId = TL_Orchestrator_resolveSendTarget_(values);
-    if (!phoneNumberId || !toWaId) {
-      result.skipped++;
-      continue;
-    }
-
-    result.scanned++;
-    TL_Orchestrator_updateRowFields_(item.rowNumber, {
-      execution_status: "sending"
-    }, "approved_send_start");
-      const sendResult = sendFn(phoneNumberId, toWaId, proposal, item);
-      if (sendResult && sendResult.ok) {
-        TL_Orchestrator_updateRowFields_(item.rowNumber, {
-          execution_status: "sent",
-        }, "approved_send");
-        if (typeof TL_Contacts_ApplyOutboundWriteback_ === "function") {
-          TL_Contacts_ApplyOutboundWriteback_(String(TL_Orchestrator_value_(values, "contact_id") || toWaId).trim(), {
-            display_name: String(TL_Orchestrator_value_(values, "sender") || TL_Orchestrator_value_(values, "receiver") || "").trim(),
-            phone: toWaId,
-            summary: String(TL_Orchestrator_value_(values, "ai_summary") || "").trim(),
-            outbound_text: proposal,
-            last_contact_at: new Date().toISOString()
-          });
-        }
-        result.sent++;
-      } else {
-        TL_Orchestrator_updateRowFields_(item.rowNumber, {
-          execution_status: "send_failed"
-        }, "send_failed");
-      result.failed++;
-    }
-  }
-
   TLW_logInfo_("send_run_approved", result);
   return result;
 }
@@ -928,7 +887,7 @@ function TL_Orchestrator_buildThreadSynthesis_(thread, options) {
       parent_event_id: TL_Orchestrator_value_(source, "event_id"),
       record_id: recordId,
       record_version: 1,
-      record_class: "proposal",
+      record_class: TL_ORCHESTRATOR.WHATSAPP_GROUP_RECORD_CLASS,
       channel: "whatsapp",
       direction: "outgoing",
       phone_number_id: phoneNumberId,
@@ -1232,7 +1191,7 @@ function TL_Orchestrator_findThreadRecipient_(rootId) {
       const sender = TL_Orchestrator_value_(values, "sender");
       if (sender) return sender;
     }
-    if (recordClass === "proposal") {
+    if (TL_Orchestrator_isReplyDraftRecordClass_(recordClass)) {
       const receiver = TL_Orchestrator_value_(values, "receiver");
       if (receiver) return receiver;
     }
@@ -1383,7 +1342,7 @@ function TL_BossPolicy_classifyItem_(item, eventMap) {
   const text = TL_Orchestrator_value_(values, "text");
   const summary = aiSummary || text || aiProposal || "";
   const proposal = aiProposal || text || "";
-  const isDecision = approvalRequired || recordClass === "proposal" || recordClass === "instruction" || approvalStatus === "draft" || approvalStatus === "awaiting_approval" || taskStatus === "pending" || taskStatus === "proposal_ready";
+  const isDecision = approvalRequired || TL_Orchestrator_isReplyDraftRecordClass_(recordClass) || recordClass === "instruction" || approvalStatus === "draft" || approvalStatus === "awaiting_approval" || taskStatus === "pending" || taskStatus === "proposal_ready";
   const isUrgent = urgencyFlag || needsOwnerNow || priorityLevel === "high" || importanceLevel === "high" || suggestedAction === "reply_now" || suggestedAction === "call" || suggestedAction === "schedule" || suggestedAction === "follow_up";
   const isHigh = priorityLevel === "high" || importanceLevel === "high";
   const isFYI = !isDecision && recordClass === "communication" && direction === "incoming";
@@ -1755,7 +1714,7 @@ function TL_Orchestrator_indexThreads_(rows) {
       }
     }
 
-    if (recordClass === "proposal") {
+    if (TL_Orchestrator_isReplyDraftRecordClass_(recordClass)) {
       if (!thread.latestProposalRow || item.rowNumber > thread.latestProposalRow.rowNumber) {
         thread.latestProposalRow = item;
       }
@@ -1866,7 +1825,10 @@ function TL_Orchestrator_burstAlreadySynthesized_(burst, rows) {
   if (!latestRowNumber) return false;
   return (rows || []).some(function(item) {
     const values = item.values;
-    if (String(TL_Orchestrator_value_(values, "record_class") || "").trim().toLowerCase() !== "proposal") return false;
+    if (!TL_Orchestrator_isReplyDraftRecordClass_(TL_Orchestrator_value_(values, "record_class"))) return false;
+    if (String(TL_Orchestrator_value_(values, "wa_group_id") || "").trim() === String(burst && TL_Orchestrator_buildBurstGroupId_(burst, TL_Orchestrator_value_(burst.latestIncomingRow && burst.latestIncomingRow.values || [], "message_id")) || "").trim()) {
+      return true;
+    }
     const notes = String(TL_Orchestrator_value_(values, "notes") || "").trim();
     return notes.indexOf("dealwise_group_latest_row=" + String(latestRowNumber)) !== -1;
   });
@@ -1908,7 +1870,7 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
       parent_event_id: String(TL_Orchestrator_value_(latestValues, "event_id") || "").trim(),
       record_id: recordId,
       record_version: 1,
-      record_class: "proposal",
+      record_class: TL_ORCHESTRATOR.WHATSAPP_GROUP_RECORD_CLASS,
       channel: "whatsapp",
       direction: "outgoing",
       phone_number_id: phoneNumberId,
@@ -1927,6 +1889,7 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
       status_timestamp: "",
       statuses_count: 0,
       contact_id: contactId,
+      wa_group_id: groupId,
       raw_payload_ref: "",
       notes: [
         "orchestrator=dealwise_group_synthesis",
