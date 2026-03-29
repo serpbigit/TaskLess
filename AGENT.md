@@ -77,6 +77,13 @@ Preferred commands from repo root:
 - Keep summaries concise and operational.
 - State what changed, what was tested, and what remains unproven.
 - If deployment steps matter, provide the exact commands used or required.
+- Default to horizontal, compact writing with minimal line breaks.
+- Preserve vertical space, especially for mobile / AnyDesk reading.
+- Prefer inline lists over stacked bullets when clarity is not harmed.
+- Use new lines only when they add real structure, not as the first formatting choice.
+- Example preference:
+  - Prefer `Hebrew: תפריט, בית, עזרה, חזור, בטל`
+  - Over breaking each short item onto separate lines.
 
 ## 9. Naming Lanes
 - `TL_*.gs` = current runtime modules, kept temporarily during the transition

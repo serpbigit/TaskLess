@@ -11,8 +11,8 @@ const TL_ORCHESTRATOR = {
   DEFAULT_SCAN_ROWS: 400,
   DEFAULT_QUIET_WINDOW_MINUTES: 120,
   WHATSAPP_GROUP_RECORD_CLASS: "grouped_inbound",
-  WHATSAPP_GROUP_QUIET_MINUTES: 8,
-  WHATSAPP_GROUP_MAX_MINUTES: 20,
+  WHATSAPP_GROUP_QUIET_MINUTES: 3,
+  WHATSAPP_GROUP_MAX_MINUTES: 12,
   DEFAULT_POST_INGEST_MINUTES: 1,
   DEFAULT_REMINDER_POLL_MINUTES: 5,
   TRIGGER_HANDLER: "TL_Orchestrator_Run",
@@ -41,6 +41,7 @@ function TL_Orchestrator_Run() {
       approval: TL_Approval_RunUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
       reminders: TL_Reminder_RunDueUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
       send: TL_Send_RunApprovedUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
+      reply_prep: typeof TL_Menu_PrepareReplyPacketCache_ === "function" ? TL_Menu_PrepareReplyPacketCache_() : null,
       boss: TL_BossPolicy_RunUnlocked_()
     };
 
@@ -325,6 +326,9 @@ function TL_AI_RunPendingUnlocked_(batchSize) {
       const mediaId = TL_Orchestrator_value_(values, "media_id");
       const notes = TL_Orchestrator_value_(values, "notes");
       const needsVoice = mediaId && (messageType === "voice" || messageType === "audio" || TL_Orchestrator_value_(values, "media_is_voice") === "true");
+      const triagePolicy = typeof TL_AI_TriagePolicyForInboxRowValues_ === "function"
+        ? TL_AI_TriagePolicyForInboxRowValues_(values)
+        : { defer: false, reason: "" };
       const needsTriage = !TL_Orchestrator_value_(values, "ai_summary") || !TL_Orchestrator_value_(values, "ai_proposal");
 
       if (needsVoice && notes.indexOf("voice_transcription_status=ok") === -1 && typeof TL_AI_TranscribeInboxRow_ === "function") {
@@ -332,9 +336,11 @@ function TL_AI_RunPendingUnlocked_(batchSize) {
         result.transcribed++;
       }
 
-      if (needsTriage && typeof TL_AI_TriageInboxRow_ === "function") {
+      if (needsTriage && !(triagePolicy && triagePolicy.defer) && typeof TL_AI_TriageInboxRow_ === "function") {
         TL_AI_TriageInboxRow_(item.rowNumber);
         result.triaged++;
+      } else if (needsTriage && triagePolicy && triagePolicy.defer) {
+        result.skipped++;
       }
     } catch (err) {
       TLW_logInfo_("ai_run_pending_error", {
@@ -384,6 +390,14 @@ function TL_Capture_RunUnlocked_(batchSize, options) {
       continue;
     }
     if (cfg.bossPhone && sender !== cfg.bossPhone) {
+      continue;
+    }
+    if (!TL_Orchestrator_isArmedBossCaptureRow_(values)) {
+      TL_Orchestrator_updateRowFields_(item.rowNumber, {
+        notes: TL_Capture_appendNote_(values, "boss_capture_state=ignored_unarmed"),
+        execution_status: "interface_handled"
+      }, "boss_capture_ignore_unarmed");
+      result.skipped++;
       continue;
     }
     if (notes.indexOf("boss_capture_state=processed") !== -1) {
@@ -521,6 +535,15 @@ function TL_Capture_RunUnlocked_(batchSize, options) {
   return result;
 }
 
+function TL_Orchestrator_isArmedBossCaptureRow_(values) {
+  const notes = String(TL_Orchestrator_value_(values, "notes") || "").toLowerCase();
+  if (!notes) return false;
+  if (notes.indexOf("menu_route=") !== -1) return true;
+  if (notes.indexOf("contact_enrichment_candidate=") !== -1) return true;
+  if (notes.indexOf("boss_capture_kind=") !== -1) return true;
+  return false;
+}
+
 function TL_Synthesis_RunUnlocked_(batchSize, options) {
   const limit = TL_Orchestrator_normalizeBatchSize_(batchSize);
   const rows = TL_Orchestrator_readRecentRows_(TL_ORCHESTRATOR.DEFAULT_SCAN_ROWS);
@@ -572,7 +595,13 @@ function TL_Approval_RunUnlocked_(batchSize) {
     const recordClass = TL_Orchestrator_value_(values, "record_class").toLowerCase();
     const proposal = TL_Orchestrator_value_(values, "ai_proposal");
     const approvalStatus = TL_Orchestrator_value_(values, "approval_status").toLowerCase();
+    const responseExpected = TL_Orchestrator_value_(values, "response_expected").toLowerCase();
+    const suggestedAction = TL_Orchestrator_value_(values, "suggested_action").toLowerCase();
     if (!TL_Orchestrator_isReplyDraftRecordClass_(recordClass) || !proposal) {
+      continue;
+    }
+    if (responseExpected === "false" || suggestedAction === "ignore" || suggestedAction === "wait") {
+      result.skipped++;
       continue;
     }
     if (approvalStatus === "approved" || approvalStatus === "awaiting_approval" || approvalStatus === "sent" || approvalStatus === "executed") {
@@ -803,6 +832,20 @@ function TL_Reminder_RunDueUnlocked_(batchSize, options) {
 }
 
 function TL_Send_RunApprovedUnlocked_(batchSize, options) {
+  if (typeof TL_Emergency_ApprovalOutboundEnabled_ === "function" && !TL_Emergency_ApprovalOutboundEnabled_()) {
+    const blocked = {
+      ok: true,
+      scanned: 0,
+      sent: 0,
+      skipped: 0,
+      failed: 0,
+      locked: true,
+      blocked: true,
+      reason: "approval_outbound_disabled"
+    };
+    TLW_logInfo_("send_run_approved", blocked);
+    return blocked;
+  }
   const result = {
     ok: true,
     scanned: 0,
@@ -1201,7 +1244,6 @@ function TL_Orchestrator_findThreadRecipient_(rootId) {
 
 function TL_BossPolicy_RunUnlocked_(options) {
   const cfg = TL_BossPolicy_getConfig_(options);
-  const now = cfg.now;
   const result = {
     ok: true,
     skipped: false,
@@ -1224,57 +1266,9 @@ function TL_BossPolicy_RunUnlocked_(options) {
     result.reason = "missing_boss_phone";
     return result;
   }
-  if (cfg.doNotDisturb) {
-    result.skipped = true;
-    result.reason = "dnd_enabled";
-    return result;
-  }
 
-  const rows = TL_BossPolicy_getRows_(options);
-  const items = TL_BossPolicy_collectItems_(rows);
-  result.counts.rows = rows.length;
-  result.counts.items = items.length;
-
-  const consumed = {};
-
-  const urgentItems = TL_BossPolicy_selectUrgentItems_(items, cfg, consumed);
-  result.counts.urgent = urgentItems.length;
-  if (urgentItems.length) {
-    if (cfg.urgentPushEnabled) {
-      result.urgent = TL_BossPolicy_maybeSendPacket_("urgent", urgentItems, cfg, options, now, 0);
-    } else {
-      result.urgent = { ok: true, skipped: true, reason: "urgent_push_disabled" };
-    }
-    if (result.urgent && result.urgent.sent) {
-      urgentItems.forEach(function(item) {
-        consumed[item.key] = true;
-      });
-    }
-  } else {
-    result.urgent = { ok: true, skipped: true, reason: "no_urgent_items" };
-  }
-
-  const decisionItems = TL_BossPolicy_selectDecisionItems_(items, cfg, consumed);
-  result.counts.decision = decisionItems.length;
-  if (decisionItems.length) {
-    result.decision = TL_BossPolicy_maybeSendPacket_("decision", decisionItems, cfg, options, now, cfg.decisionRequestIntervalMinutes);
-    if (result.decision && result.decision.sent) {
-      decisionItems.forEach(function(item) {
-        consumed[item.key] = true;
-      });
-    }
-  } else {
-    result.decision = { ok: true, skipped: true, reason: "no_decision_items" };
-  }
-
-  const digestItems = TL_BossPolicy_selectDigestItems_(items, cfg, consumed);
-  result.counts.digest = digestItems.length;
-  if (digestItems.length) {
-    result.digest = TL_BossPolicy_maybeSendPacket_("digest", digestItems, cfg, options, now, cfg.updateIntervalMinutes);
-  } else {
-    result.digest = { ok: true, skipped: true, reason: "no_digest_items" };
-  }
-
+  result.skipped = true;
+  result.reason = "boss_passive_mode";
   TLW_logInfo_("boss_policy_run", result);
   return result;
 }
@@ -1398,10 +1392,15 @@ function TL_Orchestrator_isInterfaceRequestRow_(values, overrideText) {
   const recordClass = TL_Orchestrator_value_(values, "record_class").toLowerCase();
   const sender = TLW_normalizePhone_(TL_Orchestrator_value_(values, "sender"));
   const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
-  if (direction !== "incoming" || recordClass !== "communication" || !bossPhone || sender !== bossPhone) return false;
+  if (direction !== "incoming" || !bossPhone || sender !== bossPhone) return false;
+  if (recordClass === "interface") return true;
+  if (recordClass !== "communication") return false;
 
   const notes = TL_Orchestrator_value_(values, "notes").toLowerCase();
-  if (notes.indexOf("boss_intent=show_menu") !== -1 || notes.indexOf("boss_intent=help") !== -1 || notes.indexOf("boss_intent=out_of_scope") !== -1) {
+  if (notes.indexOf("menu_interface_handled=true") !== -1 ||
+      notes.indexOf("boss_intent=show_menu") !== -1 ||
+      notes.indexOf("boss_intent=help") !== -1 ||
+      notes.indexOf("boss_intent=out_of_scope") !== -1) {
     return true;
   }
 
@@ -1841,20 +1840,30 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
   if (!rows.length) return null;
   const latest = burst.latestIncomingRow || rows[rows.length - 1];
   const latestValues = latest.values;
-  const groupedText = TL_Orchestrator_renderBurstText_(rows);
-  const triage = TL_Orchestrator_buildBurstTriage_(groupedText, latestValues, options);
+  const participants = TL_Orchestrator_resolveBurstParticipants_(rows, latestValues);
+  const groupedText = TL_Orchestrator_renderBurstText_(rows, participants);
+  const triage = TL_Orchestrator_buildBurstTriage_(groupedText, latestValues, rows, options);
   const sourceRootId = String(TL_Orchestrator_value_(latestValues, "root_id") || "").trim();
   const contactId = String(TL_Orchestrator_value_(latestValues, "contact_id") || "").trim();
-  const sender = String(TL_Orchestrator_value_(latestValues, "sender") || "").trim();
-  const receiver = String(TL_Orchestrator_value_(latestValues, "display_phone_number") || TL_Orchestrator_value_(latestValues, "receiver") || "").trim();
+  const sender = String(participants.externalPhone || TL_Orchestrator_value_(latestValues, "sender") || "").trim();
+  const receiver = String(participants.businessLine || TL_Orchestrator_value_(latestValues, "display_phone_number") || TL_Orchestrator_value_(latestValues, "receiver") || "").trim();
+  const latestNotes = String(TL_Orchestrator_value_(latestValues, "notes") || "").trim();
+  const contactDisplayName = String(participants.contactDisplayName || TL_ContactEnrichment_getNoteValue_(latestNotes, "wa_contact_name") || sender).trim();
   const phoneNumberId = String(TL_Orchestrator_value_(latestValues, "phone_number_id") || "").trim();
   const latestMessageId = String(TL_Orchestrator_value_(latestValues, "message_id") || "").trim();
   const latestTopicId = String(TL_Orchestrator_value_(latestValues, "topic_id") || "").trim();
   const groupId = TL_Orchestrator_buildBurstGroupId_(burst, latestMessageId);
   const recordId = "SYN_" + groupId;
   const now = new Date();
+  const nowIso = now.toISOString();
   const summary = String(triage.summary || "").trim() || TL_Orchestrator_buildBurstFallbackSummary_(rows);
   const proposal = String(triage.proposal || "").trim() || TL_Orchestrator_buildBurstFallbackProposal_(sender);
+  const responseExpected = typeof TL_Activity_responseExpectedFromSuggestedAction_ === "function"
+    ? TL_Activity_responseExpectedFromSuggestedAction_(triage.suggested_action)
+    : true;
+  const attentionRequired = typeof TL_Activity_attentionRequiredFromSuggestedAction_ === "function"
+    ? TL_Activity_attentionRequiredFromSuggestedAction_(triage.suggested_action)
+    : responseExpected;
   const rawJson = TLW_safeStringify_({
     source: "TL_Orchestrator_DealWiseBurst",
     burst_group_id: groupId,
@@ -1872,19 +1881,19 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
       record_version: 1,
       record_class: TL_ORCHESTRATOR.WHATSAPP_GROUP_RECORD_CLASS,
       channel: "whatsapp",
-      direction: "outgoing",
+      direction: "incoming",
       phone_number_id: phoneNumberId,
       display_phone_number: receiver,
-      sender: receiver,
-      receiver: sender,
+      sender: sender,
+      receiver: receiver,
       message_id: recordId,
       message_type: "text",
-      text: proposal,
+      text: groupedText,
       ai_summary: summary,
-      ai_proposal: proposal,
-      approval_required: "true",
-      approval_status: "draft",
-      execution_status: "proposal_ready",
+      ai_proposal: responseExpected ? proposal : "",
+      approval_required: responseExpected ? "true" : "false",
+      approval_status: responseExpected ? "draft" : "not_needed",
+      execution_status: responseExpected ? "proposal_ready" : "not_needed",
       status_latest: "",
       status_timestamp: "",
       statuses_count: 0,
@@ -1898,10 +1907,13 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
         "dealwise_group_first_row=" + String(rows[0].rowNumber || 0),
         "dealwise_group_latest_row=" + String(latest.rowNumber || 0),
         "dealwise_group_size=" + String(rows.length),
-        "dealwise_group_latest_message_id=" + latestMessageId
+        "dealwise_group_latest_message_id=" + latestMessageId,
+        "dealwise_group_external_sender=" + sender,
+        "dealwise_group_business_line=" + receiver,
+        contactDisplayName ? ("wa_contact_name=" + contactDisplayName.replace(/\n+/g, " ").replace(/[;]+/g, ",")) : ""
       ].join(";"),
       task_due: "",
-      task_status: "proposal_ready",
+      task_status: responseExpected ? "proposal_ready" : "closed",
       task_priority: "",
       topic_id: latestTopicId,
       topic_tagged_at: String(TL_Orchestrator_value_(latestValues, "topic_tagged_at") || "").trim(),
@@ -1925,16 +1937,31 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
       latest_message_at: latestMessageId ? TL_Orchestrator_rowTimestamp_(latestValues).toISOString() : "",
       external_url: "",
       participants_json: "",
-      capture_language: String(TL_Orchestrator_value_(latestValues, "capture_language") || "").trim()
+      capture_language: String(TL_Orchestrator_value_(latestValues, "capture_language") || "").trim(),
+      activity_kind: "grouped_inbound",
+      conversation_domain: "business",
+      response_expected: TL_Activity_boolString_(responseExpected),
+      response_expected_reason: responseExpected ? String(triage.suggested_action || "grouped_inbound_reply_candidate").trim() : "fyi_or_no_reply_needed",
+      attention_required: TL_Activity_boolString_(attentionRequired),
+      business_opportunity: TL_Activity_boolString_(String(triage.suggested_action || "").trim().toLowerCase() === "follow_up"),
+      reply_status: responseExpected ? "pending" : "not_needed",
+      resolved_at: responseExpected ? "" : nowIso,
+      resolved_reason: responseExpected ? "" : "no_reply_needed"
     },
     rawJson: rawJson,
     crmWriteback: {
       contactId: contactId,
-      display_name: sender,
+      display_name: contactDisplayName,
       phone: sender,
       business_summary: summary,
+      business_history: summary,
       current_state: summary,
+      last_signal_summary: summary,
+      last_signal_at: TL_Orchestrator_rowTimestamp_(latestValues).toISOString(),
+      last_inbound_at: TL_Orchestrator_rowTimestamp_(latestValues).toISOString(),
       next_action: TL_Orchestrator_buildBurstNextAction_(triage, summary),
+      next_step_summary: TL_Orchestrator_buildBurstNextAction_(triage, summary),
+      open_loop_status: responseExpected ? "open" : "closed",
       last_contact_at: TL_Orchestrator_rowTimestamp_(latestValues).toISOString(),
       last_updated: now.toISOString(),
       summary: summary
@@ -1942,12 +1969,62 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
   };
 }
 
-function TL_Orchestrator_renderBurstText_(rows) {
+function TL_Orchestrator_renderBurstText_(rows, participants) {
+  const externalPhone = TLW_normalizePhone_(participants && participants.externalPhone || "");
+  const businessLine = TLW_normalizePhone_(participants && participants.businessLine || "");
+  const externalLabel = String(participants && participants.contactDisplayName || participants && participants.externalPhone || "Contact").trim();
+  const businessLabel = "Business";
   return (rows || []).map(function(item) {
     const values = item.values;
     const text = String(TL_Orchestrator_value_(values, "text") || TL_Orchestrator_value_(values, "media_caption") || "").trim();
-    return text ? ("Message " + String(item.rowNumber || "") + ": " + text) : "";
+    if (!text) return "";
+    const sender = TLW_normalizePhone_(TL_Orchestrator_value_(values, "sender") || "");
+    const direction = String(TL_Orchestrator_value_(values, "direction") || "").trim().toLowerCase();
+    const speaker = sender && externalPhone && sender === externalPhone
+      ? externalLabel
+      : (sender && businessLine && sender === businessLine
+        ? businessLabel
+        : (direction === "incoming" ? externalLabel : businessLabel));
+    return speaker + " [" + String(item.rowNumber || "") + "]: " + text;
   }).filter(Boolean).join("\n");
+}
+
+function TL_Orchestrator_resolveBurstParticipants_(rows, latestValues) {
+  const latest = latestValues || [];
+  const contactId = String(TL_Orchestrator_value_(latest, "contact_id") || "").trim();
+  const contactPhoneFromId = TL_Orchestrator_contactPhoneFromContactId_(contactId);
+  const businessLine = TLW_normalizePhone_(
+    TL_Orchestrator_value_(latest, "display_phone_number") ||
+    TL_Orchestrator_value_(latest, "receiver") ||
+    ""
+  );
+  let externalPhone = contactPhoneFromId;
+  let contactDisplayName = "";
+
+  (rows || []).forEach(function(item) {
+    const values = item && item.values ? item.values : [];
+    const sender = TLW_normalizePhone_(TL_Orchestrator_value_(values, "sender") || "");
+    const receiver = TLW_normalizePhone_(TL_Orchestrator_value_(values, "receiver") || "");
+    const notes = String(TL_Orchestrator_value_(values, "notes") || "").trim();
+    const waName = String(TL_ContactEnrichment_getNoteValue_(notes, "wa_contact_name") || "").trim();
+    if (!contactDisplayName && waName) contactDisplayName = waName;
+    if (!externalPhone && sender && sender !== businessLine) externalPhone = sender;
+    if (!externalPhone && receiver && receiver !== businessLine) externalPhone = receiver;
+  });
+
+  if (!contactDisplayName && externalPhone) contactDisplayName = externalPhone;
+  return {
+    businessLine: businessLine,
+    externalPhone: externalPhone,
+    contactDisplayName: contactDisplayName
+  };
+}
+
+function TL_Orchestrator_contactPhoneFromContactId_(contactId) {
+  const safe = String(contactId || "").trim();
+  if (!safe) return "";
+  const match = safe.match(/_(\d{6,})$/);
+  return match ? TLW_normalizePhone_(match[1]) : "";
 }
 
 function TL_Orchestrator_buildBurstFallbackSummary_(rows) {
@@ -1978,7 +2055,7 @@ function TL_Orchestrator_buildBurstGroupId_(burst, latestMessageId) {
   return "group_" + personKey + "_" + latestRow + "_" + latestMsg;
 }
 
-function TL_Orchestrator_buildBurstTriage_(groupedText, latestValues, options) {
+function TL_Orchestrator_buildBurstTriage_(groupedText, latestValues, sourceRows, options) {
   const text = String(groupedText || "").trim();
   const fallback = {
     priority_level: "",
@@ -1999,8 +2076,14 @@ function TL_Orchestrator_buildBurstTriage_(groupedText, latestValues, options) {
   if (typeof TL_AI_callPrompt_ !== "function") return fallback;
   try {
     const cfg = TL_AI_getConfig_();
+    const excludeWhatsAppSourceIds = (sourceRows || []).map(function(item) {
+      const values = item && item.values ? item.values : [];
+      return String(TL_Orchestrator_value_(values, "record_id") || TL_Orchestrator_value_(values, "message_id") || "").trim();
+    }).filter(Boolean);
     const draftContext = typeof TL_DraftContext_BuildForInboxRowValues_ === "function"
-      ? TL_DraftContext_BuildForInboxRowValues_(latestValues)
+      ? TL_DraftContext_BuildForInboxRowValues_(latestValues, {
+        excludeWhatsAppSourceIds: excludeWhatsAppSourceIds
+      })
       : null;
     const replyLanguage = TL_AI_resolveReplyLanguage_(text, cfg.language, cfg.replyLanguagePolicy);
     const prompt = TL_AI_buildTriagePrompt_(text, cfg.language, cfg.bossName, draftContext && draftContext.promptBrief, replyLanguage);

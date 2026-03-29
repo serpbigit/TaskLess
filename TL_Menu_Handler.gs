@@ -14,7 +14,7 @@
  */
 
 const TL_MENU = {
-  TRIGGERS: ["תפריט","menu","/menu","עזרה","help","מה אפשר לעשות","מה את יכולה לעשות","מה אתה יכול לעשות","what can i do","what can you do","what can i say"],
+  TRIGGERS: ["תפריט","menu","/menu","בית","home","/home","עזרה","help","מה אפשר לעשות","מה את יכולה לעשות","מה אתה יכול לעשות","what can i do","what can you do","what can i say"],
   HELP_TRIGGERS: ["עזרה","help","מה אפשר לעשות","what can i do","what can i say"],
   BACK_TRIGGERS: ["back","go back","חזרה","חזור","חזרי","חזרה אחורה","back please"],
   CAPABILITY_TRIGGERS: ["מה את יכולה לעשות","מה אתה יכול לעשות","מה אפשר לעשות","what can you do","what can i do"],
@@ -23,11 +23,15 @@ const TL_MENU = {
   COST_TRIGGERS: ["עלות","cost","ai cost","עלות ai","עלות ה-ai","עלות של ai"],
   EXIT_TRIGGERS: ["יציאה","איפוס","בטל","cancel","exit","reset","stop"],
   STATE_KEY_PREFIX: "MENU_STATE_", // + wa_id
+  STATE_META_KEY_PREFIX: "MENU_STATE_META_", // + wa_id
   PACKET_KEY_PREFIX: "MENU_PACKET_", // + wa_id
+  PREPARED_REPLY_PACKET_KEY: "MENU_PREPARED_REPLY_PACKET",
+  ONBOARDED_KEY_PREFIX: "MENU_ONBOARDED_", // + wa_id
   MAX_PENDING_SUMMARY: 5
 };
 
 var TL_MENU_RUNTIME_WAID = "";
+const TL_MENU_SESSION_VERSION = "dw_menu_runtime_2026_03_28_01";
 
 const TL_MENU_STATES = {
   ROOT: "root",
@@ -102,15 +106,23 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
   const text = rawText.toLowerCase();
   TL_MENU_RUNTIME_WAID = bossWaId;
   try {
-    if (!text) return TL_Menu_BuildMenuReply_();
+    TL_Menu_CleanupStaleFlow_(bossWaId);
+    const firstUse = TL_Menu_IsFirstUse_(bossWaId);
+
+    if (!text) {
+      TL_Menu_MarkOnboarded_(bossWaId);
+      return firstUse ? TL_Menu_BuildWelcomeMenuReply_() : TL_Menu_BuildMenuReply_();
+    }
 
     if (TL_Menu_IsMenuCommand_(rawText)) {
+      TL_Menu_MarkOnboarded_(bossWaId);
       TL_Menu_PauseForMenuCommand_(bossWaId);
-      TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
-      return TL_Menu_BuildMenuReply_();
+      TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT, { source: "menu_command" });
+      return firstUse ? TL_Menu_BuildWelcomeMenuReply_() : TL_Menu_BuildMenuReply_();
     }
 
     if (TL_Menu_IsExitCommand_(rawText)) {
+      TL_Menu_MarkOnboarded_(bossWaId);
       TL_Menu_ResetSession_(bossWaId);
       return TL_Menu_T_(
         "איפסתי את הזרימה הנוכחית. חזרנו למצב נקי. אם תרצה, כתוב \"תפריט\" כדי להתחיל מחדש.",
@@ -119,20 +131,39 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
     }
 
     if (TL_Menu_IsBackCommand_(rawText)) {
+      TL_Menu_MarkOnboarded_(bossWaId);
       return TL_Menu_HandleBackCommand_(bossWaId);
     }
 
     if (TL_Menu_IsHelpCommand_(rawText)) {
+      TL_Menu_MarkOnboarded_(bossWaId);
       return TL_Menu_BuildContextualHelp_(bossWaId);
+    }
+
+    if (firstUse && !TL_Menu_HasActiveFlow_(bossWaId)) {
+      TL_Menu_MarkOnboarded_(bossWaId);
+      TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT);
+      return TL_Menu_BuildWelcomeMenuReply_();
     }
 
     const menuIntent = TL_Menu_RecognizeMenuIntent_(bossWaId, rawText, options);
     if (menuIntent) {
+      TL_Menu_MarkOnboarded_(bossWaId);
       TL_Menu_PauseForMenuCommand_(bossWaId);
       return TL_Menu_OpenMenuTarget_(bossWaId, menuIntent) || TL_Menu_BuildMenuReply_();
     }
 
     const existingPacket = TL_Menu_GetDecisionPacket_(bossWaId);
+    const state = TL_Menu_GetState_(bossWaId);
+    if (existingPacket && TL_Menu_IsNumericChoice_(text)) {
+      const packetReplyFirst = TL_Menu_HandleDecisionPacketReply_(bossWaId, text);
+      if (packetReplyFirst) return packetReplyFirst;
+    }
+    if (TL_Menu_IsNumericChoice_(text) && TL_Menu_IsFreshRootMenuChoiceWindow_(bossWaId, state)) {
+      const armedReply = TL_Menu_HandleMenuChoice_(bossWaId, TL_MENU_STATES.ROOT, text);
+      if (armedReply) return armedReply;
+    }
+
     if (existingPacket && TL_Menu_IsResumePausedCommand_(rawText)) {
       return TL_Menu_ResumePacketFlow_(bossWaId, existingPacket);
     }
@@ -175,8 +206,6 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
       TL_Menu_SetState_(bossWaId, targetState);
       return TL_Menu_BuildMenuForState_(targetState);
     }
-
-    const state = TL_Menu_GetState_(bossWaId);
 
     if (state === TL_MENU_STATES.CAPTURE_BRAIN_DUMP && (text === "דוגמה" || text === "example")) {
       return TL_Menu_BuildBrainDumpExampleReply_();
@@ -237,9 +266,20 @@ function TL_Menu_BuildMenuReply_() {
     "3. 🎯 Opportunities",
     "4. ❓ Help",
     "",
-    "פקודות גלובליות: menu | help | back | resume | cancel",
+    "פקודות גלובליות: תפריט/menu | בית/home | עזרה/help | חזור/back | בטל/cancel",
     "",
     "שלח את הספרה של בחירתך"
+  ]);
+}
+
+function TL_Menu_BuildWelcomeMenuReply_() {
+  const bossName = String(TLW_getSetting_("BOSS_NAME") || "").trim();
+  return TL_Menu_HebrewBlock_([
+    bossName ? ("שלום " + bossName + ",") : "שלום,",
+    TL_Menu_T_("אני DealWise, העוזר שלך לניהול תקשורת ו-CRM.", "I'm DealWise, your communication and CRM assistant."),
+    TL_Menu_T_("אפשר להתחיל מכאן:", "You can start here:"),
+    "",
+    TL_Menu_BuildMenuReply_()
   ]);
 }
 
@@ -291,18 +331,38 @@ function TL_Menu_RecognizeMenuIntent_(waId, rawText, options) {
   return null;
 }
 
-function TL_Menu_SetState_(waId, state) {
-  PropertiesService.getScriptProperties().setProperty(TL_MENU.STATE_KEY_PREFIX + waId, state);
+function TL_Menu_SetState_(waId, state, metaExtras) {
+  const safeWaId = String(waId || "").trim();
+  if (!safeWaId) return;
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(TL_MENU.STATE_KEY_PREFIX + safeWaId, state);
+  const baseMeta = {
+    state: String(state || TL_MENU_STATES.ROOT),
+    updated_at: new Date().toISOString(),
+    session_version: TL_Menu_SessionRuntimeVersion_()
+  };
+  const extras = metaExtras && typeof metaExtras === "object" ? metaExtras : {};
+  props.setProperty(TL_MENU.STATE_META_KEY_PREFIX + safeWaId, JSON.stringify(Object.assign(baseMeta, extras)));
 }
 
 function TL_Menu_GetState_(waId) {
-  const value = String(PropertiesService.getScriptProperties().getProperty(TL_MENU.STATE_KEY_PREFIX + waId) || TL_MENU_STATES.ROOT);
+  const safeWaId = String(waId || "").trim();
+  if (!safeWaId) return TL_MENU_STATES.ROOT;
+  const props = PropertiesService.getScriptProperties();
+  const value = String(props.getProperty(TL_MENU.STATE_KEY_PREFIX + safeWaId) || TL_MENU_STATES.ROOT);
+  const meta = TL_Menu_GetStateMeta_(safeWaId, props);
+  if (value !== TL_MENU_STATES.ROOT && !TL_Menu_IsStateMetaValid_(meta)) {
+    TL_Menu_ClearState_(safeWaId);
+    return TL_MENU_STATES.ROOT;
+  }
   return value === "idle" ? TL_MENU_STATES.ROOT : value;
 }
 
 function TL_Menu_ClearState_(waId) {
   try {
-    PropertiesService.getScriptProperties().deleteProperty(TL_MENU.STATE_KEY_PREFIX + String(waId || "").trim());
+    const safeWaId = String(waId || "").trim();
+    PropertiesService.getScriptProperties().deleteProperty(TL_MENU.STATE_KEY_PREFIX + safeWaId);
+    PropertiesService.getScriptProperties().deleteProperty(TL_MENU.STATE_META_KEY_PREFIX + safeWaId);
     return true;
   } catch (e) {
     return false;
@@ -321,10 +381,18 @@ function TL_Menu_IsNumericChoice_(text) {
   return !!TL_Menu_ParseChoice_(text);
 }
 
+function TL_Menu_IsFreshRootMenuChoiceWindow_(waId, state) {
+  if (String(state || "").trim() !== TL_MENU_STATES.ROOT) return false;
+  const meta = TL_Menu_GetStateMeta_(waId);
+  if (!meta) return false;
+  if (String(meta.source || "").trim().toLowerCase() !== "menu_command") return false;
+  return TL_Menu_IsRecentIso_(String(meta.updated_at || "").trim(), 3);
+}
+
 function TL_Menu_IsMenuCommand_(text) {
   const normalized = String(text || "").trim().toLowerCase();
   if (!normalized) return false;
-  return ["תפריט", "menu", "/menu"].some(function(trigger) {
+  return ["תפריט", "menu", "/menu", "בית", "home", "/home"].some(function(trigger) {
     return normalized === String(trigger || "").trim().toLowerCase();
   });
 }
@@ -419,7 +487,8 @@ function TL_Menu_HandleRootChoice_(waId, choice) {
 }
 
 function TL_Menu_OpenReplyHome_(waId) {
-  const items = TL_Menu_CollectApprovalPacketItems_("reply");
+  const prepared = TL_Menu_GetPreparedReplyPacket_();
+  const items = prepared && Array.isArray(prepared.items) ? prepared.items.slice() : TL_Menu_CollectApprovalPacketItems_("reply");
   if (!items.length) {
     TL_Menu_SetState_(waId, TL_MENU_STATES.ROOT);
     TL_Menu_ClearDecisionPacket_(waId);
@@ -429,19 +498,99 @@ function TL_Menu_OpenReplyHome_(waId) {
       TL_Menu_BuildMenuReply_()
     ].join("\n");
   }
-  TL_Menu_StoreDecisionPacket_(waId, "decision", items);
-  const packet = TL_Menu_GetDecisionPacket_(waId);
-  if (packet) {
-    packet.stage = "one_by_one";
-    packet.cursor = 0;
+  let packet = null;
+  if (prepared && Array.isArray(prepared.items) && prepared.items.length) {
+    packet = {
+      kind: "decision",
+      stage: "one_by_one",
+      cursor: 0,
+      created_at: new Date().toISOString(),
+      session_version: typeof TL_Menu_SessionRuntimeVersion_ === "function" ? TL_Menu_SessionRuntimeVersion_() : TL_MENU_SESSION_VERSION,
+      source: "prepared_reply_queue",
+      items: prepared.items.slice()
+    };
     TL_Menu_SetDecisionPacket_(waId, packet);
+  } else {
+    TL_Menu_StoreDecisionPacket_(waId, "decision", items);
+    packet = TL_Menu_GetDecisionPacket_(waId);
+    if (packet) {
+      packet.stage = "one_by_one";
+      packet.cursor = 0;
+      TL_Menu_SetDecisionPacket_(waId, packet);
+    }
   }
-  TL_Menu_SetState_(waId, TL_MENU_STATES.ROOT);
+  TL_Menu_SetState_(waId, TL_MENU_STATES.ROOT, { source: "decision_packet" });
   return [
     TL_Menu_T_("פותח את תור התשובות.", "Opening the reply queue."),
+    TL_Menu_T_("ממתינות לתשובה: ", "Reply items waiting: ") + items.length,
     "",
     packet ? TL_Menu_BuildDecisionPacketOneByOneReply_(packet) : TL_Menu_T_("לא הצלחתי לפתוח את תור התשובות.", "I couldn't open the reply queue.")
   ].join("\n");
+}
+
+function TL_Menu_ReplyPrepTtlMinutes_() {
+  const raw = Number(TLW_getSetting_("REPLY_PREP_TTL_MINUTES") || 10);
+  if (!isFinite(raw) || raw <= 0) return 10;
+  return Math.min(Math.floor(raw), 60);
+}
+
+function TL_Menu_ClearPreparedReplyPacket_() {
+  try {
+    PropertiesService.getScriptProperties().deleteProperty(TL_MENU.PREPARED_REPLY_PACKET_KEY);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function TL_Menu_SetPreparedReplyPacket_(items, meta) {
+  const payload = {
+    prepared_at: new Date().toISOString(),
+    session_version: typeof TL_Menu_SessionRuntimeVersion_ === "function" ? TL_Menu_SessionRuntimeVersion_() : TL_MENU_SESSION_VERSION,
+    item_count: Array.isArray(items) ? items.length : 0,
+    source: String(meta && meta.source || "background").trim(),
+    items: Array.isArray(items) ? items.slice(0, 25) : []
+  };
+  try {
+    PropertiesService.getScriptProperties().setProperty(TL_MENU.PREPARED_REPLY_PACKET_KEY, JSON.stringify(payload));
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+function TL_Menu_GetPreparedReplyPacket_() {
+  try {
+    const raw = String(PropertiesService.getScriptProperties().getProperty(TL_MENU.PREPARED_REPLY_PACKET_KEY) || "").trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    const version = typeof TL_Menu_SessionRuntimeVersion_ === "function" ? TL_Menu_SessionRuntimeVersion_() : TL_MENU_SESSION_VERSION;
+    if (String(parsed.session_version || "").trim() !== String(version || "").trim()) {
+      TL_Menu_ClearPreparedReplyPacket_();
+      return null;
+    }
+    if (!TL_Menu_IsRecentIso_(String(parsed.prepared_at || "").trim(), TL_Menu_ReplyPrepTtlMinutes_())) {
+      TL_Menu_ClearPreparedReplyPacket_();
+      return null;
+    }
+    return parsed;
+  } catch (e) {
+    TL_Menu_ClearPreparedReplyPacket_();
+    return null;
+  }
+}
+
+function TL_Menu_PrepareReplyPacketCache_() {
+  const startedAt = Date.now();
+  const items = TL_Menu_CollectApprovalPacketItems_("reply");
+  const payload = TL_Menu_SetPreparedReplyPacket_(items, { source: "orchestrator" });
+  return {
+    ok: true,
+    item_count: Array.isArray(items) ? items.length : 0,
+    cached: !!payload,
+    elapsed_ms: Date.now() - startedAt
+  };
 }
 
 function TL_Menu_OpenOpportunities_(waId) {
@@ -1219,28 +1368,16 @@ function TL_Menu_ShouldHandleText_(waId, text) {
   if (!normalized) return false;
   const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
   if (bossPhone && TLW_normalizePhone_(waId || "") !== bossPhone) return false;
+  const state = TL_Menu_GetState_(waId);
   if (TL_Menu_IsMenuCommand_(normalized)) return true;
   if (TL_Menu_IsHelpCommand_(normalized)) return true;
   if (TL_Menu_IsBackCommand_(normalized)) return true;
-  if (TL_Menu_IsResumePausedCommand_(normalized)) return true;
-  if (TL_Menu_IsPausedItemsQuery_(normalized)) return true;
-  if (TL_Menu_IsWaitingOnMeNowQuery_(normalized)) return true;
   if (TL_Menu_IsExitCommand_(normalized)) return true;
+  if (TL_Menu_IsNumericChoice_(normalized) && TL_Menu_IsFreshRootMenuChoiceWindow_(waId, state)) return true;
   if (TL_MENU.COST_TRIGGERS.some(function(t) { return normalized === String(t || "").trim().toLowerCase(); })) return true;
   if (TL_Menu_IsAiCostQuery_(normalized)) return true;
-  if (TL_Menu_HasDecisionPacket_(waId)) return true;
-  if (TL_Menu_HasActiveFlow_(waId)) return true;
-  if (TL_Menu_GetState_(waId) !== TL_MENU_STATES.ROOT) return true;
-  if (TL_Menu_IsNumericChoice_(normalized)) return true;
-  if (TL_Menu_IsColdStart_(waId)) return true;
-  try {
-    const intent = TL_AI_RecognizeBossIntent_(normalized);
-    if (intent && intent.intent !== "unknown") {
-      TL_Menu_PutCachedIntent_(waId, text, intent);
-      return true;
-    }
-  } catch (e) {}
-  return false;
+  if (TL_Menu_IsFirstUse_(waId)) return true;
+  return TL_Menu_HasActiveFlow_(waId);
 }
 
 function TL_Menu_RecognizeBossIntent_(text, options) {
@@ -1613,21 +1750,7 @@ function TL_Menu_ContinueOutboundDraft_(waId, rawText, options) {
 }
 
 function TL_Menu_IsApproveAndSendCommand_(rawText) {
-  const text = String(rawText || "").trim().toLowerCase().replace(/\s+/g, " ");
-  if (!text) return false;
-  return [
-    "approve and send",
-    "approve and send now",
-    "send now",
-    "send it now",
-    "approve now",
-    "אשר ושלח",
-    "אשר ושלחי",
-    "אשר ושלח עכשיו",
-    "שלח עכשיו",
-    "שלחי עכשיו",
-    "אשר עכשיו"
-  ].indexOf(text) !== -1;
+  return false;
 }
 
 function TL_Menu_IsLaterCommand_(rawText) {
@@ -2082,6 +2205,7 @@ function TL_Menu_IsPausedItemsQuery_(text) {
 function TL_Menu_HasActiveFlow_(waId) {
   const safeWaId = String(waId || "").trim();
   if (!safeWaId) return false;
+  TL_Menu_CleanupStaleFlow_(safeWaId);
   if (TL_Menu_HasDecisionPacket_(safeWaId)) return true;
   if (TL_Menu_GetState_(safeWaId) !== TL_MENU_STATES.ROOT) return true;
   if (typeof TL_ActiveItem_Get_ !== "function") return false;
@@ -2095,9 +2219,116 @@ function TL_Menu_IsColdStart_(waId) {
   return !TL_Menu_HasActiveFlow_(safeWaId);
 }
 
+function TL_Menu_CleanupStaleFlow_(waId) {
+  const safeWaId = String(waId || "").trim();
+  if (!safeWaId) return false;
+  const ttlMinutes = TL_Menu_ActiveFlowTtlMinutes_();
+  const nowMs = Date.now();
+  let changed = false;
+
+  const packet = TL_Menu_GetDecisionPacket_(safeWaId);
+  const packetFresh = packet ? TL_Menu_IsFlowRecordValid_(packet.created_at, packet.session_version, ttlMinutes, nowMs) : false;
+  if (packet && !packetFresh) {
+    TL_Menu_ClearDecisionPacket_(safeWaId);
+    changed = true;
+  }
+
+  const active = typeof TL_ActiveItem_Get_ === "function" ? TL_ActiveItem_Get_(safeWaId) : null;
+  const activeFresh = active ? TL_Menu_IsFlowRecordValid_(active.updated_at || active.opened_at, active.session_version, ttlMinutes, nowMs) : false;
+  if (active && !activeFresh && typeof TL_ActiveItem_Clear_ === "function") {
+    TL_ActiveItem_Clear_(safeWaId);
+    changed = true;
+  }
+
+  const state = TL_Menu_GetState_(safeWaId);
+  const stateMeta = TL_Menu_GetStateMeta_(safeWaId);
+  const stateFresh = state !== TL_MENU_STATES.ROOT && TL_Menu_IsStateMetaValid_(stateMeta, nowMs);
+  if (state !== TL_MENU_STATES.ROOT && !packetFresh && !activeFresh) {
+    if (!stateFresh) {
+      TL_Menu_ClearState_(safeWaId);
+      changed = true;
+    }
+  }
+
+  if (state !== TL_MENU_STATES.ROOT && !stateFresh) {
+    TL_Menu_ClearState_(safeWaId);
+    changed = true;
+  }
+
+  return changed;
+}
+
+function TL_Menu_ActiveFlowTtlMinutes_() {
+  const raw = Number(TLW_getSetting_("BOSS_FLOW_TTL_MINUTES") || 90);
+  return isFinite(raw) && raw > 0 ? raw : 90;
+}
+
+function TL_Menu_SessionRuntimeVersion_() {
+  return TL_MENU_SESSION_VERSION;
+}
+
+function TL_Menu_IsFlowRecordValid_(timestampIso, sessionVersion, ttlMinutes, nowMs) {
+  return String(sessionVersion || "") === TL_Menu_SessionRuntimeVersion_() &&
+    TL_Menu_IsRecentIso_(timestampIso, ttlMinutes, nowMs);
+}
+
+function TL_Menu_IsRecentIso_(value, ttlMinutes, nowMs) {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  const ts = Date.parse(raw);
+  if (!isFinite(ts)) return false;
+  const currentMs = isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+  return (currentMs - ts) <= (Number(ttlMinutes || 0) * 60 * 1000);
+}
+
+function TL_Menu_GetStateMeta_(waId, props) {
+  const safeWaId = String(waId || "").trim();
+  if (!safeWaId) return null;
+  try {
+    const store = props || PropertiesService.getScriptProperties();
+    const raw = String(store.getProperty(TL_MENU.STATE_META_KEY_PREFIX + safeWaId) || "").trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function TL_Menu_IsStateMetaValid_(meta, nowMs) {
+  if (!meta || typeof meta !== "object") return false;
+  return TL_Menu_IsFlowRecordValid_(
+    meta.updated_at || meta.opened_at,
+    meta.session_version,
+    TL_Menu_ActiveFlowTtlMinutes_(),
+    nowMs || Date.now()
+  );
+}
+
+function TL_Menu_IsFirstUse_(waId) {
+  const safeWaId = String(waId || "").trim();
+  if (!safeWaId) return false;
+  return String(PropertiesService.getScriptProperties().getProperty(TL_MENU.ONBOARDED_KEY_PREFIX + safeWaId) || "").trim() !== "true";
+}
+
+function TL_Menu_MarkOnboarded_(waId) {
+  const safeWaId = String(waId || "").trim();
+  if (!safeWaId) return false;
+  PropertiesService.getScriptProperties().setProperty(TL_MENU.ONBOARDED_KEY_PREFIX + safeWaId, "true");
+  return true;
+}
+
 function TL_Menu_PauseForMenuCommand_(waId) {
-  if (!waId || typeof TL_ActiveItem_PauseCurrent_ !== "function") return { ok: true, paused: false };
-  return TL_ActiveItem_PauseCurrent_(waId, "menu_command");
+  if (!waId) return { ok: true, paused: false, packet_cleared: false };
+  const activePaused = typeof TL_ActiveItem_PauseCurrent_ === "function"
+    ? TL_ActiveItem_PauseCurrent_(waId, "menu_command")
+    : { ok: true, paused: false };
+  TL_Menu_ClearDecisionPacket_(waId);
+  return {
+    ok: true,
+    paused: !!(activePaused && activePaused.paused),
+    packet_cleared: true
+  };
 }
 
 function TL_Menu_HandleBackCommand_(waId) {
@@ -2745,10 +2976,16 @@ function TL_Menu_HasDecisionPacket_(waId) {
 
 function TL_Menu_GetDecisionPacket_(waId) {
   try {
-    const raw = PropertiesService.getScriptProperties().getProperty(TL_MENU.PACKET_KEY_PREFIX + String(waId || "").trim());
+    const safeWaId = String(waId || "").trim();
+    const raw = PropertiesService.getScriptProperties().getProperty(TL_MENU.PACKET_KEY_PREFIX + safeWaId);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return parsed && parsed.items && parsed.items.length ? parsed : null;
+    if (!parsed || !parsed.items || !parsed.items.length) return null;
+    if (!TL_Menu_IsFlowRecordValid_(parsed.created_at, parsed.session_version, TL_Menu_ActiveFlowTtlMinutes_(), Date.now())) {
+      TL_Menu_ClearDecisionPacket_(safeWaId);
+      return null;
+    }
+    return parsed;
   } catch (e) {
     return null;
   }
@@ -2766,6 +3003,7 @@ function TL_Menu_SetDecisionPacket_(waId, packet) {
     stage: String(packet.stage || "root"),
     cursor: Number(packet.cursor || 0),
     created_at: String(packet.created_at || new Date().toISOString()),
+    session_version: String(packet.session_version || TL_Menu_SessionRuntimeVersion_()),
     items: (packet.items || []).map(function(item) {
       return {
         key: String(item.key || ""),
@@ -3494,6 +3732,9 @@ function TL_Menu_ApplyPacketRecipientChoice_(item, candidate) {
 function TL_Menu_SendApprovedEmailNow_(rowNumber) {
   const loc = TL_AI_getInboxRow_(rowNumber);
   if (!loc || !loc.values) return { ok: false, reason: "missing_row" };
+  if (typeof TL_Emergency_ApprovalOutboundEnabled_ === "function" && !TL_Emergency_ApprovalOutboundEnabled_()) {
+    return { ok: false, blocked: true, reason: "approval_outbound_disabled" };
+  }
   const values = loc.values;
   const snapshot = TL_Email_inboxValuesToSnapshot_(values, rowNumber);
   const payload = snapshot.payload || {};
@@ -3556,6 +3797,9 @@ function TL_Menu_SendApprovedEmailNow_(rowNumber) {
 function TL_Menu_SendApprovedWhatsAppNow_(rowNumber) {
   const loc = TL_AI_getInboxRow_(rowNumber);
   if (!loc || !loc.values) return { ok: false, reason: "missing_row" };
+  if (typeof TL_Emergency_ApprovalOutboundEnabled_ === "function" && !TL_Emergency_ApprovalOutboundEnabled_()) {
+    return { ok: false, blocked: true, reason: "approval_outbound_disabled" };
+  }
   const values = loc.values;
   const phoneNumberId = String(TL_Orchestrator_value_(values, "phone_number_id") || "").trim();
   const toWaId = String(TL_Orchestrator_resolveSendTarget_(values) || "").trim();
@@ -3763,7 +4007,7 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const option3Label = String(actionSpec.option3Label || TL_Menu_T_("אח\"כ")).trim();
   const option4Label = String(actionSpec.option4Label || TL_Menu_T_("ארכב")).trim();
   const styleShortcutLine = TL_Menu_IsOutboundCommunicationItem_(current) && !TL_Menu_ItemNeedsRecipientResolution_(current)
-    ? TL_Menu_T_("קיצורי ניסוח/פעולה: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש | אשר ושלח עכשיו | אחר כך | בטל", "Shortcuts: shorter | warmer | more formal | rewrite | approve and send now | later | discard")
+    ? TL_Menu_T_("קיצורי ניסוח/פעולה: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש | אחר כך | בטל", "Shortcuts: shorter | warmer | more formal | rewrite | later | discard")
     : (TL_Menu_IsContinuableCaptureItem_(current)
       ? TL_Menu_T_("קיצורי ניסוח/פעולה: קצר יותר | יותר ברור | נסח מחדש | אחר כך | בטל", "Shortcuts: shorter | clearer | rewrite | later | discard")
       : "")
@@ -3773,7 +4017,7 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   else if (current.isHigh) meta.push("חשוב");
   const label = meta.length ? ("[" + meta.join(" · ") + "]") : "";
   const lines = [
-    TL_Menu_T_("סקירה אחד-אחד ") + index + "/" + total,
+    TL_Menu_T_("סקירת תשובה ") + index + "/" + total,
     label ? label : "",
     senderLabel ? (TL_Menu_T_("מאת: ") + senderLabel) : "",
     channelLabel ? (TL_Menu_T_("ערוץ: ") + channelLabel) : "",
@@ -4780,6 +5024,7 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
   const latest = {};
   const contactsIndex = typeof TL_Session_getContactsIndex_ === "function" ? TL_Session_getContactsIndex_() : null;
   const topicSummaryMap = TL_Menu_TopicSummaryMap_();
+  const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
   const rows = TL_Orchestrator_readRecentRows_(160);
   (rows || []).forEach(function(item) {
     if (!item || !item.values) return;
@@ -4800,11 +5045,18 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
   Object.keys(latest).forEach(function(key) {
     const item = latest[key];
     const values = item.values;
+    const recordClass = String(TL_Orchestrator_value_(values, "record_class") || "").trim().toLowerCase();
+    const direction = String(TL_Orchestrator_value_(values, "direction") || "").trim().toLowerCase();
+    const senderPhone = TLW_normalizePhone_(TL_Orchestrator_value_(values, "sender") || "");
+    if (recordClass === "interface") return;
+    if (bossPhone && direction === "incoming" && senderPhone === bossPhone) return;
     const approvalStatus = String(TL_Orchestrator_value_(values, "approval_status") || "").toLowerCase();
     if (approvalStatus !== "draft" && approvalStatus !== "awaiting_approval") return;
+    if (normalizedMode === "reply" && direction !== "incoming") return;
     const channel = String(TL_Orchestrator_value_(values, "channel") || "").toLowerCase();
     const sender = String(TL_Orchestrator_value_(values, "sender") || "").trim();
     const receiver = String(TL_Orchestrator_value_(values, "receiver") || "").trim();
+    const displayPhoneNumber = String(TL_Orchestrator_value_(values, "display_phone_number") || "").trim();
     const messageType = String(TL_Orchestrator_value_(values, "message_type") || "").trim();
     const threadSubject = String(TL_Orchestrator_value_(values, "thread_subject") || "").trim();
     const textValue = String(TL_Orchestrator_value_(values, "text") || "").trim();
@@ -4841,11 +5093,12 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
       rowNumber: item.rowNumber,
       recordId: String(TL_Orchestrator_value_(values, "record_id") || "").trim(),
       rootId: String(TL_Orchestrator_value_(values, "root_id") || "").trim(),
-      recordClass: String(TL_Orchestrator_value_(values, "record_class") || "").trim(),
+      recordClass: recordClass,
+      direction: direction,
       summary: String(TL_Orchestrator_value_(values, "ai_summary") || threadSubject || textValue || "").trim(),
       proposal: String(TL_Orchestrator_value_(values, "ai_proposal") || "").trim(),
       sender: sender,
-      senderLabel: TL_Menu_BuildPacketSenderLabel_(senderProfile, sender, receiver, contactId),
+      senderLabel: TL_Menu_BuildPacketSenderLabel_(senderProfile, sender, receiver, contactId, channel, direction, displayPhoneNumber, contactsIndex),
       receiver: receiver,
       channel: channel,
       channelLabel: TL_Menu_BuildPacketChannelLabel_(channel, messageType),
@@ -4917,12 +5170,36 @@ function TL_Menu_GetNoteKeyValue_(notes, key) {
 }
 
 function TL_Menu_BuildPacketSenderLabel_(senderProfile, sender, receiver, contactId) {
+  const channel = arguments.length > 4 ? String(arguments[4] || "").trim().toLowerCase() : "";
+  const direction = arguments.length > 5 ? String(arguments[5] || "").trim().toLowerCase() : "";
+  const displayPhoneNumber = arguments.length > 6 ? TLW_normalizePhone_(arguments[6] || "") : "";
+  const contactsIndex = arguments.length > 7 && arguments[7] ? arguments[7] : null;
+  const contactPhone = TL_Menu_ContactPhoneFromContactId_(contactId);
+  const senderPhone = TLW_normalizePhone_(sender || "");
+  const receiverPhone = TLW_normalizePhone_(receiver || "");
+  if (channel === "whatsapp" && direction === "incoming") {
+    const contactRecord = contactsIndex && contactsIndex.byContactId ? contactsIndex.byContactId[String(contactId || "").trim()] : null;
+    if (contactRecord && String(contactRecord.name || "").trim()) {
+      return String(contactRecord.name || "").trim();
+    }
+    if (contactPhone && senderPhone === displayPhoneNumber) return contactPhone;
+    if (contactPhone) return contactPhone;
+    if (senderPhone && senderPhone !== displayPhoneNumber) return senderPhone;
+    if (receiverPhone && receiverPhone !== displayPhoneNumber) return receiverPhone;
+  }
   if (senderProfile && senderProfile.displayName) {
     return String(senderProfile.displayName).trim();
   }
   if (contactId && sender) return String(sender).trim();
   if (sender && receiver) return String(sender).trim();
   return String(sender || receiver || "").trim();
+}
+
+function TL_Menu_ContactPhoneFromContactId_(contactId) {
+  const safe = String(contactId || "").trim();
+  if (!safe) return "";
+  const match = safe.match(/_(\d{6,})$/);
+  return match ? TLW_normalizePhone_(match[1]) : "";
 }
 
 function TL_Menu_BuildPacketChannelLabel_(channel, messageType) {
@@ -4981,7 +5258,7 @@ function TL_Menu_GetDecisionPacketActionSpec_(item) {
       actionKind: "send_whatsapp",
       primaryLabel: TL_Menu_T_("אשר את טיוטת ה-WhatsApp"),
       editLabel: TL_Menu_T_("ערוך את ההודעה"),
-      proposalHeading: TL_Menu_T_("טיוטת ההודעה לאישור:")
+      proposalHeading: TL_Menu_T_("תשובה מוצעת:")
     };
   }
   if (captureKind === "email") {
@@ -4989,7 +5266,7 @@ function TL_Menu_GetDecisionPacketActionSpec_(item) {
       actionKind: "send_email",
       primaryLabel: TL_Menu_T_("אשר את טיוטת האימייל"),
       editLabel: TL_Menu_T_("ערוך את האימייל"),
-      proposalHeading: TL_Menu_T_("טיוטת האימייל לאישור:")
+      proposalHeading: TL_Menu_T_("תשובה מוצעת:")
     };
   }
   if (captureKind === "schedule") {
@@ -5045,7 +5322,7 @@ function TL_Menu_GetDecisionPacketActionSpec_(item) {
       actionKind: "send_email",
       primaryLabel: TL_Menu_T_("אשר את הטיוטה"),
       editLabel: TL_Menu_T_("ערוך את הטיוטה"),
-      proposalHeading: TL_Menu_T_("הטיוטה המלאה לאישור:")
+      proposalHeading: TL_Menu_T_("תשובה מוצעת:")
     };
   }
   return {

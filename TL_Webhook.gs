@@ -92,6 +92,12 @@ function doPost(e) {
 
       const appendedRow = TLW_appendInboxRow_(enriched, rawJson);
       const repairedCount = TLW_tryApplyCachedStatuses_(enriched.phone_number_id || "", enriched.message_id || "", appendedRow.row);
+      const bossTextMenuReply = TLW_tryBossMenuFromTextRow_(enriched, appendedRow);
+      if (bossTextMenuReply && bossTextMenuReply.consumed) {
+        appended++;
+        updated += repairedCount;
+        return;
+      }
       TLW_tryAutoVoiceTranscription_(enriched, appendedRow);
       const voiceMenuReply = TLW_tryBossMenuFromInboxRow_(enriched, appendedRow);
       if (voiceMenuReply && voiceMenuReply.sent) {
@@ -179,12 +185,17 @@ function TLW_extractEvents_(payload) {
       const phoneId = String(meta.phone_number_id || "");
 
       if (field === "messages" && val.messages && val.messages.length) {
+        const contacts = Array.isArray(val.contacts) ? val.contacts : [];
         val.messages.forEach(m => {
           const from = String(m.from || "");
           const recipient = String(m.recipient_id || "");
           const msgId = String(m.id || "");
           const type = String(m.type || "");
           const content = TLW_extractMessageContent_(m);
+          const contactMatch = contacts.find(function(contact) {
+            return String(contact && contact.wa_id || "").trim() === from;
+          }) || contacts[0] || {};
+          const profileName = String(contactMatch && contactMatch.profile && contactMatch.profile.name || "").trim();
           out.push({
             event_type:"messages",
             display_phone_number:displayPhone,
@@ -194,6 +205,7 @@ function TLW_extractEvents_(payload) {
             message_id:msgId,
             message_type:content.message_type,
             text: content.text,
+            contact_name: profileName,
             statuses_count:0,
             media_id: content.media_id,
             media_mime_type: content.media_mime_type,
@@ -278,18 +290,22 @@ function TLW_tryBossMenu_(events) {
   if (!events || !events.length) return null;
 
   // Find the first text event that should be handled by the boss menu flow:
-  // explicit trigger, numeric choice, or follow-up while menu state is active.
+  // boss text always belongs to the boss-assistant route first.
   const candidates = events.filter(ev => ev.message_type === "text");
+  const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
   const normalized = candidates.map(e=>({from:e.from, type:e.event_type, msg_id:e.message_id, text:String(e.text||"").trim().toLowerCase()}));
   TLW_logInfo_("menu_match_attempt", { candidates: normalized });
-  const msg = candidates.find(ev => {
+  const bossCandidate = bossPhone ? candidates.find(function(ev) {
+    return TLW_normalizePhone_(String(ev && ev.from || "").trim()) === bossPhone;
+  }) : null;
+  const msg = bossCandidate || candidates.find(ev => {
     const text = String(ev.text || "").trim().toLowerCase();
     return TL_Menu_ShouldHandleText_(String(ev.from || "").trim(), text);
   });
   if (!msg) {
     TLW_logInfo_("menu_match_none", {
       candidates: normalized.length,
-      boss_phone: TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || ""),
+      boss_phone: bossPhone,
       candidate_froms: normalized.map(function(item) { return TLW_normalizePhone_(item.from || ""); })
     });
     return null;
@@ -326,6 +342,10 @@ function TLW_tryBossMenu_(events) {
     phone_number_id: msg.phone_number_id || ""
   }, inboxRow);
 
+  if (inboxRow && inboxRow.row) {
+    TLW_markInterfaceHandledRow_(inboxRow.row, "menu_text", String(msg.text || "").trim());
+  }
+
   const normalizedText = String(msg.text || "").trim().toLowerCase();
   const isExplicitTrigger = TL_MENU && TL_MENU.TRIGGERS && TL_MENU.TRIGGERS.some(function(t) {
     return normalizedText === String(t || "").trim().toLowerCase();
@@ -356,11 +376,138 @@ function TLW_tryBossMenu_(events) {
   return { toSend: true, toPhoneId, toWaId: msg.from, text: finalReplyText, messageId: String(msg.message_id || "").trim() };
 }
 
+function TLW_markInterfaceHandledRow_(rowNumber, kind, textValue) {
+  try {
+    const row = Number(rowNumber || 0);
+    if (!row || typeof TL_AI_getInboxRow_ !== "function" || typeof TL_Orchestrator_updateRowFields_ !== "function") return false;
+    const loc = TL_AI_getInboxRow_(row);
+    if (!loc || !loc.values) return false;
+    const notes = typeof TL_Capture_appendNote_ === "function"
+      ? TL_Capture_appendNote_(loc.values, [
+          "menu_interface_handled=true",
+          "menu_interface_kind=" + String(kind || "menu").replace(/[;\n]+/g, "_"),
+          "menu_interface_text=" + String(textValue || "").replace(/\n+/g, " ").replace(/[;]+/g, ",")
+        ].join(";"))
+      : String(TL_Orchestrator_value_(loc.values, "notes") || "");
+    TL_Orchestrator_updateRowFields_(row, {
+      notes: notes,
+      execution_status: "interface_handled"
+    }, "menu_interface");
+    return true;
+  } catch (e) {
+    TLW_logInfo_("menu_interface_mark_error", {
+      row: Number(rowNumber || 0),
+      err: String(e && e.stack ? e.stack : e)
+    });
+    return false;
+  }
+}
+
+function TLW_tryBossMenuFromTextRow_(enriched, appendedRow, options) {
+  try {
+    if (!enriched || !appendedRow || !appendedRow.row) return null;
+    if (String(enriched.direction || "").trim().toLowerCase() !== "incoming") return null;
+    const recordClass = String(enriched.record_class || "").trim().toLowerCase();
+    if (recordClass !== "communication" && recordClass !== "interface") return null;
+    if (String(enriched.message_type || "").trim().toLowerCase() !== "text") return null;
+
+    const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
+    const sender = TLW_normalizePhone_(enriched.sender || enriched.from || "");
+    if (!bossPhone || sender !== bossPhone) return null;
+
+    const inputText = String(enriched.text || "").trim();
+    if (!inputText) return null;
+
+    TLW_logInfo_("menu_text_fallback_selected", {
+      row: appendedRow.row,
+      from: sender,
+      msg_id: String(enriched.message_id || ""),
+      text: inputText,
+      state: typeof TL_Menu_GetState_ === "function" ? TL_Menu_GetState_(sender) : ""
+    });
+
+    const replyText = TL_Menu_HandleBossMessage_({
+      from: sender,
+      text: inputText,
+      recipient_id: String(enriched.receiver || "").trim(),
+      phone_number_id: String(enriched.phone_number_id || "").trim()
+    }, {
+      row: appendedRow.row
+    }, Object.assign({}, options && options.menuOptions ? options.menuOptions : {}));
+
+    const normalizedText = inputText.toLowerCase();
+    const isExplicitTrigger = (typeof TL_Menu_IsMenuCommand_ === "function" && TL_Menu_IsMenuCommand_(normalizedText)) ||
+      (typeof TL_Menu_IsHelpCommand_ === "function" && TL_Menu_IsHelpCommand_(normalizedText));
+    const fallbackReply = isExplicitTrigger
+      ? ((typeof TL_Menu_IsHelpCommand_ === "function" && TL_Menu_IsHelpCommand_(normalizedText))
+          ? TL_Menu_BuildHelpMenu_()
+          : TL_Menu_BuildMenuReply_())
+      : "";
+    const finalReplyText = replyText === null || typeof replyText === "undefined"
+      ? String(fallbackReply || "")
+      : String(replyText);
+
+    if (!finalReplyText) {
+      TLW_markInterfaceHandledRow_(appendedRow.row, "boss_text_ignored", inputText);
+      TLW_logInfo_("menu_text_fallback_empty", {
+        row: appendedRow.row,
+        from: sender,
+        msg_id: String(enriched.message_id || ""),
+        text: inputText
+      });
+      return { consumed: true, sent: false, text: "" };
+    }
+
+    TLW_markInterfaceHandledRow_(appendedRow.row, "menu_text", inputText);
+    const textMessageId = String(enriched.message_id || "").trim();
+    if (TLW_claimReplySend_("menu_text", textMessageId)) {
+      TLW_logInfo_("menu_text_fallback_deduped", {
+        row: appendedRow.row,
+        to: sender,
+        msg_id: textMessageId
+      });
+      return { consumed: true, sent: false, deduped: true, text: finalReplyText };
+    }
+    const toPhoneId = String(enriched.phone_number_id || "").trim() ||
+      TLW_getSetting_("BUSINESS_PHONE_ID") ||
+      TLW_getSetting_("BUSINESS_PHONEID") ||
+      TLW_getSetting_("BUSINESS_PHONE");
+    const sent = TLW_sendText_(toPhoneId, sender, finalReplyText);
+    if (!(sent && sent.ok)) TLW_releaseReplySend_("menu_text", textMessageId);
+    TLW_logInfo_("menu_text_fallback_reply", {
+      row: appendedRow.row,
+      to: sender,
+      msg_id: textMessageId,
+      ok: !!(sent && sent.ok),
+      status: sent && sent.status ? sent.status : "",
+      text: inputText
+    });
+    return {
+      consumed: true,
+      sent: !!(sent && sent.ok),
+      response: sent,
+      text: finalReplyText
+    };
+  } catch (err) {
+    TLW_logInfo_("menu_text_fallback_error", {
+      row: appendedRow && appendedRow.row ? appendedRow.row : "",
+      message_id: enriched && enriched.message_id ? enriched.message_id : "",
+      err: String(err && err.stack ? err.stack : err)
+    });
+    return {
+      consumed: false,
+      sent: false,
+      err: String(err && err.stack ? err.stack : err)
+    };
+  }
+}
+
 function TLW_tryBossMenuFromInboxRow_(enriched, appendedRow, options) {
   try {
     if (!enriched || !appendedRow || !appendedRow.row) return null;
     if (String(enriched.direction || "").trim().toLowerCase() !== "incoming") return null;
-    if (String(enriched.record_class || "").trim().toLowerCase() !== "communication") return null;
+    const recordClass = String(enriched.record_class || "").trim().toLowerCase();
+    if (recordClass !== "communication" && recordClass !== "interface") return null;
 
     const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
     const sender = TLW_normalizePhone_(enriched.sender || enriched.from || "");
@@ -378,7 +525,6 @@ function TLW_tryBossMenuFromInboxRow_(enriched, appendedRow, options) {
 
     const normalizedText = inputText.toLowerCase();
     let shouldHandle = false;
-    let recognizedIntent = null;
     if (options && typeof options.shouldHandleFn === "function") {
       shouldHandle = !!options.shouldHandleFn(sender, inputText);
     } else {
@@ -390,17 +536,8 @@ function TLW_tryBossMenuFromInboxRow_(enriched, appendedRow, options) {
       });
       if (explicitMenuTrigger || explicitCostTrigger ||
           (typeof TL_Menu_IsAiCostQuery_ === "function" && TL_Menu_IsAiCostQuery_(inputText)) ||
-          (typeof TL_Menu_HasDecisionPacket_ === "function" && TL_Menu_HasDecisionPacket_(sender)) ||
-          (typeof TL_Menu_GetState_ === "function" && TL_Menu_GetState_(sender) !== TL_MENU_STATES.ROOT) ||
-          (typeof TL_Menu_IsNumericChoice_ === "function" && TL_Menu_IsNumericChoice_(normalizedText))) {
+          (typeof TL_Menu_HasActiveFlow_ === "function" && TL_Menu_HasActiveFlow_(sender))) {
         shouldHandle = true;
-      } else if (typeof TL_AI_RecognizeBossIntent_ === "function") {
-        try {
-          recognizedIntent = TL_AI_RecognizeBossIntent_(inputText);
-          shouldHandle = !!(recognizedIntent && recognizedIntent.intent && recognizedIntent.intent !== "unknown");
-        } catch (e) {
-          shouldHandle = false;
-        }
       }
     }
     if (!shouldHandle) return null;
@@ -420,9 +557,9 @@ function TLW_tryBossMenuFromInboxRow_(enriched, appendedRow, options) {
       phone_number_id: String(enriched.phone_number_id || "").trim()
     }, {
       row: appendedRow.row
-    }, Object.assign({}, options && options.menuOptions ? options.menuOptions : {}, recognizedIntent ? {
-      intentFn: function() { return recognizedIntent; }
-    } : {}));
+    }, Object.assign({}, options && options.menuOptions ? options.menuOptions : {}));
+
+    TLW_markInterfaceHandledRow_(appendedRow.row, "menu_voice", inputText);
 
     const isExplicitTrigger = TL_MENU && TL_MENU.TRIGGERS && TL_MENU.TRIGGERS.some(function(t) {
       return normalizedText === String(t || "").trim().toLowerCase();
@@ -501,6 +638,10 @@ function TLW_enrichEvent_(ev, ts) {
   const baseRecipient = String(ev.recipient_id || "");
   const contactNumber = (direction === "incoming") ? baseSender : (baseRecipient || "");
   const contactId = contactNumber ? ("WA_" + phoneId + "_" + contactNumber) : "";
+  const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
+  const normalizedContactNumber = TLW_normalizePhone_(contactNumber);
+  const isBossInbound = direction === "incoming" && !!bossPhone && normalizedContactNumber === bossPhone;
+  const contactName = String(ev.contact_name || "").trim();
 
   // sender/receiver normalization
   let sender = baseSender;
@@ -524,7 +665,7 @@ function TLW_enrichEvent_(ev, ts) {
     parent_event_id: "",
     record_id: recordId,
     record_version: 1,
-    record_class: (eventType === "statuses") ? "status" : "communication",
+    record_class: (eventType === "statuses") ? "status" : (isBossInbound ? "interface" : "communication"),
     channel: channel,
     direction: (eventType === "statuses") ? "status" : direction,
     phone_number_id: phoneId,
@@ -534,6 +675,7 @@ function TLW_enrichEvent_(ev, ts) {
     message_id: msgId,
     message_type: String(ev.message_type || ""),
     text: String(ev.text || ""),
+    activity_kind: isBossInbound ? "assistant_command" : String(ev.message_type || ""),
     ai_summary: "",
     ai_proposal: "",
     approval_required: "",
@@ -544,7 +686,10 @@ function TLW_enrichEvent_(ev, ts) {
     statuses_count: Number(ev.statuses_count || 0),
     contact_id: contactId,
     raw_payload_ref: "",
-    notes: "",
+    notes: [
+      isBossInbound ? "assistant_interface=true" : "",
+      contactName ? ("wa_contact_name=" + contactName.replace(/\n+/g, " ").replace(/[;]+/g, ",")) : ""
+    ].filter(Boolean).join(";"),
     task_due: "",
     task_status: "",
     task_priority: "",
@@ -570,7 +715,8 @@ function TLW_enrichEvent_(ev, ts) {
     latest_message_at: "",
     external_url: "",
     participants_json: "",
-    capture_language: ""
+    capture_language: "",
+    conversation_domain: isBossInbound ? "assistant" : ""
   };
 }
 
@@ -586,62 +732,18 @@ function TLW_appendInboxRow_(obj, rawJson) {
   const needs = existing.some((v,i)=>String(v||"")!==String(TL_WEBHOOK.INBOX_HEADERS[i]||""));
   if (needs) { range.setValues([TL_WEBHOOK.INBOX_HEADERS]); sh.setFrozenRows(1); }
 
-  // set raw payload ref to rawJson (trimmed by caller)
-  const row = [
-    obj.timestamp || new Date(),
-    String(obj.root_id||""),
-    String(obj.event_id||""),
-    String(obj.parent_event_id||""),
-    String(obj.record_id||""),
-    Number(obj.record_version||1),
-    String(obj.record_class||""),
-    String(obj.channel||""),
-    String(obj.direction||""),
-    String(obj.phone_number_id||""),
-    String(obj.display_phone_number||""),
-    String(obj.sender||""),
-    String(obj.receiver||""),
-    String(obj.message_id||""),
-    String(obj.message_type||""),
-    String(obj.text||""),
-    String(obj.ai_summary||""),
-    String(obj.ai_proposal||""),
-    String(obj.approval_required||""),
-    String(obj.approval_status||""),
-    String(obj.execution_status||""),
-    String(obj.status_latest||""),
-    String(obj.status_timestamp||""),
-    Number(obj.statuses_count||0),
-    String(obj.contact_id||""),
-    String(obj.raw_payload_ref||"") || rawJson,
-    String(obj.notes||""),
-    String(obj.task_due||""),
-    String(obj.task_status||""),
-    String(obj.task_priority||""),
-    String(obj.topic_id||""),
-    String(obj.topic_tagged_at||""),
-    String(obj.biz_stage||""),
-    String(obj.biz_stage_ts||""),
-    String(obj.payment_status||""),
-    String(obj.delivery_due||""),
-    String(obj.media_id||""),
-    String(obj.media_mime_type||""),
-    String(obj.media_sha256||""),
-    String(obj.media_caption||""),
-    String(obj.media_filename||""),
-    obj.media_is_voice ? "true" : "false",
-    String(obj.priority_level||""),
-    String(obj.importance_level||""),
-    String(obj.urgency_flag||""),
-    String(obj.needs_owner_now||""),
-    String(obj.suggested_action||""),
-    String(obj.thread_id||""),
-    String(obj.thread_subject||""),
-    String(obj.latest_message_at||""),
-    String(obj.external_url||""),
-    String(obj.participants_json||""),
-    String(obj.capture_language||"")
-  ];
+  const normalized = typeof TL_Activity_normalizeRowObject_ === "function"
+    ? TL_Activity_normalizeRowObject_(Object.assign({}, obj || {}, {
+      raw_payload_ref: String((obj && obj.raw_payload_ref) || "") || rawJson
+    }))
+    : Object.assign({}, obj || {});
+  const row = TL_WEBHOOK.INBOX_HEADERS.map(function(header) {
+    if (header === "timestamp") return normalized.timestamp || new Date();
+    if (header === "record_version") return Number(normalized.record_version || 1);
+    if (header === "statuses_count") return Number(normalized.statuses_count || 0);
+    if (header === "media_is_voice") return String(normalized.media_is_voice || "").trim().toLowerCase() === "true" ? "true" : "false";
+    return normalized[header] !== undefined && normalized[header] !== null ? normalized[header] : "";
+  });
 
   sh.appendRow(row);
   return { sh, row: sh.getLastRow() };
@@ -659,10 +761,13 @@ function TLW_getRecentMessageIdSet_() {
 
     const start = Math.max(2, lastRow - TL_WEBHOOK.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
     const count = lastRow - start + 1;
-    const values = sh.getRange(start, 10, count, 5).getValues(); // phone_number_id (J) through message_id (N)
+    const phoneCol = TLW_colIndex_("phone_number_id");
+    const msgCol = TLW_colIndex_("message_id");
+    const width = msgCol - phoneCol + 1;
+    const values = sh.getRange(start, phoneCol, count, width).getValues();
     values.forEach(r => {
       const phoneId = String(r[0]||"").trim();
-      const msgId = String(r[4]||"").trim();
+      const msgId = String(r[width - 1]||"").trim();
       if (msgId) set.add(phoneId + "|" + msgId);
     });
   } catch (e) {}
@@ -679,11 +784,15 @@ function TLW_upsertStatus_(ev, rawJson) {
   }
 
   const { sh, row } = loc;
-  const current = Number(sh.getRange(row, 24).getValue() || 0); // statuses_count col (X)
-  sh.getRange(row, 22).setValue(String(ev.message_type || ""));       // status_latest
-  sh.getRange(row, 23).setValue(String(ev.status_timestamp || ""));   // status_timestamp
-  sh.getRange(row, 24).setValue(current + 1);                         // statuses_count
-  sh.getRange(row, 26).setValue(rawJson);                             // raw_payload_ref
+  const countCol = TLW_colIndex_("statuses_count");
+  const latestCol = TLW_colIndex_("status_latest");
+  const tsCol = TLW_colIndex_("status_timestamp");
+  const rawCol = TLW_colIndex_("raw_payload_ref");
+  const current = Number(sh.getRange(row, countCol).getValue() || 0);
+  sh.getRange(row, latestCol).setValue(String(ev.message_type || ""));
+  sh.getRange(row, tsCol).setValue(String(ev.status_timestamp || ""));
+  sh.getRange(row, countCol).setValue(current + 1);
+  sh.getRange(row, rawCol).setValue(rawJson);
   TLW_applyVersionBump_(row, "status_merge");
   TLW_logDebug_("status_merge", { phone: ev.phone_number_id, msg: messageId, row });
   return true;
@@ -741,11 +850,15 @@ function TLW_tryApplyCachedStatuses_(phoneId, messageId, rowNumber) {
       return;
     }
     if (!payload) return;
-    const current = Number(sh.getRange(rowNumber, 24).getValue() || 0);
-    sh.getRange(rowNumber, 22).setValue(String(payload.status_latest || ""));
-    sh.getRange(rowNumber, 23).setValue(String(payload.status_timestamp || ""));
-    sh.getRange(rowNumber, 24).setValue(current + 1);
-    sh.getRange(rowNumber, 26).setValue(String(payload.raw_payload_ref || ""));
+    const countCol = TLW_colIndex_("statuses_count");
+    const latestCol = TLW_colIndex_("status_latest");
+    const tsCol = TLW_colIndex_("status_timestamp");
+    const rawCol = TLW_colIndex_("raw_payload_ref");
+    const current = Number(sh.getRange(rowNumber, countCol).getValue() || 0);
+    sh.getRange(rowNumber, latestCol).setValue(String(payload.status_latest || ""));
+    sh.getRange(rowNumber, tsCol).setValue(String(payload.status_timestamp || ""));
+    sh.getRange(rowNumber, countCol).setValue(current + 1);
+    sh.getRange(rowNumber, rawCol).setValue(String(payload.raw_payload_ref || ""));
     TLW_applyVersionBump_(rowNumber, "late_status_repair");
     applied++;
   });
@@ -801,13 +914,15 @@ function TLW_findRecentContactByContext_(phoneId, text, ts) {
     let fallbackContact = "";
     for (let i = vals.length - 1; i >= 0; i--) {
       const row = vals[i];
-      if (String(row[9] || "") !== String(phoneId || "")) continue;
+      if (String(row[TLW_colIndex_("phone_number_id") - 1] || "").trim() !== String(phoneId || "")) continue;
       if (cutoff && row[0] instanceof Date && row[0] < cutoff) continue;
-      const direction = String(row[8] || "").trim().toLowerCase();
-      const contact = direction === "incoming" ? String(row[11] || "").trim() : String(row[12] || "").trim();
+      const direction = String(row[TLW_colIndex_("direction") - 1] || "").trim().toLowerCase();
+      const contact = direction === "incoming"
+        ? String(row[TLW_colIndex_("sender") - 1] || "").trim()
+        : String(row[TLW_colIndex_("receiver") - 1] || "").trim();
       if (!contact) continue;
       if (!fallbackContact) fallbackContact = contact;
-      const candidateText = String(row[15] || "").trim().toLowerCase();
+      const candidateText = String(row[TLW_colIndex_("text") - 1] || "").trim().toLowerCase();
       if (!normalizedText || !candidateText || candidateText.indexOf(normalizedText) !== -1 || normalizedText.indexOf(candidateText) !== -1) {
         return contact;
       }
@@ -847,12 +962,15 @@ function TLW_findRowByMessageId_(phoneId, messageId) {
 
     const start = Math.max(2, lastRow - TL_WEBHOOK.MAX_IDEMPOTENCY_SCAN_ROWS + 1);
     const count = lastRow - start + 1;
-    const ids = sh.getRange(start, 10, count, 5).getValues(); // phone_number_id (J) through message_id (N)
+    const phoneCol = TLW_colIndex_("phone_number_id");
+    const msgCol = TLW_colIndex_("message_id");
+    const width = msgCol - phoneCol + 1;
+    const ids = sh.getRange(start, phoneCol, count, width).getValues();
 
     // search from newest to oldest for speed
     for (let i = ids.length - 1; i >= 0; i--) {
       const pId = String(ids[i][0]||"").trim();
-      const mId = String(ids[i][4]||"").trim();
+      const mId = String(ids[i][width - 1]||"").trim();
       if (pId === String(phoneId||"") && mId === messageId) return { sh, row: start + i };
     }
   } catch (e) {}
@@ -1113,7 +1231,8 @@ function TLW_tryAutoVoiceTranscription_(enriched, appendedRow) {
     if (!enriched || !appendedRow || !appendedRow.row) return;
     if (String(TLW_getSetting_("ai_voice_transcription") || "").trim().toLowerCase() !== "true") return;
     if (String(enriched.direction || "").trim().toLowerCase() !== "incoming") return;
-    if (String(enriched.record_class || "").trim().toLowerCase() !== "communication") return;
+    const recordClass = String(enriched.record_class || "").trim().toLowerCase();
+    if (recordClass !== "communication" && recordClass !== "interface") return;
     if (!String(enriched.media_id || "").trim()) return;
 
     const messageType = String(enriched.message_type || "").trim().toLowerCase();
@@ -1143,8 +1262,25 @@ function TLW_tryAutoAiTriage_(enriched, appendedRow) {
     if (String(enriched.direction || "").trim().toLowerCase() !== "incoming") return;
     if (String(enriched.record_class || "").trim().toLowerCase() !== "communication") return;
     if (TLW_normalizePhone_(enriched.sender || enriched.from || "") === TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "")) return;
+    if (typeof TL_AI_ShouldDeferRawWhatsAppTriage_ === "function" &&
+        TL_AI_ShouldDeferRawWhatsAppTriage_(enriched.channel, enriched.direction, enriched.record_class)) {
+      TLW_logInfo_("ai_triage_auto_deferred", {
+        row: appendedRow.row,
+        message_id: enriched.message_id || "",
+        reason: "await_group_synthesis"
+      });
+      return;
+    }
 
     const result = TL_AI_TriageInboxRow_(appendedRow.row);
+    if (result && result.skipped) {
+      TLW_logInfo_("ai_triage_auto_deferred", {
+        row: appendedRow.row,
+        message_id: enriched.message_id || "",
+        reason: result.reason || "deferred"
+      });
+      return;
+    }
     TLW_logInfo_("ai_triage_auto", {
       row: appendedRow.row,
       message_id: enriched.message_id || "",
@@ -1171,6 +1307,17 @@ function TLW_tryAutoBossCapture_(enriched, appendedRow, options) {
     const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
     const sender = TLW_normalizePhone_(enriched.sender || enriched.from || "");
     if (!bossPhone || sender !== bossPhone) return;
+    const menuState = typeof TL_Menu_GetState_ === "function"
+      ? String(TL_Menu_GetState_(sender) || "root").trim()
+      : "root";
+    if (!(typeof TL_Menu_IsCaptureState_ === "function" && TL_Menu_IsCaptureState_(menuState))) {
+      TLW_logInfo_("boss_capture_auto_blocked", {
+        row: appendedRow.row,
+        reason: "menu_capture_not_requested",
+        menu_state: menuState
+      });
+      return;
+    }
 
     const loc = typeof TL_AI_getInboxRow_ === "function" ? TL_AI_getInboxRow_(appendedRow.row) : null;
     if (!loc || !loc.values) return;
