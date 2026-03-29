@@ -38,6 +38,7 @@ Scope:
 - preserve useful legacy support tabs while removing dependence on `INBOX`
 - keep `SETTINGS`, `LOG`, and `AI_Cost_Tracker` stable during this phase
 - make grouped WhatsApp bursts and email threads the main interaction units
+- keep WhatsApp conversation-window thresholds configurable in code for now, and expose them in `SETTINGS` later once behavior is stable
 - keep FYI and low-value status pings in history, but do not surface them in boss-facing flows
 - detect manual external replies and suppress stale pending reply items automatically
 
@@ -59,6 +60,7 @@ Scope:
 - reuse contact state and recent activity
 - allow approve, edit, discard, next
 - never draft replies for FYI or low-signal items
+- add passive reply-personalization learning later via a `Personal Style Directory` built from sent-message prompt/response pairs, intent and recipient labeling, weighted phrase retrieval, and a minimum-sample confidence threshold before style-based drafting is allowed
 
 ### Step 5 — Safe Send Path Rebuild
 

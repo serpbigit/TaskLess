@@ -10,6 +10,9 @@ function Helper_BossSessionStatus() {
   const packet = typeof TL_Menu_GetDecisionPacket_ === "function" ? TL_Menu_GetDecisionPacket_(bossWaId) : null;
   const state = typeof TL_Menu_GetState_ === "function" ? TL_Menu_GetState_(bossWaId) : "";
   const active = typeof TL_ActiveItem_Get_ === "function" ? TL_ActiveItem_Get_(bossWaId) : null;
+  const reply = typeof TL_Menu_GetPreparedReplyPacket_ === "function" ? TL_Menu_GetPreparedReplyPacket_() : null;
+  const approvals = typeof TL_Menu_GetPreparedApprovalsPacket_ === "function" ? TL_Menu_GetPreparedApprovalsPacket_() : null;
+  const opportunities = typeof TL_Menu_GetPreparedOpportunitiesPacket_ === "function" ? TL_Menu_GetPreparedOpportunitiesPacket_() : null;
   return {
     ok: true,
     boss_wa_id: bossWaId,
@@ -25,7 +28,10 @@ function Helper_BossSessionStatus() {
     active_kind: active ? String(active.kind || "") : "",
     active_opened_at: active ? String(active.opened_at || "") : "",
     active_updated_at: active ? String(active.updated_at || "") : "",
-    ttl_minutes: typeof TL_Menu_ActiveFlowTtlMinutes_ === "function" ? TL_Menu_ActiveFlowTtlMinutes_() : 0
+    ttl_minutes: typeof TL_Menu_ActiveFlowTtlMinutes_ === "function" ? TL_Menu_ActiveFlowTtlMinutes_() : 0,
+    prepared_reply_items: reply && Array.isArray(reply.items) ? reply.items.length : 0,
+    prepared_approval_items: approvals && Array.isArray(approvals.items) ? approvals.items.length : 0,
+    prepared_opportunity_items: opportunities && Array.isArray(opportunities.items) ? opportunities.items.length : 0
   };
 }
 
@@ -37,7 +43,9 @@ function Helper_BossSessionReset() {
   if (typeof TL_Menu_ResetSession_ === "function") {
     TL_Menu_ResetSession_(bossWaId);
   }
-  if (typeof TL_Menu_ClearPreparedReplyPacket_ === "function") {
+  if (typeof TL_Menu_ClearPreparedBossSnapshots_ === "function") {
+    TL_Menu_ClearPreparedBossSnapshots_();
+  } else if (typeof TL_Menu_ClearPreparedReplyPacket_ === "function") {
     TL_Menu_ClearPreparedReplyPacket_();
   }
   return Object.assign({
@@ -59,6 +67,25 @@ function Helper_PrepareReplyQueueNow() {
     prepared: prepared,
     cached_item_count: cached && Array.isArray(cached.items) ? cached.items.length : 0,
     cached_prepared_at: cached ? String(cached.prepared_at || "") : ""
+  };
+}
+
+function Helper_PrepareBossSnapshotsNow() {
+  if (typeof TL_Menu_PrepareBossSnapshots_ !== "function") {
+    return { ok: false, reason: "boss_snapshot_prep_unavailable" };
+  }
+  const prepared = TL_Menu_PrepareBossSnapshots_();
+  const reply = typeof TL_Menu_GetPreparedReplyPacket_ === "function" ? TL_Menu_GetPreparedReplyPacket_() : null;
+  const approvals = typeof TL_Menu_GetPreparedApprovalsPacket_ === "function" ? TL_Menu_GetPreparedApprovalsPacket_() : null;
+  const opportunities = typeof TL_Menu_GetPreparedOpportunitiesPacket_ === "function" ? TL_Menu_GetPreparedOpportunitiesPacket_() : null;
+  return {
+    ok: !!(prepared && prepared.ok),
+    action: "prepare_boss_snapshots",
+    prepared: prepared,
+    cached_reply_count: reply && Array.isArray(reply.items) ? reply.items.length : 0,
+    cached_approvals_count: approvals && Array.isArray(approvals.items) ? approvals.items.length : 0,
+    cached_opportunities_count: opportunities && Array.isArray(opportunities.items) ? opportunities.items.length : 0,
+    prepared_at: reply ? String(reply.prepared_at || "") : ""
   };
 }
 

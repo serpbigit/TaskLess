@@ -170,7 +170,7 @@ function TL_AI_buildTriagePrompt_(inputText, language, bossName, draftContextBri
     "The Boss's name is: " + String(bossName || "Boss"),
     "The draft context brief contains a customer-specific topic registry. Use one exact existing topic if it fits; otherwise propose one new topic candidate only.",
     "Return exactly one JSON object with these keys only:",
-    '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","topic_id":"string","topic_candidate":"string","topic_summary":"string","topic_confidence":"0 to 1","summary":"string","proposal":"string"}',
+    '{"priority_level":"low|medium|high","importance_level":"low|medium|high","urgency_flag":"true|false","needs_owner_now":"true|false","suggested_action":"reply_now|reply_later|call|schedule|follow_up|wait|ignore|review_manually","topic_id":"string","topic_candidate":"string","topic_summary":"string","topic_confidence":"0 to 1","summary":"string","proposal":"string","proposal_options":["string","string","string"]}',
     "Field definitions:",
     "priority_level: overall work priority for queue ordering. Use high sparingly.",
     "importance_level: business significance such as money, commitments, customer impact, legal/reputation risk.",
@@ -191,23 +191,45 @@ function TL_AI_buildTriagePrompt_(inputText, language, bossName, draftContextBri
     "review_manually = needs human judgment before choosing next action.",
     "summary: 1-2 factual sentences in the Boss UI language, no fluff, no invented facts.",
     "proposal: exact next-step wording on the Boss's behalf in the Draft reply language. If a reply is appropriate, write the actual draft reply text. If no reply should be sent, explain the recommended action plainly.",
+    "proposal_options: for reply-worthy messages, provide 2-3 short distinct reply drafts that would all make sense and move the thread forward. Put the strongest/default reply first. If no reply should be sent, return an empty array.",
     "Validation rules:",
     "Always output all keys.",
     "Use only the allowed enum values.",
     "Use empty strings only if absolutely necessary; prefer a concrete short summary/proposal.",
+    "proposal_options must contain at most 3 items, with no numbering and no duplicates.",
     "Choose exactly one topic path: either set topic_id or set topic_candidate, never both.",
     "Do not wrap the JSON in markdown fences.",
     "Interpret urgency narrowly: only true when timing matters now or soon.",
     "Interpret importance as business relevance, money, reputation, commitment, or customer risk.",
     "Examples:",
-    '{"priority_level":"high","importance_level":"high","urgency_flag":"true","needs_owner_now":"true","suggested_action":"reply_now","topic_id":"topic_meeting_followup","topic_candidate":"","topic_summary":"Meeting follow-up","topic_confidence":"0.96","summary":"לקוח מבקש תשובה דחופה לגבי פגישה להיום.","proposal":"שלום, קיבלתי. אני זמין היום בשעה 16:00. אם נוח לך, אשמח לאשר."}',
-    '{"priority_level":"medium","importance_level":"medium","urgency_flag":"false","needs_owner_now":"false","suggested_action":"reply_later","topic_id":"","topic_candidate":"topic_quote_request","topic_summary":"Quote request","topic_confidence":"0.82","summary":"הלקוח מתעניין בהמשך שיחה על שיתוף פעולה בשבוע הבא.","proposal":"היי, תודה על ההודעה. אשמח לדבר בשבוע הבא. תגיד לי איזה יום ושעה נוחים לך."}',
-    '{"priority_level":"low","importance_level":"low","urgency_flag":"false","needs_owner_now":"false","suggested_action":"ignore","topic_id":"topic_internal_note","topic_candidate":"","topic_summary":"Internal note","topic_confidence":"0.91","summary":"נשלחה הודעת בדיקה פנימית ללא בקשה לפעולה.","proposal":"אין צורך להשיב. אפשר לסגור את הפריט ללא שליחה."}',
-    '{"priority_level":"medium","importance_level":"high","urgency_flag":"false","needs_owner_now":"true","suggested_action":"review_manually","topic_id":"","topic_candidate":"topic_sensitive_business_followup","topic_summary":"Sensitive business follow-up","topic_confidence":"0.64","summary":"לקוח קיים מעלה נושא מסחרי רגיש שדורש שיקול דעת לפני מענה.","proposal":"לא לשלוח עדיין. כדאי שהבוס יבדוק את ההקשר לפני ניסוח תשובה."}',
+    '{"priority_level":"high","importance_level":"high","urgency_flag":"true","needs_owner_now":"true","suggested_action":"reply_now","topic_id":"topic_meeting_followup","topic_candidate":"","topic_summary":"Meeting follow-up","topic_confidence":"0.96","summary":"לקוח מבקש תשובה דחופה לגבי פגישה להיום.","proposal":"שלום, קיבלתי. אני זמין היום בשעה 16:00. אם נוח לך, אשמח לאשר.","proposal_options":["שלום, קיבלתי. אני זמין היום בשעה 16:00. אם נוח לך, אשמח לאשר.","אני פנוי בהמשך היום. איזו שעה מתאימה לך?","היום פחות מסתדר לי. אפשר לקבוע למחר?"]}',
+    '{"priority_level":"medium","importance_level":"medium","urgency_flag":"false","needs_owner_now":"false","suggested_action":"reply_later","topic_id":"","topic_candidate":"topic_quote_request","topic_summary":"Quote request","topic_confidence":"0.82","summary":"הלקוח מתעניין בהמשך שיחה על שיתוף פעולה בשבוע הבא.","proposal":"היי, תודה על ההודעה. אשמח לדבר בשבוע הבא. תגיד לי איזה יום ושעה נוחים לך.","proposal_options":["היי, תודה על ההודעה. אשמח לדבר בשבוע הבא. תגיד לי איזה יום ושעה נוחים לך.","תודה, קיבלתי. אני זמין בהמשך השבוע אם תרצה לתאם שעה.","ראיתי את ההודעה. שלח לי שעה שנוחה לך ואבדוק אם מתאים לי."]}',
+    '{"priority_level":"low","importance_level":"low","urgency_flag":"false","needs_owner_now":"false","suggested_action":"ignore","topic_id":"topic_internal_note","topic_candidate":"","topic_summary":"Internal note","topic_confidence":"0.91","summary":"נשלחה הודעת בדיקה פנימית ללא בקשה לפעולה.","proposal":"אין צורך להשיב. אפשר לסגור את הפריט ללא שליחה.","proposal_options":[]}',
+    '{"priority_level":"medium","importance_level":"high","urgency_flag":"false","needs_owner_now":"true","suggested_action":"review_manually","topic_id":"","topic_candidate":"topic_sensitive_business_followup","topic_summary":"Sensitive business follow-up","topic_confidence":"0.64","summary":"לקוח קיים מעלה נושא מסחרי רגיש שדורש שיקול דעת לפני מענה.","proposal":"לא לשלוח עדיין. כדאי שהבוס יבדוק את ההקשר לפני ניסוח תשובה.","proposal_options":[]}',
     draftContextBrief ? draftContextBrief : "Draft context brief: none",
     "Message:",
     String(inputText || "")
   ].join("\n");
+}
+
+function TL_AI_normalizeProposalOptions_(rawOptions, fallbackProposal) {
+  const out = [];
+  const seen = {};
+  const add = function(value) {
+    const text = String(value || "").trim().replace(/\s+/g, " ");
+    if (!text) return;
+    const key = text.toLowerCase();
+    if (seen[key]) return;
+    seen[key] = true;
+    out.push(text);
+  };
+  if (Array.isArray(rawOptions)) {
+    rawOptions.forEach(add);
+  } else if (typeof rawOptions === "string") {
+    add(rawOptions);
+  }
+  add(fallbackProposal);
+  return out.slice(0, 3);
 }
 
 function TL_AI_buildBossCapturePrompt_(inputText, language, bossName) {
@@ -367,12 +389,12 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "Language preference: " + String(language || "Hebrew"),
     "The Boss's name is: " + String(bossName || "Boss"),
     "Supported intents:",
-    "show_menu, help, show_capabilities, show_ai_cost, find_contact, find_context, find_similar_replies, list_reminders, list_tasks, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_draft_replies, list_waiting_on_others, list_followups, list_open_tasks, list_blocked_tasks, list_paused_items, show_settings, show_verticals, create_reminder_relative, create_reminder_datetime, create_reminder_recurring, create_task_no_due, create_task_with_due, create_task_dependent, create_task_personal, create_task_business, create_log_health, create_log_habits, create_log_journal, create_log_note, create_schedule_business, create_schedule_family, create_schedule_reminder, create_contact_enrichment, out_of_scope, unknown",
+    "show_menu, help, show_capabilities, show_ai_cost, find_contact, find_context, find_similar_replies, list_approvals, list_pending, list_urgent, list_attention, list_next_steps, list_paused_items, create_contact_enrichment, out_of_scope, unknown",
     "Return exactly one JSON object with this shape:",
-    '{"intent":"supported_intent_name","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|draft_replies|waiting_on_others|followups|open_tasks|blocked_tasks|paused_items|contact_lookup|context_lookup|similar_replies|menu|help|verticals|settings|reminders|tasks|ai_cost|none","capture_state":"TL_MENU_STATES value or empty string","menu_target":"main|capabilities|reminders|notes|schedule|tasks|manage_work|settings|verticals|help|none|","confidence":0.0,"needs_clarification":"true|false","reply":"string","parameters":{"query":"string","capture_kind":"string","capture_mode":"string","time_hint":"string","target":"string"}}',
+    '{"intent":"supported_intent_name","route":"menu|summary|capture|none","summary_kind":"pending|attention|approvals|next_steps|paused_items|contact_lookup|context_lookup|similar_replies|menu|help|ai_cost|none","capture_state":"TL_MENU_STATES value or empty string","menu_target":"main|capabilities|reply|enrich_crm|opportunities|manage_work|help|none|","confidence":0.0,"needs_clarification":"true|false","reply":"string","parameters":{"query":"string","capture_kind":"string","capture_mode":"string","time_hint":"string","target":"string"}}',
     "Field definitions:",
     "intent: choose exactly one supported intent name.",
-    "route: menu for explicit menu/help navigation, summary for status/list views, capture for create/log/remind/enrich flows, none for out_of_scope or unknown.",
+    "route: menu for explicit menu/help navigation, summary for status/list views, capture only for CRM enrichment, none for out_of_scope or unknown.",
     "summary_kind: required when route=summary, otherwise usually none.",
     "capture_state: required when route=capture and should match the best TL_MENU_STATES target; otherwise empty string.",
     "menu_target: use when route=menu to indicate which submenu should open; otherwise empty string.",
@@ -383,8 +405,8 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     "parameters.capture_kind / capture_mode / time_hint / target: fill only when helpful, otherwise empty strings.",
     "Routing rules:",
     "Use summary routes for list/status questions.",
-    "Use capture routes for create/add/log/remind/schedule requests.",
-    "Prefer a specific capture_state when the message clearly matches a menu capture path.",
+    "Use capture routes only for contact CRM enrichment requests.",
+    "Prefer a specific capture_state only when the message clearly matches contact CRM enrichment.",
     "Use out_of_scope when the message asks for weather, news, trivia, jokes, sports, or general chat outside DealWise communication and CRM capabilities.",
     "Return unknown only when the message is too ambiguous to classify and is not clearly out of scope.",
     "Validation rules:",
@@ -399,16 +421,12 @@ function TL_AI_buildBossIntentPrompt_(inputText, language, bossName) {
     '{"intent":"find_contact","route":"summary","summary_kind":"contact_lookup","capture_state":"","menu_target":"","confidence":0.94,"needs_clarification":"false","reply":"בודקת את איש הקשר שביקשת.","parameters":{"query":"find Dana","capture_kind":"","capture_mode":"","time_hint":"","target":"Dana"}}',
     '{"intent":"find_context","route":"summary","summary_kind":"context_lookup","capture_state":"","menu_target":"","confidence":0.94,"needs_clarification":"false","reply":"אוספת את ההקשר האחרון שביקשת.","parameters":{"query":"show recent messages with Dana","capture_kind":"","capture_mode":"","time_hint":"","target":"Dana"}}',
     '{"intent":"find_similar_replies","route":"summary","summary_kind":"similar_replies","capture_state":"","menu_target":"","confidence":0.94,"needs_clarification":"false","reply":"אוספת תשובות דומות מהעבר.","parameters":{"query":"show similar replies for Dana about documents","capture_kind":"","capture_mode":"","time_hint":"","target":"Dana"}}',
-    '{"intent":"list_reminders","route":"menu","summary_kind":"reminders","capture_state":"","menu_target":"reminders","confidence":0.97,"needs_clarification":"false","reply":"פותח את אפשרויות התזכורות.","parameters":{"query":"reminders","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
-    '{"intent":"list_tasks","route":"menu","summary_kind":"tasks","capture_state":"","menu_target":"tasks","confidence":0.97,"needs_clarification":"false","reply":"פותח את אפשרויות המשימות.","parameters":{"query":"tasks","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_approvals","route":"summary","summary_kind":"approvals","capture_state":"","menu_target":"manage_work","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את מה שממתין לאישור.","parameters":{"query":"approvals","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_pending","route":"summary","summary_kind":"pending","capture_state":"","menu_target":"manage_work","confidence":0.97,"needs_clarification":"false","reply":"מראה לך מה פתוח כרגע.","parameters":{"query":"clean my plate","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_attention","route":"summary","summary_kind":"attention","capture_state":"","menu_target":"manage_work","confidence":0.97,"needs_clarification":"false","reply":"מראה לך מה צריך תשומת לב.","parameters":{"query":"what needs attention","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"list_paused_items","route":"summary","summary_kind":"paused_items","capture_state":"","menu_target":"manage_work","confidence":0.95,"needs_clarification":"false","reply":"מראה לך מה הושהה.","parameters":{"query":"show paused items","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     '{"intent":"show_ai_cost","route":"summary","summary_kind":"ai_cost","capture_state":"","menu_target":"","confidence":0.98,"needs_clarification":"false","reply":"מראה לך את עלות ה-AI המצטברת.","parameters":{"query":"ai cost","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
-    '{"intent":"create_task_with_due","route":"capture","summary_kind":"none","capture_state":"CAPTURE_TASK_WITH_DUE","menu_target":"tasks","confidence":0.97,"needs_clarification":"false","reply":"קיבלתי, אכין משימה עם תאריך יעד.","parameters":{"query":"send proposal by Thursday","capture_kind":"task","capture_mode":"with_due","time_hint":"Thursday","target":""}}',
-    '{"intent":"create_log_journal","route":"capture","summary_kind":"none","capture_state":"CAPTURE_LOG_JOURNAL","menu_target":"notes","confidence":0.96,"needs_clarification":"false","reply":"נרשם, אכין מזה פריט יומן.","parameters":{"query":"met with Dana","capture_kind":"journal","capture_mode":"journal","time_hint":"","target":""}}',
-    '{"intent":"create_contact_enrichment","route":"capture","summary_kind":"none","capture_state":"CAPTURE_CONTACT_ENRICH","menu_target":"notes","confidence":0.96,"needs_clarification":"false","reply":"קיבלתי, אכין הצעת העשרה לאיש קשר.","parameters":{"query":"make note that I met David and his son has a wedding next week","capture_kind":"contact_enrichment","capture_mode":"contact_enrichment","time_hint":"","target":"David"}}',
+    '{"intent":"create_contact_enrichment","route":"capture","summary_kind":"none","capture_state":"CAPTURE_CONTACT_ENRICH","menu_target":"enrich_crm","confidence":0.96,"needs_clarification":"false","reply":"קיבלתי, אכין הצעת העשרה לאיש קשר.","parameters":{"query":"make note that I met David and his son has a wedding next week","capture_kind":"contact_enrichment","capture_mode":"contact_enrichment","time_hint":"","target":"David"}}',
     '{"intent":"out_of_scope","route":"none","summary_kind":"none","capture_state":"","menu_target":"","confidence":0.99,"needs_clarification":"false","reply":"מחוץ לתחום","parameters":{"query":"weather","capture_kind":"","capture_mode":"","time_hint":"","target":""}}',
     capabilityBrief ? capabilityBrief : "",
     "Message:",
@@ -921,6 +939,24 @@ function TL_AI_TriageInboxRow_(rowNumber) {
   if (!loc) throw new Error("INBOX row not found: " + rowNumber);
 
   const rowData = loc.values;
+  const triagePolicy = typeof TL_AI_TriagePolicyForInboxRowValues_ === "function"
+    ? TL_AI_TriagePolicyForInboxRowValues_(rowData)
+    : { defer: false, reason: "" };
+  if (triagePolicy && triagePolicy.defer) {
+    TLW_logInfo_("ai_triage_deferred_row", {
+      row: loc.row,
+      reason: triagePolicy.reason,
+      channel: String(TL_Orchestrator_value_(rowData, "channel") || "").trim(),
+      record_class: String(TL_Orchestrator_value_(rowData, "record_class") || "").trim(),
+      direction: String(TL_Orchestrator_value_(rowData, "direction") || "").trim()
+    });
+    return {
+      ok: true,
+      row: loc.row,
+      skipped: true,
+      reason: triagePolicy.reason
+    };
+  }
   const inputText = TL_AI_getCanonicalInputText_(rowData);
   if (!inputText) throw new Error("Row has no usable input text for triage: " + rowNumber);
 
@@ -1216,6 +1252,27 @@ function TL_AI_normalizeSuggestedAction_(value) {
   return allowed.indexOf(v) !== -1 ? v : "review_manually";
 }
 
+function TL_AI_ShouldDeferRawWhatsAppTriage_(channel, direction, recordClass) {
+  const normalizedChannel = String(channel || "").trim().toLowerCase();
+  const normalizedDirection = String(direction || "").trim().toLowerCase();
+  const normalizedRecordClass = String(recordClass || "").trim().toLowerCase();
+  return normalizedChannel === "whatsapp" &&
+    normalizedDirection === "incoming" &&
+    normalizedRecordClass === "communication";
+}
+
+function TL_AI_TriagePolicyForInboxRowValues_(values) {
+  const defer = TL_AI_ShouldDeferRawWhatsAppTriage_(
+    TL_Orchestrator_value_(values, "channel"),
+    TL_Orchestrator_value_(values, "direction"),
+    TL_Orchestrator_value_(values, "record_class")
+  );
+  return {
+    defer: defer,
+    reason: defer ? "await_group_synthesis" : ""
+  };
+}
+
 function TL_AI_normalizeTopicSlug_(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return "";
@@ -1502,10 +1559,10 @@ function TL_AI_normalizeBossReadOnlyTurn_(item) {
 
 function TL_AI_bossRouteFromIntent_(intent) {
   const v = String(intent || "").trim().toLowerCase();
-  if (v === "show_menu" || v === "help" || v === "show_capabilities" || v === "show_settings" || v === "show_verticals") return "menu";
+  if (v === "show_menu" || v === "help" || v === "show_capabilities") return "menu";
   if (v === "show_ai_cost" || v === "find_contact" || v === "find_context" || v === "find_similar_replies") return "summary";
   if (v.indexOf("list_") === 0) return "summary";
-  if (v.indexOf("create_") === 0) return "capture";
+  if (v === "create_contact_enrichment") return "capture";
   return "none";
 }
 
@@ -1516,24 +1573,15 @@ function TL_AI_bossSummaryKindFromIntent_(intent) {
     find_contact: "contact_lookup",
     find_context: "context_lookup",
     find_similar_replies: "similar_replies",
-    list_reminders: "reminders",
-    list_tasks: "tasks",
     list_approvals: "approvals",
     list_pending: "pending",
     list_urgent: "attention",
     list_attention: "attention",
     list_next_steps: "next_steps",
     list_paused_items: "paused_items",
-    list_draft_replies: "draft_replies",
-    list_waiting_on_others: "waiting_on_others",
-    list_followups: "followups",
-    list_open_tasks: "open_tasks",
-    list_blocked_tasks: "blocked_tasks",
     show_ai_cost: "ai_cost",
     show_menu: "menu",
-    help: "help",
-    show_settings: "settings",
-    show_verticals: "verticals"
+    help: "help"
   };
   return map[v] || "none";
 }
@@ -1541,21 +1589,6 @@ function TL_AI_bossSummaryKindFromIntent_(intent) {
 function TL_AI_bossCaptureStateFromIntent_(intent) {
   const v = String(intent || "").trim().toLowerCase();
   const map = {
-    create_reminder_relative: "CAPTURE_REMINDER_RELATIVE",
-    create_reminder_datetime: "CAPTURE_REMINDER_DATETIME",
-    create_reminder_recurring: "CAPTURE_REMINDER_RECURRING",
-    create_task_no_due: "CAPTURE_TASK_NO_DUE",
-    create_task_with_due: "CAPTURE_TASK_WITH_DUE",
-    create_task_dependent: "CAPTURE_TASK_DEPENDENT",
-    create_task_personal: "CAPTURE_TASK_PERSONAL",
-    create_task_business: "CAPTURE_TASK_BUSINESS",
-    create_log_health: "CAPTURE_LOG_HEALTH",
-    create_log_habits: "CAPTURE_LOG_HABITS",
-    create_log_journal: "CAPTURE_LOG_JOURNAL",
-    create_log_note: "CAPTURE_LOG_NOTE",
-    create_schedule_business: "CAPTURE_SCHEDULE_BUSINESS",
-    create_schedule_family: "CAPTURE_SCHEDULE_FAMILY",
-    create_schedule_reminder: "CAPTURE_SCHEDULE_REMINDER",
     create_contact_enrichment: "CAPTURE_CONTACT_ENRICH"
   };
   return map[v] || "";
@@ -1566,24 +1599,16 @@ function TL_AI_bossMenuTargetFromIntent_(intent, summaryKind) {
   const summary = String(summaryKind || "").trim().toLowerCase();
   if (v === "show_menu" || v === "help") return "main";
   if (v === "show_capabilities") return "capabilities";
-  if (v === "show_settings") return "settings";
-  if (v === "show_verticals") return "verticals";
-  if (summary === "reminders") return "reminders";
-  if (summary === "tasks" || summary === "open_tasks" || summary === "blocked_tasks") return "tasks";
-  if (summary === "approvals" || summary === "pending" || summary === "attention" || summary === "next_steps" || summary === "paused_items" || summary === "draft_replies" || summary === "waiting_on_others" || summary === "followups") return "manage_work";
+  if (v === "create_contact_enrichment") return "enrich_crm";
+  if (summary === "approvals" || summary === "pending" || summary === "attention" || summary === "next_steps" || summary === "paused_items") return "manage_work";
   return "";
 }
 
 function TL_AI_normalizeBossIntentName_(value) {
   const v = String(value || "").trim().toLowerCase();
   const allowed = [
-    "show_menu","help","show_capabilities","show_ai_cost","find_contact","find_context","find_similar_replies","list_reminders","list_tasks","list_approvals","list_pending","list_urgent","list_attention","list_next_steps","list_paused_items",
-    "list_draft_replies","list_waiting_on_others","list_followups","list_open_tasks","list_blocked_tasks",
-    "show_settings","show_verticals",
-    "create_reminder_relative","create_reminder_datetime","create_reminder_recurring",
-    "create_task_no_due","create_task_with_due","create_task_dependent","create_task_personal","create_task_business",
-    "create_log_health","create_log_habits","create_log_journal","create_log_note",
-    "create_schedule_business","create_schedule_family","create_schedule_reminder","create_contact_enrichment",
+    "show_menu","help","show_capabilities","show_ai_cost","find_contact","find_context","find_similar_replies","list_approvals","list_pending","list_urgent","list_attention","list_next_steps","list_paused_items",
+    "create_contact_enrichment",
     "out_of_scope",
     "unknown"
   ];
@@ -1599,7 +1624,7 @@ function TL_AI_normalizeBossIntentRoute_(value) {
 function TL_AI_normalizeBossSummaryKind_(value) {
   const v = String(value || "").trim().toLowerCase();
   if (v === "urgent") return "attention";
-  const allowed = ["pending","attention","approvals","next_steps","paused_items","contact_lookup","context_lookup","similar_replies","draft_replies","waiting_on_others","followups","open_tasks","blocked_tasks","menu","help","verticals","settings","reminders","tasks","ai_cost","none"];
+  const allowed = ["pending","attention","approvals","next_steps","paused_items","contact_lookup","context_lookup","similar_replies","menu","help","ai_cost","none"];
   return allowed.indexOf(v) !== -1 ? v : "none";
 }
 
@@ -1618,18 +1643,13 @@ function TL_AI_normalizeBossRetrievalFocus_(value) {
 
 function TL_AI_normalizeBossMenuTarget_(value) {
   const v = String(value || "").trim().toLowerCase();
-  const allowed = ["main","capabilities","reminders","notes","schedule","tasks","manage_work","settings","verticals","help","none",""];
+  const allowed = ["main","capabilities","reply","enrich_crm","opportunities","manage_work","help","none",""];
   return allowed.indexOf(v) !== -1 ? v : "";
 }
 
 function TL_AI_normalizeBossCaptureState_(value) {
   const v = String(value || "").trim();
-  const allowed = [
-    "CAPTURE_REMINDER_RELATIVE","CAPTURE_REMINDER_DATETIME","CAPTURE_REMINDER_RECURRING",
-    "CAPTURE_TASK_NO_DUE","CAPTURE_TASK_WITH_DUE","CAPTURE_TASK_DEPENDENT","CAPTURE_TASK_PERSONAL","CAPTURE_TASK_BUSINESS",
-    "CAPTURE_LOG_HEALTH","CAPTURE_LOG_HABITS","CAPTURE_LOG_JOURNAL","CAPTURE_LOG_NOTE",
-    "CAPTURE_SCHEDULE_BUSINESS","CAPTURE_SCHEDULE_FAMILY","CAPTURE_SCHEDULE_REMINDER","CAPTURE_CONTACT_ENRICH"
-  ];
+  const allowed = ["CAPTURE_CONTACT_ENRICH"];
   return allowed.indexOf(v) !== -1 ? v : "";
 }
 

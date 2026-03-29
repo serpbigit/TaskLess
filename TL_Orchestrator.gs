@@ -41,7 +41,9 @@ function TL_Orchestrator_Run() {
       approval: TL_Approval_RunUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
       reminders: TL_Reminder_RunDueUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
       send: TL_Send_RunApprovedUnlocked_(TL_ORCHESTRATOR.DEFAULT_BATCH_SIZE),
-      reply_prep: typeof TL_Menu_PrepareReplyPacketCache_ === "function" ? TL_Menu_PrepareReplyPacketCache_() : null,
+      boss_snapshots: typeof TL_Menu_PrepareBossSnapshots_ === "function"
+        ? TL_Menu_PrepareBossSnapshots_()
+        : (typeof TL_Menu_PrepareReplyPacketCache_ === "function" ? TL_Menu_PrepareReplyPacketCache_() : null),
       boss: TL_BossPolicy_RunUnlocked_()
     };
 
@@ -1942,6 +1944,9 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
   const nowIso = now.toISOString();
   const summary = String(triage.summary || "").trim() || TL_Orchestrator_buildBurstFallbackSummary_(conversationRows);
   const proposal = String(triage.proposal || "").trim() || TL_Orchestrator_buildBurstFallbackProposal_(sender);
+  const proposalOptions = typeof TL_AI_normalizeProposalOptions_ === "function"
+    ? TL_AI_normalizeProposalOptions_(triage.proposal_options, proposal)
+    : [proposal];
   const aiResponseExpected = typeof TL_Activity_responseExpectedFromSuggestedAction_ === "function"
     ? TL_Activity_responseExpectedFromSuggestedAction_(triage.suggested_action)
     : true;
@@ -1956,7 +1961,8 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
     grouped_text: groupedText,
     focus_text: String(focus.focusText || "").trim(),
     conversation_row_numbers: conversationRows.map(function(item) { return item.rowNumber; }),
-    closure_hint: focus.closureHint
+    closure_hint: focus.closureHint,
+    proposal_options: proposalOptions
   }, 4000);
 
   return {
@@ -2221,7 +2227,8 @@ function TL_Orchestrator_buildBurstTriage_(groupedText, latestValues, sourceRows
     needs_owner_now: "",
     suggested_action: "reply_now",
     summary: "",
-    proposal: ""
+    proposal: "",
+    proposal_options: []
   };
   if (!text) return fallback;
   const promptFn = options && typeof options.promptFn === "function" ? options.promptFn : null;
@@ -2269,7 +2276,10 @@ function TL_Orchestrator_buildBurstTriage_(groupedText, latestValues, sourceRows
       needs_owner_now: TL_AI_normalizeBooleanString_(raw.needs_owner_now),
       suggested_action: TL_AI_normalizeSuggestedAction_(raw.suggested_action),
       summary: String(raw.summary || result.summary || "").trim(),
-      proposal: String(raw.proposal || result.proposal || "").trim()
+      proposal: String(raw.proposal || result.proposal || "").trim(),
+      proposal_options: typeof TL_AI_normalizeProposalOptions_ === "function"
+        ? TL_AI_normalizeProposalOptions_(raw.proposal_options, raw.proposal || result.proposal || "")
+        : []
     };
   } catch (err) {
     TLW_logInfo_("dealwise_group_triage_fallback", {

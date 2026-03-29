@@ -26,6 +26,8 @@ const TL_MENU = {
   STATE_META_KEY_PREFIX: "MENU_STATE_META_", // + wa_id
   PACKET_KEY_PREFIX: "MENU_PACKET_", // + wa_id
   PREPARED_REPLY_PACKET_KEY: "MENU_PREPARED_REPLY_PACKET",
+  PREPARED_APPROVALS_PACKET_KEY: "MENU_PREPARED_APPROVALS_PACKET",
+  PREPARED_OPPORTUNITIES_PACKET_KEY: "MENU_PREPARED_OPPORTUNITIES_PACKET",
   ONBOARDED_KEY_PREFIX: "MENU_ONBOARDED_", // + wa_id
   MAX_PENDING_SUMMARY: 5
 };
@@ -534,6 +536,12 @@ function TL_Menu_ReplyPrepTtlMinutes_() {
   return Math.min(Math.floor(raw), 60);
 }
 
+function TL_Menu_BossSnapshotTtlMinutes_() {
+  const raw = Number(TLW_getSetting_("BOSS_SNAPSHOT_TTL_MINUTES") || TL_Menu_ReplyPrepTtlMinutes_());
+  if (!isFinite(raw) || raw <= 0) return TL_Menu_ReplyPrepTtlMinutes_();
+  return Math.min(Math.floor(raw), 60);
+}
+
 function TL_Menu_ClearPreparedReplyPacket_() {
   try {
     PropertiesService.getScriptProperties().deleteProperty(TL_MENU.PREPARED_REPLY_PACKET_KEY);
@@ -593,10 +601,137 @@ function TL_Menu_PrepareReplyPacketCache_() {
   };
 }
 
+function TL_Menu_ClearPreparedApprovalsPacket_() {
+  try {
+    PropertiesService.getScriptProperties().deleteProperty(TL_MENU.PREPARED_APPROVALS_PACKET_KEY);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function TL_Menu_SetPreparedApprovalsPacket_(items, meta) {
+  const payload = {
+    prepared_at: new Date().toISOString(),
+    session_version: typeof TL_Menu_SessionRuntimeVersion_ === "function" ? TL_Menu_SessionRuntimeVersion_() : TL_MENU_SESSION_VERSION,
+    item_count: Array.isArray(items) ? items.length : 0,
+    source: String(meta && meta.source || "background").trim(),
+    items: Array.isArray(items) ? items.slice(0, 50) : []
+  };
+  try {
+    PropertiesService.getScriptProperties().setProperty(TL_MENU.PREPARED_APPROVALS_PACKET_KEY, JSON.stringify(payload));
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+function TL_Menu_GetPreparedApprovalsPacket_() {
+  try {
+    const raw = String(PropertiesService.getScriptProperties().getProperty(TL_MENU.PREPARED_APPROVALS_PACKET_KEY) || "").trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    const version = typeof TL_Menu_SessionRuntimeVersion_ === "function" ? TL_Menu_SessionRuntimeVersion_() : TL_MENU_SESSION_VERSION;
+    if (String(parsed.session_version || "").trim() !== String(version || "").trim()) {
+      TL_Menu_ClearPreparedApprovalsPacket_();
+      return null;
+    }
+    if (!TL_Menu_IsRecentIso_(String(parsed.prepared_at || "").trim(), TL_Menu_BossSnapshotTtlMinutes_())) {
+      TL_Menu_ClearPreparedApprovalsPacket_();
+      return null;
+    }
+    return parsed;
+  } catch (e) {
+    TL_Menu_ClearPreparedApprovalsPacket_();
+    return null;
+  }
+}
+
+function TL_Menu_ClearPreparedOpportunitiesPacket_() {
+  try {
+    PropertiesService.getScriptProperties().deleteProperty(TL_MENU.PREPARED_OPPORTUNITIES_PACKET_KEY);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function TL_Menu_SetPreparedOpportunitiesPacket_(packetItems, meta) {
+  const payload = {
+    prepared_at: new Date().toISOString(),
+    session_version: typeof TL_Menu_SessionRuntimeVersion_ === "function" ? TL_Menu_SessionRuntimeVersion_() : TL_MENU_SESSION_VERSION,
+    item_count: Array.isArray(packetItems) ? packetItems.length : 0,
+    source: String(meta && meta.source || "background").trim(),
+    items: Array.isArray(packetItems) ? packetItems.slice(0, 10) : []
+  };
+  try {
+    PropertiesService.getScriptProperties().setProperty(TL_MENU.PREPARED_OPPORTUNITIES_PACKET_KEY, JSON.stringify(payload));
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+function TL_Menu_GetPreparedOpportunitiesPacket_() {
+  try {
+    const raw = String(PropertiesService.getScriptProperties().getProperty(TL_MENU.PREPARED_OPPORTUNITIES_PACKET_KEY) || "").trim();
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    const version = typeof TL_Menu_SessionRuntimeVersion_ === "function" ? TL_Menu_SessionRuntimeVersion_() : TL_MENU_SESSION_VERSION;
+    if (String(parsed.session_version || "").trim() !== String(version || "").trim()) {
+      TL_Menu_ClearPreparedOpportunitiesPacket_();
+      return null;
+    }
+    if (!TL_Menu_IsRecentIso_(String(parsed.prepared_at || "").trim(), TL_Menu_BossSnapshotTtlMinutes_())) {
+      TL_Menu_ClearPreparedOpportunitiesPacket_();
+      return null;
+    }
+    return parsed;
+  } catch (e) {
+    TL_Menu_ClearPreparedOpportunitiesPacket_();
+    return null;
+  }
+}
+
+function TL_Menu_ClearPreparedBossSnapshots_() {
+  return {
+    reply: TL_Menu_ClearPreparedReplyPacket_(),
+    approvals: TL_Menu_ClearPreparedApprovalsPacket_(),
+    opportunities: TL_Menu_ClearPreparedOpportunitiesPacket_()
+  };
+}
+
+function TL_Menu_PrepareBossSnapshots_() {
+  const startedAt = Date.now();
+  const allItems = TL_Menu_CollectApprovalPacketItems_("all");
+  const replyItems = (allItems || []).filter(function(item) {
+    return TL_Menu_MatchesApprovalCategory_(item, "reply");
+  });
+  const opportunities = TL_Menu_BuildOpportunityPacketItems_(TL_Menu_ListOpportunityCandidates_(3));
+  const replyPayload = TL_Menu_SetPreparedReplyPacket_(replyItems, { source: "orchestrator" });
+  const approvalsPayload = TL_Menu_SetPreparedApprovalsPacket_(allItems, { source: "orchestrator" });
+  const opportunitiesPayload = TL_Menu_SetPreparedOpportunitiesPacket_(opportunities, { source: "orchestrator" });
+  return {
+    ok: true,
+    reply_count: replyItems.length,
+    approvals_count: allItems.length,
+    opportunities_count: opportunities.length,
+    cached_reply: !!replyPayload,
+    cached_approvals: !!approvalsPayload,
+    cached_opportunities: !!opportunitiesPayload,
+    elapsed_ms: Date.now() - startedAt
+  };
+}
+
 function TL_Menu_OpenOpportunities_(waId) {
   TL_Menu_SetState_(waId, TL_MENU_STATES.ROOT);
-  const candidates = TL_Menu_ListOpportunityCandidates_(3);
-  if (!candidates.length) {
+  const prepared = TL_Menu_GetPreparedOpportunitiesPacket_();
+  const packetItems = prepared && Array.isArray(prepared.items)
+    ? prepared.items.slice()
+    : TL_Menu_BuildOpportunityPacketItems_(TL_Menu_ListOpportunityCandidates_(3));
+  if (!packetItems.length) {
     return [
       TL_Menu_T_("הזדמנויות", "Opportunities"),
       TL_Menu_T_(
@@ -610,7 +745,7 @@ function TL_Menu_OpenOpportunities_(waId) {
     stage: "one_by_one",
     cursor: 0,
     created_at: new Date().toISOString(),
-    items: TL_Menu_BuildOpportunityPacketItems_(candidates)
+    items: packetItems
   });
   const packet = TL_Menu_GetDecisionPacket_(waId);
   return [
@@ -624,7 +759,8 @@ function TL_Menu_OpenOpportunities_(waId) {
 }
 
 function TL_Menu_OpenApprovalsHome_(waId) {
-  const items = TL_Menu_CollectApprovalPacketItems_("all");
+  const prepared = TL_Menu_GetPreparedApprovalsPacket_();
+  const items = prepared && Array.isArray(prepared.items) ? prepared.items.slice() : TL_Menu_CollectApprovalPacketItems_("all");
   if (!items.length) {
     TL_Menu_SetState_(waId, TL_MENU_STATES.ROOT);
     TL_Menu_ClearDecisionPacket_(waId);
@@ -648,7 +784,11 @@ function TL_Menu_HandleApprovalsHomeChoice_(waId, choice) {
   })[String(choice || "").trim()];
   if (!category) return TL_Menu_BuildApprovalsHomeMenu_(waId);
 
-  const items = TL_Menu_CollectApprovalPacketItems_(category);
+  const prepared = TL_Menu_GetPreparedApprovalsPacket_();
+  const preparedItems = prepared && Array.isArray(prepared.items) ? prepared.items.slice() : null;
+  const items = preparedItems
+    ? preparedItems.filter(function(item) { return TL_Menu_MatchesApprovalCategory_(item, category); })
+    : TL_Menu_CollectApprovalPacketItems_(category);
   if (!items.length) {
     return [
       TL_Menu_BuildApprovalCategoryEmptyText_(category),
@@ -3289,9 +3429,69 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
   }
 
   const actionSpec = TL_Menu_GetDecisionPacketActionSpec_(current);
+  const multiReplyOptions = TL_Menu_GetDecisionPacketReplyOptions_(current);
 
   if (TL_Menu_ItemNeedsRecipientResolution_(current)) {
     return TL_Menu_HandleDecisionPacketRecipientReply_(waId, packet, choice);
+  }
+
+  if (multiReplyOptions.length) {
+    const editChoice = String(multiReplyOptions.length + 1);
+    const laterChoice = String(multiReplyOptions.length + 2);
+    const archiveChoice = String(multiReplyOptions.length + 3);
+    const selectedIndex = Number(choice) - 1;
+    if (selectedIndex >= 0 && selectedIndex < multiReplyOptions.length) {
+      const selectedText = String(multiReplyOptions[selectedIndex] || "").trim();
+      TL_Menu_ApplyDecisionProposalChoice_(current.rowNumber, selectedText);
+      current.proposal = selectedText;
+      const approvalMulti = TL_Menu_ApproveDecisionRow_(current.rowNumber);
+      packet.cursor = Number(packet.cursor || 0) + 1;
+      const selectedReceipt = TL_Menu_BuildDecisionPacketReceipt_(current, approvalMulti);
+      if (!packet.items[packet.cursor || 0]) {
+        TL_Menu_ClearDecisionPacket_(waId);
+        return [
+          selectedReceipt,
+          TL_Menu_T_("אין כרגע עוד פריטים שממתינים להחלטה.")
+        ].filter(Boolean).join("\n\n");
+      }
+      TL_Menu_SetDecisionPacket_(waId, packet);
+      return [
+        selectedReceipt,
+        TL_Menu_BuildDecisionPacketOneByOneReply_(packet)
+      ].filter(Boolean).join("\n\n");
+    } else if (choice === editChoice) {
+      packet.stage = "edit";
+      TL_Menu_SetDecisionPacket_(waId, packet);
+      return TL_Menu_BuildDecisionPacketEditReply_(packet);
+    } else if (choice === laterChoice) {
+      packet.cursor = Number(packet.cursor || 0) + 1;
+    } else if (choice === archiveChoice) {
+      const archivedMulti = TL_Menu_ArchiveDecisionRow_(current.rowNumber);
+      packet.cursor = Number(packet.cursor || 0) + 1;
+      const archivedReceipt = archivedMulti && archivedMulti.receiptText ? archivedMulti.receiptText : TL_Menu_T_("הפריט הועבר לארכיון.");
+      if (!packet.items[packet.cursor || 0]) {
+        TL_Menu_ClearDecisionPacket_(waId);
+        return [
+          archivedReceipt,
+          TL_Menu_T_("אין כרגע עוד פריטים שממתינים להחלטה.")
+        ].filter(Boolean).join("\n\n");
+      }
+      TL_Menu_SetDecisionPacket_(waId, packet);
+      return [
+        archivedReceipt,
+        TL_Menu_BuildDecisionPacketOneByOneReply_(packet)
+      ].filter(Boolean).join("\n\n");
+    } else {
+      return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
+    }
+
+    if (!packet.items[packet.cursor || 0]) {
+      TL_Menu_ClearDecisionPacket_(waId);
+      return TL_Menu_T_("סיימנו את הסקירה. אין עוד פריטים בחבילה.");
+    }
+
+    TL_Menu_SetDecisionPacket_(waId, packet);
+    return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
   }
 
   if (choice === "1") {
@@ -3930,6 +4130,57 @@ function TL_Menu_ReviseDecisionRow_(rowNumber, revisedText) {
   };
 }
 
+function TL_Menu_ApplyDecisionProposalChoice_(rowNumber, chosenText) {
+  const cleaned = String(chosenText || "").trim().replace(/\s+/g, " ");
+  if (!rowNumber || !cleaned) return { ok: false, reason: "missing_choice" };
+  try {
+    const loc = typeof TL_AI_getInboxRow_ === "function" ? TL_AI_getInboxRow_(rowNumber) : null;
+    if (!loc || !loc.values) return { ok: false, reason: "row_not_found" };
+    const values = loc.values;
+    const channel = String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase();
+    const messageType = String(TL_Orchestrator_value_(values, "message_type") || "").trim().toLowerCase();
+    const notes = String(TL_Orchestrator_value_(values, "notes") || "");
+    if (channel === "email" && messageType === "email_thread" && typeof TL_Email_inboxValuesToSnapshot_ === "function" && typeof TL_Email_appendInboxVersion_ === "function") {
+      const snapshot = TL_Email_inboxValuesToSnapshot_(values, rowNumber);
+      const payload = snapshot.payload || {};
+      const approval = payload.approvalSnapshot || {};
+      const merged = TL_Email_mergePayload_(payload, {
+        proposal: Object.assign({}, payload.proposal || {}, { body: cleaned }),
+        approvalSnapshot: Object.assign({}, approval, { body: cleaned })
+      });
+      TL_Email_appendInboxVersion_(rowNumber, {
+        ai_proposal: cleaned,
+        raw_payload_ref: merged,
+        approval_required: "true",
+        approval_status: "awaiting_approval",
+        execution_status: "awaiting_approval",
+        notes: TL_Email_appendNote_(notes, "boss_selected_proposal_option")
+      }, "boss_select_proposal_option");
+      return { ok: true, proposal: cleaned };
+    }
+    let nextPayload = String(TL_Orchestrator_value_(values, "raw_payload_ref") || "").trim();
+    if (nextPayload) {
+      try {
+        const parsed = JSON.parse(nextPayload);
+        parsed.selected_proposal = cleaned;
+        nextPayload = TLW_safeStringify_(parsed, 8000);
+      } catch (e) {}
+    }
+    TL_Orchestrator_updateRowFields_(rowNumber, {
+      ai_proposal: cleaned,
+      raw_payload_ref: nextPayload,
+      approval_required: "true",
+      approval_status: "awaiting_approval",
+      execution_status: "proposal_ready",
+      task_status: "proposal_ready",
+      notes: TL_Capture_appendNote_(values, "boss_selected_proposal_option")
+    }, "boss_select_proposal_option");
+    return { ok: true, proposal: cleaned };
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message || e || "proposal_choice_failed") };
+  }
+}
+
 function TL_Menu_BuildDecisionPacketReply_(packet) {
   return TL_Menu_HebrewBlock_([
     TL_Menu_BuildDecisionPacketHeader_(packet),
@@ -4004,8 +4255,11 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const isSchedule = String(current.captureKind || "").trim().toLowerCase() === "schedule";
   const option1Label = String(actionSpec.primaryLabel || TL_Menu_T_("אשר")).trim();
   const option2Label = String(actionSpec.option2Label || TL_Menu_T_("ערוך")).trim();
-  const option3Label = String(actionSpec.option3Label || TL_Menu_T_("אח\"כ")).trim();
+  const option3Label = String(actionSpec.option3Label || TL_Menu_T_("אחר כך", "Later")).trim();
   const option4Label = String(actionSpec.option4Label || TL_Menu_T_("ארכב")).trim();
+  const editOptionNumber = multiReplyOptions.length ? (multiReplyOptions.length + 1) : 2;
+  const laterOptionNumber = multiReplyOptions.length ? (multiReplyOptions.length + 2) : 3;
+  const archiveOptionNumber = multiReplyOptions.length ? (multiReplyOptions.length + 3) : 4;
   const styleShortcutLine = TL_Menu_IsOutboundCommunicationItem_(current) && !TL_Menu_ItemNeedsRecipientResolution_(current)
     ? TL_Menu_T_("קיצורי ניסוח/פעולה: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש | אחר כך | בטל", "Shortcuts: shorter | warmer | more formal | rewrite | later | discard")
     : (TL_Menu_IsContinuableCaptureItem_(current)
@@ -4026,13 +4280,16 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     "",
     TL_Menu_T_("הבנתי כך:"),
     isReminder ? (TL_Menu_T_("הודעה: ") + reminderMessage) : summary,
-    proposalBody ? (actionSpec.proposalHeading + "\n" + proposalBody) : "",
+    multiReplyOptions.length
+      ? (TL_Menu_T_("בחר אחת מהתשובות המוצעות לשליחה:", "Choose one of the suggested replies to send:") + "\n" +
+        multiReplyOptions.map(function(value, idx) { return String(idx + 1) + ". " + String(value || "").trim(); }).join("\n"))
+      : (proposalBody ? (actionSpec.proposalHeading + "\n" + proposalBody) : ""),
     isReminder && dueLabel ? (TL_Menu_T_("זמן הפעלת תזכורת: ") + dueLabel) : (isSchedule && dueLabel ? (TL_Menu_T_("זמן האירוע: ") + dueLabel) : (duePreview ? (TL_Menu_T_("יעד: ") + duePreview) : "")),
     "",
-    "1. " + option1Label,
-    option2Label ? ("2. " + option2Label) : "",
-    option3Label ? ("3. " + option3Label) : "",
-    option4Label ? ("4. " + option4Label) : "",
+    multiReplyOptions.length ? (String(editOptionNumber) + ". " + TL_Menu_T_("ערוך", "Edit")) : ("1. " + option1Label),
+    multiReplyOptions.length ? (String(laterOptionNumber) + ". " + TL_Menu_T_("אחר כך", "Later")) : (option2Label ? ("2. " + option2Label) : ""),
+    multiReplyOptions.length ? (String(archiveOptionNumber) + ". " + TL_Menu_T_("ארכב", "Archive")) : (option3Label ? ("3. " + option3Label) : ""),
+    multiReplyOptions.length ? "" : (option4Label ? ("4. " + option4Label) : ""),
     styleShortcutLine ? "" : "",
     styleShortcutLine ? styleShortcutLine : "",
     TL_Menu_T_("שלח את הספרה של בחירתך")
@@ -5104,7 +5361,6 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
         Number(latestWhatsAppThreadRow[threadKey] || 0) > Number(item.rowNumber || 0)) {
       return;
     }
-    const classified = typeof TL_BossPolicy_classifyItem_ === "function" ? TL_BossPolicy_classifyItem_(item, {}) : null;
     const packetItem = {
       key: key,
       rowNumber: item.rowNumber,
@@ -5114,8 +5370,9 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
       direction: direction,
       summary: String(TL_Orchestrator_value_(values, "ai_summary") || threadSubject || textValue || "").trim(),
       proposal: String(TL_Orchestrator_value_(values, "ai_proposal") || "").trim(),
+      proposalOptions: TL_Menu_ExtractProposalOptions_(channel, values, payload, String(TL_Orchestrator_value_(values, "ai_proposal") || "").trim()),
       sender: sender,
-      senderLabel: TL_Menu_BuildPacketSenderLabel_(senderProfile, sender, receiver, contactId, channel, direction, displayPhoneNumber, contactsIndex),
+      senderLabel: TL_Menu_BuildPacketSenderLabel_(senderProfile, sender, receiver, contactId, channel, direction, displayPhoneNumber, contactsIndex, notes),
       receiver: receiver,
       channel: channel,
       channelLabel: TL_Menu_BuildPacketChannelLabel_(channel, messageType),
@@ -5135,9 +5392,21 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
       historyDepth: Number(approval.historyDepth || 0),
       duePreview: String(dueInfo.preview || "").trim(),
       dueLabel: String(dueInfo.label || "").trim(),
-      isUrgent: classified ? !!classified.isUrgent : false,
-      isHigh: classified ? !!classified.isHigh : false
+      isUrgent: false,
+      isHigh: false
     };
+    if (normalizedMode === "reply" && channel === "whatsapp" && recordClass === "grouped_inbound") {
+      const refreshedPacketItem = TL_Menu_RefreshWhatsAppReplyPacketItem_(packetItem, values, rows, contactsIndex);
+      if (!refreshedPacketItem) return;
+      packetItem.summary = refreshedPacketItem.summary;
+      packetItem.proposal = refreshedPacketItem.proposal;
+      packetItem.sender = refreshedPacketItem.sender;
+      packetItem.senderLabel = refreshedPacketItem.senderLabel;
+      packetItem.rawSnippet = refreshedPacketItem.rawSnippet;
+    }
+    const classified = typeof TL_BossPolicy_classifyItem_ === "function" ? TL_BossPolicy_classifyItem_(packetItem, {}) : null;
+    packetItem.isUrgent = classified ? !!classified.isUrgent : false;
+    packetItem.isHigh = classified ? !!classified.isHigh : false;
     packetItem.actionKind = TL_Menu_GetDecisionPacketActionSpec_(packetItem).actionKind;
     if (!TL_Menu_MatchesApprovalCategory_(packetItem, normalizedMode === "drafts" ? "all" : normalizedMode)) return;
     items.push(packetItem);
@@ -5191,13 +5460,18 @@ function TL_Menu_BuildPacketSenderLabel_(senderProfile, sender, receiver, contac
   const direction = arguments.length > 5 ? String(arguments[5] || "").trim().toLowerCase() : "";
   const displayPhoneNumber = arguments.length > 6 ? TLW_normalizePhone_(arguments[6] || "") : "";
   const contactsIndex = arguments.length > 7 && arguments[7] ? arguments[7] : null;
+  const notes = arguments.length > 8 ? String(arguments[8] || "") : "";
   const contactPhone = TL_Menu_ContactPhoneFromContactId_(contactId);
   const senderPhone = TLW_normalizePhone_(sender || "");
   const receiverPhone = TLW_normalizePhone_(receiver || "");
   if (channel === "whatsapp" && direction === "incoming") {
     const contactRecord = contactsIndex && contactsIndex.byContactId ? contactsIndex.byContactId[String(contactId || "").trim()] : null;
-    if (contactRecord && String(contactRecord.name || "").trim()) {
-      return String(contactRecord.name || "").trim();
+    if (contactRecord && String(contactRecord.display_name || contactRecord.name || "").trim()) {
+      return String(contactRecord.display_name || contactRecord.name || "").trim();
+    }
+    const waContactName = String(TL_Menu_GetNoteKeyValue_(notes, "wa_contact_name") || "").trim();
+    if (waContactName) {
+      return waContactName;
     }
     if (contactPhone && senderPhone === displayPhoneNumber) return contactPhone;
     if (contactPhone) return contactPhone;
@@ -5210,6 +5484,90 @@ function TL_Menu_BuildPacketSenderLabel_(senderProfile, sender, receiver, contac
   if (contactId && sender) return String(sender).trim();
   if (sender && receiver) return String(sender).trim();
   return String(sender || receiver || "").trim();
+}
+
+function TL_Menu_ExtractProposalOptions_(channel, values, payload, fallbackProposal) {
+  const normalizedChannel = String(channel || "").trim().toLowerCase();
+  const safePayload = payload && typeof payload === "object" ? payload : {};
+  const approval = safePayload.approvalSnapshot && typeof safePayload.approvalSnapshot === "object"
+    ? safePayload.approvalSnapshot
+    : {};
+  let rawOptions = [];
+  if (normalizedChannel === "email") {
+    rawOptions = approval.proposalOptions || safePayload.proposalOptions || [];
+  } else if (normalizedChannel === "whatsapp") {
+    const raw = String(TL_Orchestrator_value_(values, "raw_payload_ref") || "").trim();
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        rawOptions = parsed.proposal_options || parsed.proposalOptions || [];
+      } catch (e) {}
+    }
+  }
+  return typeof TL_AI_normalizeProposalOptions_ === "function"
+    ? TL_AI_normalizeProposalOptions_(rawOptions, fallbackProposal)
+    : (fallbackProposal ? [String(fallbackProposal).trim()] : []);
+}
+
+function TL_Menu_GetDecisionPacketReplyOptions_(item) {
+  const safe = item && typeof item === "object" ? item : {};
+  if (!TL_Menu_IsReplyPacketItem_(safe)) return [];
+  const options = Array.isArray(safe.proposalOptions) ? safe.proposalOptions : [];
+  return options.map(function(value) { return String(value || "").trim(); }).filter(Boolean).slice(0, 3);
+}
+
+function TL_Menu_RefreshWhatsAppReplyPacketItem_(packetItem, values, recentRows, contactsIndex) {
+  const safeItem = packetItem && typeof packetItem === "object" ? packetItem : null;
+  const safeValues = Array.isArray(values) ? values : [];
+  if (!safeItem) return null;
+  const threadKey = TL_Menu_WhatsAppThreadKey_(safeValues);
+  if (!threadKey) return safeItem;
+  const threadRows = TL_Menu_CollectWhatsAppCommunicationRowsForThread_(threadKey, recentRows);
+  if (!threadRows.length) return safeItem;
+  if (typeof TL_Orchestrator_resolveBurstParticipants_ !== "function" || typeof TL_Orchestrator_buildConversationFocus_ !== "function") {
+    return safeItem;
+  }
+  const participants = TL_Orchestrator_resolveBurstParticipants_(threadRows, safeValues);
+  const focus = TL_Orchestrator_buildConversationFocus_(threadRows, participants);
+  if (!focus || focus.closureHint || !focus.hasOpenInbound) return null;
+
+  const latestRow = threadRows[threadRows.length - 1];
+  const latestDirection = String(TL_Orchestrator_value_(latestRow && latestRow.values || [], "direction") || "").trim().toLowerCase();
+  if (latestDirection !== "incoming") return null;
+
+  const safeContactsIndex = contactsIndex && contactsIndex.byContactId ? contactsIndex.byContactId : null;
+  const contactRecord = safeContactsIndex ? safeContactsIndex[String(safeItem.contactId || "").trim()] : null;
+  const senderLabel = String(
+    (contactRecord && (contactRecord.display_name || contactRecord.name)) ||
+    participants.contactDisplayName ||
+    participants.externalPhone ||
+    safeItem.senderLabel ||
+    safeItem.sender ||
+    ""
+  ).trim();
+  const senderPhone = String(participants.externalPhone || safeItem.sender || "").trim();
+  const rawSnippet = TL_Menu_BuildPacketSnippet_("whatsapp", "grouped_inbound", String(focus.focusText || "").trim());
+  return Object.assign({}, safeItem, {
+    sender: senderPhone || safeItem.sender,
+    senderLabel: senderLabel || safeItem.senderLabel,
+    rawSnippet: rawSnippet || safeItem.rawSnippet
+  });
+}
+
+function TL_Menu_CollectWhatsAppCommunicationRowsForThread_(threadKey, recentRows) {
+  const safeThreadKey = String(threadKey || "").trim();
+  if (!safeThreadKey) return [];
+  return (recentRows || []).filter(function(item) {
+    if (!item || !item.values) return false;
+    const values = item.values;
+    const channel = String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase();
+    const recordClass = String(TL_Orchestrator_value_(values, "record_class") || "").trim().toLowerCase();
+    if (channel !== "whatsapp") return false;
+    if (recordClass !== "communication") return false;
+    return TL_Menu_WhatsAppThreadKey_(values) === safeThreadKey;
+  }).sort(function(a, b) {
+    return Number(a.rowNumber || 0) - Number(b.rowNumber || 0);
+  });
 }
 
 function TL_Menu_ContactPhoneFromContactId_(contactId) {

@@ -266,3 +266,95 @@ function TL_TestMenu_PacketReplyBeatsFreshRootChoice() {
   Logger.log("TL_TestMenu_PacketReplyBeatsFreshRootChoice: %s", JSON.stringify(out, null, 2));
   return out;
 }
+
+function TL_TestMenu_RefreshWhatsAppReplyPacketItem_SkipsHandledThread() {
+  const groupedValues = TL_INBOX.HEADERS.map(function() { return ""; });
+  groupedValues[TL_colIndex_("channel") - 1] = "whatsapp";
+  groupedValues[TL_colIndex_("record_class") - 1] = "grouped_inbound";
+  groupedValues[TL_colIndex_("direction") - 1] = "incoming";
+  groupedValues[TL_colIndex_("display_phone_number") - 1] = "972506847373";
+  groupedValues[TL_colIndex_("sender") - 1] = "972506847363";
+  groupedValues[TL_colIndex_("receiver") - 1] = "972506847373";
+  groupedValues[TL_colIndex_("contact_id") - 1] = "WA_896133996927016_972506847363";
+  groupedValues[TL_colIndex_("notes") - 1] = "wa_contact_name=Nechama";
+
+  function makeRow(rowNumber, direction, sender, receiver, text) {
+    const values = TL_INBOX.HEADERS.map(function() { return ""; });
+    values[TL_colIndex_("channel") - 1] = "whatsapp";
+    values[TL_colIndex_("record_class") - 1] = "communication";
+    values[TL_colIndex_("direction") - 1] = direction;
+    values[TL_colIndex_("display_phone_number") - 1] = "972506847373";
+    values[TL_colIndex_("sender") - 1] = sender;
+    values[TL_colIndex_("receiver") - 1] = receiver;
+    values[TL_colIndex_("contact_id") - 1] = "WA_896133996927016_972506847363";
+    values[TL_colIndex_("text") - 1] = text;
+    values[TL_colIndex_("notes") - 1] = "wa_contact_name=Nechama";
+    return { rowNumber: rowNumber, values: values };
+  }
+
+  const rows = [
+    makeRow(1, "incoming", "972506847363", "972506847373", "מה שלום מיכל?"),
+    makeRow(2, "outgoing", "972506847373", "972506847363", "היי נחמה, תודה על העדכון לגבי מיכל.")
+  ];
+  const packetItem = {
+    rowNumber: 10,
+    contactId: "WA_896133996927016_972506847363",
+    sender: "972506847373",
+    senderLabel: "972506847373",
+    rawSnippet: "old",
+    summary: "old",
+    proposal: "old"
+  };
+  const refreshed = TL_Menu_RefreshWhatsAppReplyPacketItem_(packetItem, groupedValues, rows, {
+    byContactId: {
+      "WA_896133996927016_972506847363": { display_name: "Nechama" }
+    }
+  });
+  const out = {
+    ok: refreshed === null,
+    refreshed: refreshed
+  };
+  Logger.log("TL_TestMenu_RefreshWhatsAppReplyPacketItem_SkipsHandledThread: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
+function TL_TestMenu_PreparedBossSnapshotsRoundTrip() {
+  if (typeof TL_Menu_ClearPreparedBossSnapshots_ === "function") {
+    TL_Menu_ClearPreparedBossSnapshots_();
+  }
+  const approvalsSet = typeof TL_Menu_SetPreparedApprovalsPacket_ === "function"
+    ? TL_Menu_SetPreparedApprovalsPacket_([{ rowNumber: 1, channel: "whatsapp" }], { source: "test" })
+    : null;
+  const opportunitiesSet = typeof TL_Menu_SetPreparedOpportunitiesPacket_ === "function"
+    ? TL_Menu_SetPreparedOpportunitiesPacket_([{ rowNumber: 2, channel: "whatsapp" }], { source: "test" })
+    : null;
+  const approvals = typeof TL_Menu_GetPreparedApprovalsPacket_ === "function"
+    ? TL_Menu_GetPreparedApprovalsPacket_()
+    : null;
+  const opportunities = typeof TL_Menu_GetPreparedOpportunitiesPacket_ === "function"
+    ? TL_Menu_GetPreparedOpportunitiesPacket_()
+    : null;
+  const out = {
+    ok: !!(approvalsSet && opportunitiesSet && approvals && opportunities &&
+      Array.isArray(approvals.items) && approvals.items.length === 1 &&
+      Array.isArray(opportunities.items) && opportunities.items.length === 1),
+    approvals_count: approvals && Array.isArray(approvals.items) ? approvals.items.length : 0,
+    opportunities_count: opportunities && Array.isArray(opportunities.items) ? opportunities.items.length : 0
+  };
+  Logger.log("TL_TestMenu_PreparedBossSnapshotsRoundTrip: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
+function TL_TestMenu_GetDecisionPacketReplyOptions_Multi() {
+  const out = {
+    ok: false,
+    options: TL_Menu_GetDecisionPacketReplyOptions_({
+      channel: "whatsapp",
+      proposal: "Default reply",
+      proposalOptions: ["Option A", "Option B", "Option C"]
+    })
+  };
+  out.ok = Array.isArray(out.options) && out.options.length === 3 && out.options[0] === "Option A";
+  Logger.log("TL_TestMenu_GetDecisionPacketReplyOptions_Multi: %s", JSON.stringify(out, null, 2));
+  return out;
+}
