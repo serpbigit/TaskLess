@@ -1779,6 +1779,7 @@ function TL_Orchestrator_collectSealedWhatsAppBursts_(rows, options) {
     if (!burst || !burst.latestIncomingRow || !burst.latestTimestamp) return false;
     if ((now.getTime() - burst.latestTimestamp.getTime()) < quietMs) return false;
     if (TL_Orchestrator_burstAlreadySynthesized_(burst, rows)) return false;
+    burst.conversationRows = TL_Orchestrator_collectConversationRowsForBurst_(rows, burst, options);
     return true;
   }).sort(function(a, b) {
     return a.latestTimestamp.getTime() - b.latestTimestamp.getTime();
@@ -1819,6 +1820,80 @@ function TL_Orchestrator_whatsAppMaxMinutes_() {
   return Math.max(TL_Orchestrator_whatsAppQuietMinutes_(), Math.min(Math.floor(raw), 60));
 }
 
+function TL_Orchestrator_whatsAppConversationGapMinutes_() {
+  const raw = Number(TLW_getSetting_("WHATSAPP_CONVERSATION_GAP_MINUTES") || 90);
+  if (!isFinite(raw) || raw <= 0) return 90;
+  return Math.max(TL_Orchestrator_whatsAppQuietMinutes_(), Math.min(Math.floor(raw), 720));
+}
+
+function TL_Orchestrator_whatsAppConversationMaxMinutes_() {
+  const raw = Number(TLW_getSetting_("WHATSAPP_CONVERSATION_MAX_MINUTES") || 240);
+  if (!isFinite(raw) || raw <= 0) return 240;
+  return Math.max(TL_Orchestrator_whatsAppConversationGapMinutes_(), Math.min(Math.floor(raw), 1440));
+}
+
+function TL_Orchestrator_collectConversationRowsForBurst_(allRows, burst, options) {
+  const personKey = String(burst && burst.personKey || "").trim();
+  if (!personKey) return (burst && burst.rows ? burst.rows.slice() : []);
+  const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
+  const gapMs = TL_Orchestrator_whatsAppConversationGapMinutes_() * 60000;
+  const maxMs = TL_Orchestrator_whatsAppConversationMaxMinutes_() * 60000;
+  const anchorRowNumbers = {};
+  (burst && burst.rows ? burst.rows : []).forEach(function(item) {
+    anchorRowNumbers[String(item && item.rowNumber || "")] = true;
+  });
+
+  const threadRows = (allRows || []).filter(function(item) {
+    const values = item && item.values ? item.values : [];
+    if (String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase() !== "whatsapp") return false;
+    if (String(TL_Orchestrator_value_(values, "record_class") || "").trim().toLowerCase() !== "communication") return false;
+    const direction = String(TL_Orchestrator_value_(values, "direction") || "").trim().toLowerCase();
+    if (direction !== "incoming" && direction !== "outgoing") return false;
+    const sender = TLW_normalizePhone_(TL_Orchestrator_value_(values, "sender") || "");
+    if (bossPhone && sender === bossPhone) return false;
+    return TL_Orchestrator_personKeyForValues_(values) === personKey;
+  }).sort(function(a, b) {
+    const at = TL_Orchestrator_rowTimestamp_(a.values).getTime();
+    const bt = TL_Orchestrator_rowTimestamp_(b.values).getTime();
+    if (at !== bt) return at - bt;
+    return a.rowNumber - b.rowNumber;
+  });
+
+  if (!threadRows.length) return (burst && burst.rows ? burst.rows.slice() : []);
+
+  let firstIndex = -1;
+  let lastIndex = -1;
+  threadRows.forEach(function(item, index) {
+    if (!anchorRowNumbers[String(item && item.rowNumber || "")]) return;
+    if (firstIndex === -1) firstIndex = index;
+    lastIndex = index;
+  });
+  if (firstIndex === -1) return (burst && burst.rows ? burst.rows.slice() : []);
+
+  let left = firstIndex;
+  let right = lastIndex;
+  const anchorStart = TL_Orchestrator_rowTimestamp_(threadRows[firstIndex].values).getTime();
+  const anchorEnd = TL_Orchestrator_rowTimestamp_(threadRows[lastIndex].values).getTime();
+
+  while (left > 0) {
+    const prevTs = TL_Orchestrator_rowTimestamp_(threadRows[left - 1].values).getTime();
+    const nextTs = TL_Orchestrator_rowTimestamp_(threadRows[left].values).getTime();
+    if ((nextTs - prevTs) > gapMs) break;
+    if ((anchorEnd - prevTs) > maxMs) break;
+    left--;
+  }
+
+  while (right < threadRows.length - 1) {
+    const prevTs = TL_Orchestrator_rowTimestamp_(threadRows[right].values).getTime();
+    const nextTs = TL_Orchestrator_rowTimestamp_(threadRows[right + 1].values).getTime();
+    if ((nextTs - prevTs) > gapMs) break;
+    if ((nextTs - anchorStart) > maxMs) break;
+    right++;
+  }
+
+  return threadRows.slice(left, right + 1);
+}
+
 function TL_Orchestrator_burstAlreadySynthesized_(burst, rows) {
   const latestRowNumber = Number(burst && burst.latestIncomingRow && burst.latestIncomingRow.rowNumber || 0);
   if (!latestRowNumber) return false;
@@ -1840,9 +1915,18 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
   if (!rows.length) return null;
   const latest = burst.latestIncomingRow || rows[rows.length - 1];
   const latestValues = latest.values;
-  const participants = TL_Orchestrator_resolveBurstParticipants_(rows, latestValues);
-  const groupedText = TL_Orchestrator_renderBurstText_(rows, participants);
-  const triage = TL_Orchestrator_buildBurstTriage_(groupedText, latestValues, rows, options);
+  const conversationRows = (burst && burst.conversationRows ? burst.conversationRows : rows).slice().sort(function(a, b) {
+    return a.rowNumber - b.rowNumber;
+  });
+  const participants = TL_Orchestrator_resolveBurstParticipants_(conversationRows, latestValues);
+  const groupedText = TL_Orchestrator_renderBurstText_(conversationRows, participants);
+  const focus = TL_Orchestrator_buildConversationFocus_(conversationRows, participants);
+  const triage = TL_Orchestrator_buildBurstTriage_(groupedText, latestValues, conversationRows, Object.assign({}, options || {}, {
+    focusText: focus.focusText,
+    hasOpenInbound: focus.hasOpenInbound,
+    latestDirection: focus.latestDirection,
+    closureHint: focus.closureHint
+  }));
   const sourceRootId = String(TL_Orchestrator_value_(latestValues, "root_id") || "").trim();
   const contactId = String(TL_Orchestrator_value_(latestValues, "contact_id") || "").trim();
   const sender = String(participants.externalPhone || TL_Orchestrator_value_(latestValues, "sender") || "").trim();
@@ -1856,19 +1940,23 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
   const recordId = "SYN_" + groupId;
   const now = new Date();
   const nowIso = now.toISOString();
-  const summary = String(triage.summary || "").trim() || TL_Orchestrator_buildBurstFallbackSummary_(rows);
+  const summary = String(triage.summary || "").trim() || TL_Orchestrator_buildBurstFallbackSummary_(conversationRows);
   const proposal = String(triage.proposal || "").trim() || TL_Orchestrator_buildBurstFallbackProposal_(sender);
-  const responseExpected = typeof TL_Activity_responseExpectedFromSuggestedAction_ === "function"
+  const aiResponseExpected = typeof TL_Activity_responseExpectedFromSuggestedAction_ === "function"
     ? TL_Activity_responseExpectedFromSuggestedAction_(triage.suggested_action)
     : true;
+  const responseExpected = !focus.closureHint && focus.hasOpenInbound && aiResponseExpected;
   const attentionRequired = typeof TL_Activity_attentionRequiredFromSuggestedAction_ === "function"
-    ? TL_Activity_attentionRequiredFromSuggestedAction_(triage.suggested_action)
+    ? TL_Activity_attentionRequiredFromSuggestedAction_(responseExpected ? triage.suggested_action : "ignore")
     : responseExpected;
   const rawJson = TLW_safeStringify_({
     source: "TL_Orchestrator_DealWiseBurst",
     burst_group_id: groupId,
     burst_row_numbers: rows.map(function(item) { return item.rowNumber; }),
-    grouped_text: groupedText
+    grouped_text: groupedText,
+    focus_text: String(focus.focusText || "").trim(),
+    conversation_row_numbers: conversationRows.map(function(item) { return item.rowNumber; }),
+    closure_hint: focus.closureHint
   }, 4000);
 
   return {
@@ -1888,7 +1976,7 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
       receiver: receiver,
       message_id: recordId,
       message_type: "text",
-      text: groupedText,
+      text: String(focus.focusText || groupedText).trim(),
       ai_summary: summary,
       ai_proposal: responseExpected ? proposal : "",
       approval_required: responseExpected ? "true" : "false",
@@ -1907,6 +1995,7 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
         "dealwise_group_first_row=" + String(rows[0].rowNumber || 0),
         "dealwise_group_latest_row=" + String(latest.rowNumber || 0),
         "dealwise_group_size=" + String(rows.length),
+        "dealwise_conversation_size=" + String(conversationRows.length),
         "dealwise_group_latest_message_id=" + latestMessageId,
         "dealwise_group_external_sender=" + sender,
         "dealwise_group_business_line=" + receiver,
@@ -1934,7 +2023,7 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
       suggested_action: String(triage.suggested_action || "").trim(),
       thread_id: "",
       thread_subject: "",
-      latest_message_at: latestMessageId ? TL_Orchestrator_rowTimestamp_(latestValues).toISOString() : "",
+      latest_message_at: latestMessageId ? TL_Orchestrator_rowTimestamp_((conversationRows[conversationRows.length - 1] || latest).values).toISOString() : "",
       external_url: "",
       participants_json: "",
       capture_language: String(TL_Orchestrator_value_(latestValues, "capture_language") || "").trim(),
@@ -1957,7 +2046,7 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
       business_history: summary,
       current_state: summary,
       last_signal_summary: summary,
-      last_signal_at: TL_Orchestrator_rowTimestamp_(latestValues).toISOString(),
+      last_signal_at: TL_Orchestrator_rowTimestamp_((conversationRows[conversationRows.length - 1] || latest).values).toISOString(),
       last_inbound_at: TL_Orchestrator_rowTimestamp_(latestValues).toISOString(),
       next_action: TL_Orchestrator_buildBurstNextAction_(triage, summary),
       next_step_summary: TL_Orchestrator_buildBurstNextAction_(triage, summary),
@@ -1967,6 +2056,74 @@ function TL_Orchestrator_buildBurstSynthesis_(burst, options) {
       summary: summary
     }
   };
+}
+
+function TL_Orchestrator_buildConversationFocus_(rows, participants) {
+  const sorted = (rows || []).slice().sort(function(a, b) {
+    return a.rowNumber - b.rowNumber;
+  });
+  if (!sorted.length) {
+    return {
+      focusRows: [],
+      focusText: "",
+      hasOpenInbound: false,
+      latestDirection: "",
+      closureHint: false
+    };
+  }
+  let lastOutgoingIndex = -1;
+  sorted.forEach(function(item, index) {
+    const direction = String(TL_Orchestrator_value_(item.values, "direction") || "").trim().toLowerCase();
+    if (direction === "outgoing") lastOutgoingIndex = index;
+  });
+  let focusRows = [];
+  if (lastOutgoingIndex === -1) {
+    focusRows = sorted.filter(function(item) {
+      return String(TL_Orchestrator_value_(item.values, "direction") || "").trim().toLowerCase() === "incoming";
+    });
+  } else {
+    focusRows = sorted.slice(lastOutgoingIndex + 1).filter(function(item) {
+      return String(TL_Orchestrator_value_(item.values, "direction") || "").trim().toLowerCase() === "incoming";
+    });
+  }
+  const latestValues = sorted[sorted.length - 1].values;
+  const latestDirection = String(TL_Orchestrator_value_(latestValues, "direction") || "").trim().toLowerCase();
+  const latestText = String(TL_Orchestrator_value_(latestValues, "text") || "").trim();
+  const closureHint = latestDirection === "incoming" && TL_Orchestrator_hasResolvedByContactHint_(latestText);
+  return {
+    focusRows: focusRows,
+    focusText: TL_Orchestrator_renderBurstText_(focusRows.length ? focusRows : sorted.slice(-1), participants),
+    hasOpenInbound: focusRows.length > 0 && latestDirection === "incoming",
+    latestDirection: latestDirection,
+    closureHint: closureHint
+  };
+}
+
+function TL_Orchestrator_hasResolvedByContactHint_(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (!normalized) return false;
+  const phrases = [
+    "never mind",
+    "nevermind",
+    "found the solution",
+    "found a solution",
+    "solved it",
+    "sorted now",
+    "all good now",
+    "it's fine now",
+    "its fine now",
+    "לא משנה",
+    "הסתדרתי",
+    "מצאתי את הפתרון",
+    "מצאתי פתרון",
+    "הכל טוב",
+    "אין צורך",
+    "טופל",
+    "סודר"
+  ];
+  return phrases.some(function(phrase) {
+    return normalized.indexOf(phrase) !== -1;
+  });
 }
 
 function TL_Orchestrator_renderBurstText_(rows, participants) {
@@ -2068,9 +2225,13 @@ function TL_Orchestrator_buildBurstTriage_(groupedText, latestValues, sourceRows
   };
   if (!text) return fallback;
   const promptFn = options && typeof options.promptFn === "function" ? options.promptFn : null;
+  const focusText = String(options && options.focusText || "").trim();
+  const hasOpenInbound = !(options && options.hasOpenInbound === false);
+  const latestDirection = String(options && options.latestDirection || "").trim().toLowerCase();
+  const closureHint = !!(options && options.closureHint);
   if (promptFn) {
     try {
-      return Object.assign({}, fallback, promptFn(text, latestValues) || {});
+      return Object.assign({}, fallback, promptFn(text, latestValues, options) || {});
     } catch (err) {}
   }
   if (typeof TL_AI_callPrompt_ !== "function") return fallback;
@@ -2085,8 +2246,20 @@ function TL_Orchestrator_buildBurstTriage_(groupedText, latestValues, sourceRows
         excludeWhatsAppSourceIds: excludeWhatsAppSourceIds
       })
       : null;
-    const replyLanguage = TL_AI_resolveReplyLanguage_(text, cfg.language, cfg.replyLanguagePolicy);
-    const prompt = TL_AI_buildTriagePrompt_(text, cfg.language, cfg.bossName, draftContext && draftContext.promptBrief, replyLanguage);
+    const promptText = [
+      "WhatsApp conversation window:",
+      text,
+      "",
+      "Latest unresolved inbound that may still need a reply:",
+      focusText || "No unresolved inbound remains. Decide whether the thread is already handled or resolved.",
+      "",
+      "Deterministic hints:",
+      "latest_direction=" + (latestDirection || "unknown"),
+      "has_open_inbound=" + (hasOpenInbound ? "true" : "false"),
+      "closure_hint=" + (closureHint ? "true" : "false")
+    ].join("\n");
+    const replyLanguage = TL_AI_resolveReplyLanguage_(promptText, cfg.language, cfg.replyLanguagePolicy);
+    const prompt = TL_AI_buildTriagePrompt_(promptText, cfg.language, cfg.bossName, draftContext && draftContext.promptBrief, replyLanguage);
     const result = TL_AI_callPrompt_(prompt);
     const raw = result && result.raw_json ? result.raw_json : {};
     return {

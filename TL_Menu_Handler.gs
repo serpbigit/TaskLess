@@ -5022,6 +5022,7 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
   const normalizedMode = String(mode || "all").trim().toLowerCase();
   if (typeof TL_Orchestrator_readRecentRows_ !== "function") return [];
   const latest = {};
+  const latestWhatsAppThreadRow = {};
   const contactsIndex = typeof TL_Session_getContactsIndex_ === "function" ? TL_Session_getContactsIndex_() : null;
   const topicSummaryMap = TL_Menu_TopicSummaryMap_();
   const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
@@ -5039,6 +5040,14 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
     const nextVersion = Number(TL_Orchestrator_value_(values, "record_version") || 0);
     if (!current || nextVersion > currentVersion || (nextVersion === currentVersion && Number(item.rowNumber || 0) > Number(current.rowNumber || 0))) {
       latest[key] = item;
+    }
+    const channel = String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase();
+    const recordClass = String(TL_Orchestrator_value_(values, "record_class") || "").trim().toLowerCase();
+    if (channel === "whatsapp" && recordClass !== "interface") {
+      const threadKey = TL_Menu_WhatsAppThreadKey_(values);
+      if (threadKey && (!latestWhatsAppThreadRow[threadKey] || Number(item.rowNumber || 0) > Number(latestWhatsAppThreadRow[threadKey] || 0))) {
+        latestWhatsAppThreadRow[threadKey] = Number(item.rowNumber || 0);
+      }
     }
   });
   const items = [];
@@ -5061,6 +5070,7 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
     const threadSubject = String(TL_Orchestrator_value_(values, "thread_subject") || "").trim();
     const textValue = String(TL_Orchestrator_value_(values, "text") || "").trim();
     const contactId = String(TL_Orchestrator_value_(values, "contact_id") || "").trim();
+    const threadKey = channel === "whatsapp" ? TL_Menu_WhatsAppThreadKey_(values) : "";
     const topicId = String(TL_Orchestrator_value_(values, "topic_id") || "").trim();
     const notes = String(TL_Orchestrator_value_(values, "notes") || "");
     const payload = channel === "email" && typeof TL_Email_parseInboxPayload_ === "function"
@@ -5087,6 +5097,13 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
       if (priority !== "high" && importance !== "high" && suggested !== "reply_now" && suggested !== "follow_up") return;
     }
     if (normalizedMode === "drafts" && !String(TL_Orchestrator_value_(values, "ai_proposal") || "").trim()) return;
+    if (normalizedMode === "reply" &&
+        channel === "whatsapp" &&
+        recordClass === "grouped_inbound" &&
+        threadKey &&
+        Number(latestWhatsAppThreadRow[threadKey] || 0) > Number(item.rowNumber || 0)) {
+      return;
+    }
     const classified = typeof TL_BossPolicy_classifyItem_ === "function" ? TL_BossPolicy_classifyItem_(item, {}) : null;
     const packetItem = {
       key: key,
@@ -5200,6 +5217,17 @@ function TL_Menu_ContactPhoneFromContactId_(contactId) {
   if (!safe) return "";
   const match = safe.match(/_(\d{6,})$/);
   return match ? TLW_normalizePhone_(match[1]) : "";
+}
+
+function TL_Menu_WhatsAppThreadKey_(values) {
+  const contactId = String(TL_Orchestrator_value_(values, "contact_id") || "").trim();
+  if (contactId) return "contact:" + contactId;
+  const displayPhoneNumber = TLW_normalizePhone_(TL_Orchestrator_value_(values, "display_phone_number") || "");
+  const sender = TLW_normalizePhone_(TL_Orchestrator_value_(values, "sender") || "");
+  const receiver = TLW_normalizePhone_(TL_Orchestrator_value_(values, "receiver") || "");
+  if (sender && sender !== displayPhoneNumber) return "phone:" + sender;
+  if (receiver && receiver !== displayPhoneNumber) return "phone:" + receiver;
+  return "";
 }
 
 function TL_Menu_BuildPacketChannelLabel_(channel, messageType) {
