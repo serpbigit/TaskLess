@@ -93,9 +93,21 @@ function TL_Menu_T_(hebrewText, englishText) {
   return TL_Language_UiText_(String(hebrewText || englishText || ""), targetLanguage);
 }
 
+function TL_Menu_StaticText_(hebrewText, englishText) {
+  return TL_Menu_IsEnglishUi_() && String(englishText || "").trim()
+    ? String(englishText || "").trim()
+    : String(hebrewText || englishText || "").trim();
+}
+
+function TL_Menu_StaticBlock_(lines) {
+  return (lines || []).filter(function(line) {
+    return line !== null && line !== undefined;
+  }).join("\n");
+}
+
 function TL_Menu_HebrewBlock_(lines) {
   return TL_Menu_T_((lines || []).filter(function(line) {
-    return line !== null && line !== undefined && line !== "";
+    return line !== null && line !== undefined;
   }).join("\n"));
 }
 
@@ -110,19 +122,16 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
   const text = rawText.toLowerCase();
   TL_MENU_RUNTIME_WAID = bossWaId;
   try {
-    TL_Menu_CleanupStaleFlow_(bossWaId);
-    const firstUse = TL_Menu_IsFirstUse_(bossWaId);
-
     if (!text) {
+      TL_Menu_CleanupStaleFlow_(bossWaId);
+      const firstUse = TL_Menu_IsFirstUse_(bossWaId);
       TL_Menu_MarkOnboarded_(bossWaId);
       return firstUse ? TL_Menu_BuildWelcomeMenuReply_() : TL_Menu_BuildMenuReply_();
     }
 
     if (TL_Menu_IsMenuCommand_(rawText)) {
-      TL_Menu_MarkOnboarded_(bossWaId);
-      TL_Menu_PauseForMenuCommand_(bossWaId);
-      TL_Menu_SetState_(bossWaId, TL_MENU_STATES.ROOT, { source: "menu_command" });
-      return firstUse ? TL_Menu_BuildWelcomeMenuReply_() : TL_Menu_BuildMenuReply_();
+      TL_Menu_PrepareRootMenuCommand_(bossWaId);
+      return TL_Menu_BuildMenuReply_();
     }
 
     if (TL_Menu_IsEndCommand_(rawText)) {
@@ -153,6 +162,9 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
       TL_Menu_MarkOnboarded_(bossWaId);
       return TL_Menu_BuildContextualHelp_(bossWaId);
     }
+
+    TL_Menu_CleanupStaleFlow_(bossWaId);
+    const firstUse = TL_Menu_IsFirstUse_(bossWaId);
 
     if (TL_Menu_IsIdleSession_(bossWaId)) {
       TL_Menu_MarkOnboarded_(bossWaId);
@@ -283,31 +295,42 @@ function TL_Menu_HandleBossMessage_(ev, inboxRow, options) {
 }
 
 function TL_Menu_BuildMenuReply_() {
+  return TL_Menu_BuildStaticMenuReply_();
+}
+
+function TL_Menu_BuildStaticMenuReply_() {
   const bossName = String(TLW_getSetting_("BOSS_NAME") || "").trim();
-  return TL_Menu_HebrewBlock_([
-    bossName ? ("שלום " + bossName + ",") : "שלום,",
-    "DealWise",
-    "אפשר לבחור מסלול:",
+  return TL_Menu_StaticBlock_([
+    bossName
+      ? TL_Menu_StaticText_("שלום " + bossName + ",", "Hello " + bossName + ",")
+      : TL_Menu_StaticText_("שלום,", "Hello,"),
+    TL_Menu_StaticText_("בחר אפשרות:", "Choose an option:"),
     "",
     "1. 💬 Messages That Need Your Reply",
     "2. 👤 Update Contact Info",
     "3. 🎯 Next Steps To Close Deals",
     "4. ❓ Help",
     "",
-    "פקודות גלובליות: menu | back | end | help",
+    TL_Menu_StaticText_("*שלח את מספר הבחירה שלך (למשל 1 ו-Send).*", "*Send the number of your choice (e.g. 1 and Send).*"),
     "",
-    "שלח את הספרה של בחירתך"
+    "",
+    TL_Menu_StaticText_("פקודות גלובליות: menu | back | end | help", "Global commands: menu | back | end | help"),
   ]);
 }
 
 function TL_Menu_BuildWelcomeMenuReply_() {
+  return TL_Menu_BuildStaticWelcomeMenuReply_();
+}
+
+function TL_Menu_BuildStaticWelcomeMenuReply_() {
   const bossName = String(TLW_getSetting_("BOSS_NAME") || "").trim();
-  return TL_Menu_HebrewBlock_([
-    bossName ? ("שלום " + bossName + ",") : "שלום,",
-    TL_Menu_T_("אני DealWise, העוזר שלך לניהול תקשורת ו-CRM.", "I'm DealWise, your communication and CRM assistant."),
-    TL_Menu_T_("אפשר להתחיל מכאן:", "You can start here:"),
+  return TL_Menu_StaticBlock_([
+    bossName
+      ? TL_Menu_StaticText_("שלום " + bossName + ",", "Hello " + bossName + ",")
+      : TL_Menu_StaticText_("שלום,", "Hello,"),
+    TL_Menu_StaticText_("אני העוזר שלך לניהול תקשורת ו-CRM.", "I'm your communication and CRM assistant."),
     "",
-    TL_Menu_BuildMenuReply_()
+    TL_Menu_BuildStaticMenuReply_()
   ]);
 }
 
@@ -1199,27 +1222,31 @@ function TL_Menu_BuildSettingsLanguageMenu_() {
 }
 
 function TL_Menu_BuildHelpMenu_() {
-  return TL_Menu_HebrewBlock_([
-    "עזרה",
-    "1. פתח את תור התשובות",
-    "2. הוסף זיכרון CRM לאיש קשר",
-    "3. הצג הזדמנויות עם נוסח מוכן להעתקה",
-    "4. הסבר על הפקודות הקיימות",
+  return TL_Menu_BuildStaticHelpMenu_();
+}
+
+function TL_Menu_BuildStaticHelpMenu_() {
+  return TL_Menu_StaticBlock_([
+    TL_Menu_StaticText_("עזרה", "Help"),
+    TL_Menu_StaticText_("1. פתח את תור התשובות", "1. Open the reply queue"),
+    TL_Menu_StaticText_("2. הוסף זיכרון CRM לאיש קשר", "2. Update contact memory"),
+    TL_Menu_StaticText_("3. הצג הזדמנויות עם נוסח מוכן להעתקה", "3. Show next deal steps"),
+    TL_Menu_StaticText_("4. הסבר על הפקודות הקיימות", "4. Explain the available commands"),
     "",
-    "דוגמאות:",
-    "Messages That Need Your Reply: מה מחכה לי למענה?",
-    "Update Contact Info: תוסיפי שדוד רגיש למחיר",
-    "Next Steps To Close Deals: על מי כדאי לי לעבוד עכשיו?",
+    TL_Menu_StaticText_("דוגמאות:", "Examples:"),
+    TL_Menu_StaticText_("Messages That Need Your Reply: מה מחכה לי למענה?", "Messages That Need Your Reply: what needs my reply?"),
+    TL_Menu_StaticText_("Update Contact Info: תוסיפי שדוד רגיש למחיר", "Update Contact Info: add that David is price sensitive"),
+    TL_Menu_StaticText_("Next Steps To Close Deals: על מי כדאי לי לעבוד עכשיו?", "Next Steps To Close Deals: who should I move forward with now?"),
     "",
-    "פקודות גלובליות:",
+    TL_Menu_StaticText_("פקודות גלובליות:", "Global commands:"),
     "menu = main menu",
     "back = one step back",
     "end = end boss chat and switch to standby",
     "resume = continue paused flow",
     "help = contextual help",
     "",
-    "5. חזרה לתפריט הראשי",
-    "שלח את מספר האפשרות שתבחר"
+    TL_Menu_StaticText_("5. חזרה לתפריט הראשי", "5. Back to the main menu"),
+    TL_Menu_StaticText_("שלח את מספר האפשרות שתבחר", "Send the number of your choice")
   ]);
 }
 
@@ -2573,6 +2600,164 @@ function TL_Menu_PauseForMenuCommand_(waId) {
     paused: !!(activePaused && activePaused.paused),
     packet_cleared: true
   };
+}
+
+function TL_Menu_PrepareRootMenuCommand_(waId) {
+  const safeWaId = String(waId || "").trim();
+  if (!safeWaId) return { ok: false };
+
+  const props = PropertiesService.getScriptProperties();
+  const activeKey = typeof TL_ActiveItem_key_ === "function" ? TL_ActiveItem_key_(safeWaId) : "";
+  const hasActiveItem = !!String(activeKey ? (props.getProperty(activeKey) || "") : "").trim();
+
+  if (hasActiveItem) {
+    TL_Menu_PauseForMenuCommand_(safeWaId);
+  } else {
+    props.deleteProperty(TL_MENU.PACKET_KEY_PREFIX + safeWaId);
+  }
+
+  const nextMeta = {
+    state: TL_MENU_STATES.ROOT,
+    updated_at: new Date().toISOString(),
+    session_version: TL_Menu_SessionRuntimeVersion_(),
+    source: "menu_command"
+  };
+  const nextProps = {};
+  nextProps[TL_MENU.ONBOARDED_KEY_PREFIX + safeWaId] = "true";
+  nextProps[TL_MENU.STATE_KEY_PREFIX + safeWaId] = TL_MENU_STATES.ROOT;
+  nextProps[TL_MENU.STATE_META_KEY_PREFIX + safeWaId] = JSON.stringify(nextMeta);
+  props.setProperties(nextProps, false);
+
+  return {
+    ok: true,
+    had_active_item: hasActiveItem
+  };
+}
+
+function TL_Menu_BuildStaticEndReply_() {
+  return TL_Menu_StaticText_(
+    "שיחת הבוס הסתיימה. אני במצב המתנה. אפשר להתחיל צ׳אט חדש בכל רגע על ידי שליחת כל תו.",
+    "Boss AI chat ended. I am now on standby. You can start a new chat at any time by sending any character."
+  );
+}
+
+function TL_Menu_BuildStaticExitReply_() {
+  return TL_Menu_StaticText_(
+    "איפסתי את הזרימה הנוכחית. חזרנו למצב נקי. אם תרצה, כתוב \"menu\" כדי להתחיל מחדש.",
+    "I reset the current flow. We are back to a clean state. If you want, type \"menu\" to start again."
+  );
+}
+
+function TL_Menu_HandleHardCommandFast_(waId, rawText) {
+  const safeWaId = String(waId || "").trim();
+  const text = String(rawText || "").trim();
+  if (!safeWaId || !text) return null;
+
+  if (TL_Menu_IsMenuCommand_(text)) {
+    TL_Menu_PrepareRootMenuCommand_(safeWaId);
+    return {
+      command: "menu",
+      reply_text: TL_Menu_BuildStaticMenuReply_(),
+      should_warm: true
+    };
+  }
+
+  if (TL_Menu_IsEndCommand_(text)) {
+    TL_Menu_MarkOnboarded_(safeWaId);
+    TL_Menu_ResetSession_(safeWaId);
+    TL_Menu_SetIdleSession_(safeWaId);
+    return {
+      command: "end",
+      reply_text: TL_Menu_BuildStaticEndReply_(),
+      should_warm: false
+    };
+  }
+
+  if (TL_Menu_IsExitCommand_(text)) {
+    TL_Menu_MarkOnboarded_(safeWaId);
+    TL_Menu_ResetSession_(safeWaId);
+    return {
+      command: "exit",
+      reply_text: TL_Menu_BuildStaticExitReply_(),
+      should_warm: false
+    };
+  }
+
+  if (TL_Menu_IsHelpCommand_(text)) {
+    TL_Menu_MarkOnboarded_(safeWaId);
+    return {
+      command: "help",
+      reply_text: TL_Menu_BuildStaticHelpMenu_(),
+      should_warm: true
+    };
+  }
+
+  if (TL_Menu_IsBackCommand_(text)) {
+    TL_Menu_MarkOnboarded_(safeWaId);
+    return {
+      command: "back",
+      reply_text: TL_Menu_HandleBackCommand_(safeWaId),
+      should_warm: true
+    };
+  }
+
+  return null;
+}
+
+function TL_Menu_HandlePassiveWakeFast_(waId, rawText) {
+  const safeWaId = String(waId || "").trim();
+  const text = String(rawText || "").trim();
+  if (!safeWaId || !text) return null;
+  if (TL_Menu_IsMenuCommand_(text) || TL_Menu_IsHelpCommand_(text) || TL_Menu_IsBackCommand_(text) || TL_Menu_IsEndCommand_(text) || TL_Menu_IsExitCommand_(text)) {
+    return null;
+  }
+
+  if (TL_Menu_IsIdleSession_(safeWaId)) {
+    TL_Menu_MarkOnboarded_(safeWaId);
+    TL_Menu_SetState_(safeWaId, TL_MENU_STATES.ROOT, { source: "idle_wake_fast" });
+    return {
+      command: "idle_wake",
+      reply_text: TL_Menu_BuildStaticMenuReply_(),
+      should_warm: true
+    };
+  }
+
+  if (TL_Menu_ShouldDefaultToMenuOnStaleInteraction_(safeWaId, text)) {
+    TL_Menu_ResetSession_(safeWaId);
+    TL_Menu_MarkOnboarded_(safeWaId);
+    TL_Menu_SetState_(safeWaId, TL_MENU_STATES.ROOT, { source: "stale_restart_fast" });
+    return {
+      command: "stale_restart",
+      reply_text: TL_Menu_BuildStaticMenuReply_(),
+      should_warm: true
+    };
+  }
+
+  return null;
+}
+
+function TL_Menu_TryWarmLikelyNextSteps_(waId, context) {
+  const safeWaId = String(waId || "").trim();
+  if (!safeWaId) return { ok: false, reason: "missing_wa_id" };
+  const startedAt = Date.now();
+  try {
+    const snapshots = TL_Menu_PrepareBossSnapshots_();
+    return {
+      ok: true,
+      source: String(context && context.source || "menu_fast_lane").trim() || "menu_fast_lane",
+      command: String(context && context.command || "").trim(),
+      elapsed_ms: Date.now() - startedAt,
+      snapshots: snapshots
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      source: String(context && context.source || "menu_fast_lane").trim() || "menu_fast_lane",
+      command: String(context && context.command || "").trim(),
+      elapsed_ms: Date.now() - startedAt,
+      error: String(e && e.stack ? e.stack : e)
+    };
+  }
 }
 
 function TL_Menu_HandleBackCommand_(waId) {

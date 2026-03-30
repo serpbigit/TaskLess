@@ -87,7 +87,7 @@ function TL_TestMenu_FirstUseWelcome() {
     phone_number_id: "896133996927016"
   }, null, {});
   const onboarded = typeof TL_Menu_IsFirstUse_ === "function" ? !TL_Menu_IsFirstUse_(bossPhone) : false;
-  const ok = onboarded && String(reply || "").toLowerCase().indexOf("dealwise") !== -1;
+  const ok = onboarded && String(reply || "").toLowerCase().indexOf("choose an option") !== -1;
   const out = { ok: ok, onboarded: onboarded, reply_preview: String(reply || "").slice(0, 160) };
   Logger.log("TL_TestMenu_FirstUseWelcome: %s", JSON.stringify(out, null, 2));
   return out;
@@ -356,5 +356,159 @@ function TL_TestMenu_GetDecisionPacketReplyOptions_Multi() {
   };
   out.ok = Array.isArray(out.options) && out.options.length === 3 && out.options[0] === "Option A";
   Logger.log("TL_TestMenu_GetDecisionPacketReplyOptions_Multi: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
+function TL_TestMenu_DecisionPacketRoundTrip_PreservesProposalOptions() {
+  const waId = "972552630035";
+  TL_Menu_ClearDecisionPacket_(waId);
+  TL_Menu_SetDecisionPacket_(waId, {
+    kind: "decision",
+    stage: "one_by_one",
+    cursor: 0,
+    created_at: new Date().toISOString(),
+    items: [{
+      rowNumber: 68,
+      channel: "whatsapp",
+      summary: "Client asks for a meeting later today.",
+      proposal: "Yes, I can join later today.",
+      proposalOptions: ["Yes, I can join later today.", "What time works for you?", "I can't today, can we move it?"]
+    }]
+  });
+  const packet = TL_Menu_GetDecisionPacket_(waId);
+  const out = {
+    ok: !!(packet && packet.items && packet.items[0] && Array.isArray(packet.items[0].proposalOptions) && packet.items[0].proposalOptions.length === 3),
+    option_count: packet && packet.items && packet.items[0] && Array.isArray(packet.items[0].proposalOptions)
+      ? packet.items[0].proposalOptions.length
+      : 0
+  };
+  Logger.log("TL_TestMenu_DecisionPacketRoundTrip_PreservesProposalOptions: %s", JSON.stringify(out, null, 2));
+  TL_Menu_ClearDecisionPacket_(waId);
+  return out;
+}
+
+function TL_TestMenu_StaleInteractionDefaultsToMenu() {
+  const waId = "972552630035";
+  PropertiesService.getScriptProperties().setProperty("BOSS_CONTEXT_RESTART_MINUTES", "15");
+  PropertiesService.getScriptProperties().setProperty(TL_MENU.LAST_INTERACTION_KEY_PREFIX + waId, JSON.stringify({
+    at: new Date(Date.now() - (16 * 60 * 1000)).toISOString(),
+    text: "old",
+    session_version: TL_Menu_SessionRuntimeVersion_()
+  }));
+  TL_Menu_ResetSession_(waId);
+  const out = {
+    ok: TL_Menu_ShouldDefaultToMenuOnStaleInteraction_(waId, "h", Date.now()) === true
+  };
+  Logger.log("TL_TestMenu_StaleInteractionDefaultsToMenu: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
+function TL_TestMenu_EndCommandCreatesIdleStandby() {
+  const waId = "972552630035";
+  TL_Menu_ResetSession_(waId);
+  TL_Menu_MarkOnboarded_(waId);
+  TL_Menu_SetState_(waId, TL_MENU_STATES.ROOT, { source: "menu_command" });
+  const reply = TL_Menu_HandleBossMessage_({
+    from: waId,
+    text: "end",
+    recipient_id: "",
+    phone_number_id: "896133996927016"
+  }, null, {});
+  const out = {
+    ok: TL_Menu_IsIdleSession_(waId) === true && String(reply || "").toLowerCase().indexOf("standby") !== -1,
+    idle: TL_Menu_IsIdleSession_(waId),
+    reply_preview: String(reply || "").slice(0, 160)
+  };
+  Logger.log("TL_TestMenu_EndCommandCreatesIdleStandby: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
+function TL_TestMenu_IdleWakeReturnsMainMenu() {
+  const waId = "972552630035";
+  TL_Menu_ResetSession_(waId);
+  TL_Menu_MarkOnboarded_(waId);
+  TL_Menu_SetIdleSession_(waId);
+  const reply = TL_Menu_HandleBossMessage_({
+    from: waId,
+    text: "h",
+    recipient_id: "",
+    phone_number_id: "896133996927016"
+  }, null, {});
+  const stateMeta = TL_Menu_GetStateMeta_(waId) || {};
+  const out = {
+    ok: TL_Menu_IsIdleSession_(waId) === false &&
+      String(stateMeta.source || "").trim() === "idle_wake" &&
+      String(reply || "").toLowerCase().indexOf("choose an option") !== -1,
+    idle_after: TL_Menu_IsIdleSession_(waId),
+    state_source: String(stateMeta.source || "").trim(),
+    reply_preview: String(reply || "").slice(0, 160)
+  };
+  Logger.log("TL_TestMenu_IdleWakeReturnsMainMenu: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
+function TL_TestMenu_GlobalCommandsAreCaseInsensitive() {
+  const out = {
+    ok: TL_Menu_IsMenuCommand_("Menu") === true &&
+      TL_Menu_IsMenuCommand_("menu") === true &&
+      TL_Menu_IsHelpCommand_("Help") === true &&
+      TL_Menu_IsBackCommand_("Back") === true &&
+      TL_Menu_IsEndCommand_("End") === true,
+    menu_upper: TL_Menu_IsMenuCommand_("Menu"),
+    menu_lower: TL_Menu_IsMenuCommand_("menu"),
+    help_upper: TL_Menu_IsHelpCommand_("Help"),
+    back_upper: TL_Menu_IsBackCommand_("Back"),
+    end_upper: TL_Menu_IsEndCommand_("End")
+  };
+  Logger.log("TL_TestMenu_GlobalCommandsAreCaseInsensitive: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
+function TL_TestMenu_HardCommandFastMenu() {
+  const bossPhone = String(TLW_getSetting_("BOSS_PHONE") || "").trim();
+  if (!bossPhone) throw new Error("Missing BOSS_PHONE");
+  if (typeof TL_Menu_ResetSession_ === "function") TL_Menu_ResetSession_(bossPhone);
+  const reply = TL_Menu_HandleHardCommandFast_(bossPhone, "menu");
+  const out = {
+    ok: !!reply &&
+      String(reply.command || "") === "menu" &&
+      !!reply.should_warm &&
+      String(reply.reply_text || "").toLowerCase().indexOf("choose an option") !== -1,
+    reply: reply
+  };
+  Logger.log("TL_TestMenu_HardCommandFastMenu: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
+function TL_TestMenu_HardCommandFastEnd() {
+  const bossPhone = String(TLW_getSetting_("BOSS_PHONE") || "").trim();
+  if (!bossPhone) throw new Error("Missing BOSS_PHONE");
+  const reply = TL_Menu_HandleHardCommandFast_(bossPhone, "end");
+  const out = {
+    ok: !!reply &&
+      String(reply.command || "") === "end" &&
+      !reply.should_warm &&
+      String(reply.reply_text || "").toLowerCase().indexOf("standby") !== -1,
+    reply: reply,
+    idle: typeof TL_Menu_IsIdleSession_ === "function" ? TL_Menu_IsIdleSession_(bossPhone) : null
+  };
+  Logger.log("TL_TestMenu_HardCommandFastEnd: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
+function TL_TestMenu_PassiveWakeFastMenu() {
+  const bossPhone = String(TLW_getSetting_("BOSS_PHONE") || "").trim();
+  if (!bossPhone) throw new Error("Missing BOSS_PHONE");
+  if (typeof TL_Menu_ResetSession_ === "function") TL_Menu_ResetSession_(bossPhone);
+  if (typeof TL_Menu_SetIdleSession_ === "function") TL_Menu_SetIdleSession_(bossPhone);
+  const reply = TL_Menu_HandlePassiveWakeFast_(bossPhone, "x");
+  const out = {
+    ok: !!reply &&
+      String(reply.command || "") === "idle_wake" &&
+      !!reply.should_warm &&
+      String(reply.reply_text || "").toLowerCase().indexOf("choose an option") !== -1,
+    reply: reply
+  };
+  Logger.log("TL_TestMenu_PassiveWakeFastMenu: %s", JSON.stringify(out, null, 2));
   return out;
 }

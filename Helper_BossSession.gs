@@ -245,6 +245,7 @@ function Helper_BossMenuTransportDiagnosticsHelper() {
       direction: String(TL_Orchestrator_value_(values, "direction") || ""),
       record_class: String(TL_Orchestrator_value_(values, "record_class") || ""),
       activity_kind: String(TL_Orchestrator_value_(values, "activity_kind") || ""),
+      message_id: String(TL_Orchestrator_value_(values, "message_id") || ""),
       sender: String(TL_Orchestrator_value_(values, "sender") || ""),
       receiver: String(TL_Orchestrator_value_(values, "receiver") || ""),
       text: String(TL_Orchestrator_value_(values, "text") || ""),
@@ -268,15 +269,29 @@ function Helper_BossMenuTransportDiagnosticsHelper() {
     const sh = ss.getSheetByName("LOG");
     if (sh && sh.getLastRow() >= 2) {
       const lastRow = sh.getLastRow();
-      const startRow = Math.max(2, lastRow - 79);
+      const startRow = Math.max(2, lastRow - 399);
       const vals = sh.getRange(startRow, 1, lastRow - startRow + 1, 5).getValues();
       vals.forEach(function(row) {
         const message = String(row[3] || "").trim();
         const metaRaw = String(row[4] || "").trim();
-        if (!/^menu_/.test(message)) return;
         const meta = metaRaw ? (function() {
           try { return JSON.parse(metaRaw); } catch (e) { return { raw: metaRaw }; }
         })() : {};
+        const relevantMessage =
+          /^menu_/.test(message) ||
+          /^menu_text_fallback_/.test(message) ||
+          /^menu_voice_/.test(message) ||
+          /^menu_perf_/.test(message) ||
+          message === "doPost_error";
+        if (!relevantMessage) return;
+        const metaText = JSON.stringify(meta);
+        const relevantToBoss =
+          metaText.indexOf(bossPhone) !== -1 ||
+          String(meta.to || "").trim() === bossPhone ||
+          String(meta.from || "").trim() === bossPhone ||
+          String(meta.text || "").trim().toLowerCase() === "menu" ||
+          String(meta.text || "").trim() === "1";
+        if (!relevantToBoss) return;
         logEntries.push({
           timestamp: String(row[0] || ""),
           level: String(row[1] || ""),
@@ -288,11 +303,68 @@ function Helper_BossMenuTransportDiagnosticsHelper() {
     }
   } catch (e) {}
 
+  const latestBossCommand = (transportRows || []).filter(function(row) {
+    return String(row.direction || "").trim().toLowerCase() === "incoming";
+  }).slice(-1)[0] || null;
+
+  function toMs_(value) {
+    const ms = Date.parse(String(value || ""));
+    return isFinite(ms) ? ms : 0;
+  }
+
+  const latestCommandLogs = latestBossCommand
+    ? (logEntries || []).filter(function(entry) {
+        const meta = entry && entry.meta ? entry.meta : {};
+        const sameMsgId = String(meta.msg_id || "").trim() && String(meta.msg_id || "").trim() === String(latestBossCommand.message_id || "").trim();
+        const sameBoss = String(meta.from || "").trim() === bossPhone || String(meta.to || "").trim() === bossPhone;
+        const entryMs = toMs_(entry.timestamp);
+        const rowMs = toMs_(latestBossCommand.timestamp);
+        const nearInTime = entryMs && rowMs ? Math.abs(entryMs - rowMs) <= (2 * 60 * 1000) : false;
+        return sameMsgId || (sameBoss && nearInTime);
+      }).slice(-12)
+    : [];
+
+  const latestPerf = latestCommandLogs.filter(function(entry) {
+    return String(entry && entry.message || "").trim() === "menu_perf_summary";
+  }).slice(-1)[0] || null;
+
+  const timingAnalysis = latestPerf && latestPerf.meta ? {
+    pre_menu_elapsed_ms: Number(latestPerf.meta.pre_menu_elapsed_ms || latestPerf.meta.webhook_elapsed_ms || 0),
+    match_stage_ms: Number(latestPerf.meta.match_stage_ms || latestPerf.meta.match_elapsed_ms || 0),
+    hard_command_stage_ms: Number(latestPerf.meta.hard_command_stage_ms || 0),
+    passive_wake_stage_ms: Number(latestPerf.meta.passive_wake_stage_ms || 0),
+    backend_pre_send_ms: Number(latestPerf.meta.backend_pre_send_ms || 0),
+    meta_roundtrip_ms: Number(latestPerf.meta.meta_roundtrip_ms || latestPerf.meta.send_elapsed_ms || 0),
+    time_to_meta_accept_ms: Number(latestPerf.meta.time_to_meta_accept_ms || latestPerf.meta.reply_sent_elapsed_ms || 0),
+    append_stage_ms: Number(latestPerf.meta.append_stage_ms || 0),
+    enrich_stage_ms: Number(latestPerf.meta.enrich_stage_ms || 0),
+    dedupe_stage_ms: Number(latestPerf.meta.dedupe_stage_ms || 0),
+    append_write_stage_ms: Number(latestPerf.meta.append_write_stage_ms || 0),
+    status_repair_stage_ms: Number(latestPerf.meta.status_repair_stage_ms || 0),
+    handler_stage_ms: Number(latestPerf.meta.handler_stage_ms || 0),
+    finalize_stage_ms: Number(latestPerf.meta.finalize_stage_ms || 0),
+    send_elapsed_ms: Number(latestPerf.meta.send_elapsed_ms || 0),
+    reply_sent_elapsed_ms: Number(latestPerf.meta.reply_sent_elapsed_ms || 0),
+    post_send_tail_ms: Number(latestPerf.meta.post_send_tail_ms || 0),
+    post_send_append_stage_ms: Number(latestPerf.meta.post_send_append_stage_ms || 0),
+    post_send_prewarm_stage_ms: Number(latestPerf.meta.post_send_prewarm_stage_ms || 0),
+    total_elapsed_ms: Number(latestPerf.meta.total_elapsed_ms || 0),
+    dedupe_check_mode: String(latestPerf.meta.dedupe_check_mode || ""),
+    hard_command_fast_lane: !!latestPerf.meta.hard_command_fast_lane,
+    passive_wake_fast_lane: !!latestPerf.meta.passive_wake_fast_lane,
+    hard_command_kind: String(latestPerf.meta.hard_command_kind || ""),
+    result: String(latestPerf.meta.result || ""),
+    send_status: Number(latestPerf.meta.send_status || 0)
+  } : null;
+
   const out = {
     ok: true,
     boss_phone: bossPhone,
-    recent_transport_rows: transportRows.slice(-12),
-    recent_menu_logs: logEntries.slice(-20)
+    latest_boss_command: latestBossCommand,
+    latest_command_logs: latestCommandLogs,
+    latest_timing_analysis: timingAnalysis,
+    recent_transport_rows: transportRows.slice(-8),
+    recent_menu_logs: logEntries.slice(-12)
   };
   try { Logger.log("Helper_BossMenuTransportDiagnosticsHelper %s", JSON.stringify(out, null, 2)); } catch (e) {}
   try { console.log("Helper_BossMenuTransportDiagnosticsHelper", JSON.stringify(out)); } catch (e) {}

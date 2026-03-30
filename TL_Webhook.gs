@@ -14,6 +14,13 @@ const TL_WEBHOOK = {
   INBOX_HEADERS: TL_INBOX.HEADERS
 };
 
+var TLW_SETTINGS_CACHE = {};
+var TLW_SPREADSHEET_CACHE = null;
+var TLW_SHEET_CACHE = {};
+var TLW_META_TOKEN_CACHE = null;
+var TLW_REPLY_PHONE_ID_CACHE = null;
+var TLW_PENDING_LOGS = [];
+
 function TLW_colIndex_(headerName) {
   return TL_colIndex_(headerName);
 }
@@ -37,6 +44,7 @@ function doGet(e) {
 
 function doPost(e) {
   const started = new Date();
+  const startedMs = started.getTime();
   try {
     const raw = (e && e.postData && typeof e.postData.contents === "string") ? e.postData.contents : "";
     if (!raw) {
@@ -56,16 +64,14 @@ function doPost(e) {
     const events = TLW_extractEvents_(payload);
 
     // Boss menu quick-path: only messages with text from BOSS_PHONE
-    const menuReply = TLW_tryBossMenu_(events);
-    if (menuReply && menuReply.toSend) {
-      if (TLW_claimReplySend_("menu_text", menuReply.messageId)) {
-        TLW_logInfo_("menu_reply_deduped", { to: menuReply.toWaId, msg_id: menuReply.messageId || "", phone_id: menuReply.toPhoneId || "" });
-        return TLW_json_({ ok:true, menu:true, deduped:true });
-      }
-      const sent = TLW_sendText_(menuReply.toPhoneId, menuReply.toWaId, menuReply.text);
-      if (!(sent && sent.ok)) TLW_releaseReplySend_("menu_text", menuReply.messageId);
-      TLW_logInfo_("menu_reply", { to: menuReply.toWaId, phone_id: menuReply.toPhoneId, ok: sent.ok, status: sent.status, body: sent.body });
-      return TLW_json_({ ok:true, menu:true });
+    const menuReply = TLW_tryBossMenu_(events, { doPostStartedMs: startedMs });
+    if (menuReply && menuReply.handled) {
+      return TLW_json_({
+        ok: true,
+        menu: true,
+        sent: !!menuReply.sent,
+        deduped: !!menuReply.deduped
+      });
     }
 
     if (!events.length) {
@@ -286,15 +292,18 @@ function TLW_extractEvents_(payload) {
   return out;
 }
 
-function TLW_tryBossMenu_(events) {
+function TLW_tryBossMenu_(events, options) {
   if (!events || !events.length) return null;
+  const opts = options && typeof options === "object" ? options : {};
+  const tryStartedMs = Date.now();
+  const preMenuElapsedMs = Math.max(0, tryStartedMs - Number(opts.doPostStartedMs || tryStartedMs));
 
   // Find the first text event that should be handled by the boss menu flow:
   // boss text always belongs to the boss-assistant route first.
   const candidates = events.filter(ev => ev.message_type === "text");
   const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
   const normalized = candidates.map(e=>({from:e.from, type:e.event_type, msg_id:e.message_id, text:String(e.text||"").trim().toLowerCase()}));
-  TLW_logInfo_("menu_match_attempt", { candidates: normalized });
+  TLW_deferLog_("info", "menu_match_attempt", { candidates: normalized });
   const bossCandidate = bossPhone ? candidates.find(function(ev) {
     return TLW_normalizePhone_(String(ev && ev.from || "").trim()) === bossPhone;
   }) : null;
@@ -303,34 +312,293 @@ function TLW_tryBossMenu_(events) {
     return TL_Menu_ShouldHandleText_(String(ev.from || "").trim(), text);
   });
   if (!msg) {
-    TLW_logInfo_("menu_match_none", {
+    const noMatchElapsedMs = Date.now() - tryStartedMs;
+    TLW_deferLog_("info", "menu_match_none", {
       candidates: normalized.length,
       boss_phone: bossPhone,
       candidate_froms: normalized.map(function(item) { return TLW_normalizePhone_(item.from || ""); })
     });
+    TLW_deferLog_("info", "menu_perf_summary", {
+      result: "no_match",
+      candidate_count: normalized.length,
+      pre_menu_elapsed_ms: preMenuElapsedMs,
+      webhook_elapsed_ms: preMenuElapsedMs,
+      match_elapsed_ms: noMatchElapsedMs,
+      match_stage_ms: noMatchElapsedMs,
+      total_elapsed_ms: noMatchElapsedMs
+    });
+    TLW_flushDeferredLogs_();
     return null;
   }
 
-  TLW_logInfo_("menu_match_selected", {
+  TLW_deferLog_("info", "menu_match_selected", {
     from: msg.from || "",
     msg_id: msg.message_id || "",
     text: String(msg.text || "").trim()
   });
 
+  const normalizedText = String(msg.text || "").trim().toLowerCase();
+  const isExplicitTrigger = TL_MENU && TL_MENU.TRIGGERS && TL_MENU.TRIGGERS.some(function(t) {
+    return normalizedText === String(t || "").trim().toLowerCase();
+  });
+  const isHardOverrideCommand =
+    (typeof TL_Menu_IsMenuCommand_ === "function" && TL_Menu_IsMenuCommand_(normalizedText)) ||
+    (typeof TL_Menu_IsHelpCommand_ === "function" && TL_Menu_IsHelpCommand_(normalizedText)) ||
+    (typeof TL_Menu_IsBackCommand_ === "function" && TL_Menu_IsBackCommand_(normalizedText)) ||
+    (typeof TL_Menu_IsEndCommand_ === "function" && TL_Menu_IsEndCommand_(normalizedText)) ||
+    (typeof TL_Menu_IsExitCommand_ === "function" && TL_Menu_IsExitCommand_(normalizedText));
+  const matchedElapsedMs = Date.now() - tryStartedMs;
+  const hardCommandStartedMs = Date.now();
+  const hardCommandReply = isHardOverrideCommand && typeof TL_Menu_HandleHardCommandFast_ === "function"
+    ? TL_Menu_HandleHardCommandFast_(String(msg.from || "").trim(), String(msg.text || "").trim())
+    : null;
+  const hardCommandElapsedMs = Date.now() - hardCommandStartedMs;
+  const passiveWakeStartedMs = Date.now();
+  const passiveWakeReply = !hardCommandReply && typeof TL_Menu_HandlePassiveWakeFast_ === "function"
+    ? TL_Menu_HandlePassiveWakeFast_(String(msg.from || "").trim(), String(msg.text || "").trim())
+    : null;
+  const passiveWakeElapsedMs = Date.now() - passiveWakeStartedMs;
+  const immediateReply = hardCommandReply || passiveWakeReply;
+
+  if (immediateReply && String(immediateReply.reply_text || "").trim()) {
+    const toPhoneId = TLW_getReplyPhoneId_(msg);
+    const replyMessageId = String(msg.message_id || "").trim();
+    const replyText = String(immediateReply.reply_text || "");
+    const deferredLogs = [];
+
+    deferredLogs.push({ message: "menu_trigger", meta: { from: msg.from, text: msg.text || "", phone_id: msg.phone_number_id || "" } });
+    deferredLogs.push({ message: "menu_reply_ready", meta: {
+      to: msg.from || "",
+      msg_id: replyMessageId,
+      text: String(msg.text || "").trim()
+    }});
+
+    let alreadyClaimed = false;
+    try {
+      alreadyClaimed = TLW_claimReplySend_("menu_text", replyMessageId);
+      deferredLogs.push({ message: "menu_send_claim", meta: {
+        msg_id: replyMessageId,
+        to: msg.from || "",
+        deduped: !!alreadyClaimed
+      }});
+    } catch (claimErr) {
+      deferredLogs.push({ message: "menu_send_claim_error", meta: {
+        msg_id: replyMessageId,
+        to: msg.from || "",
+        err: String(claimErr && claimErr.stack ? claimErr.stack : claimErr)
+      }});
+      alreadyClaimed = false;
+    }
+
+    if (alreadyClaimed) {
+      if (typeof TL_Menu_TouchLastInteraction_ === "function") {
+        TL_Menu_TouchLastInteraction_(String(msg.from || "").trim(), String(msg.text || "").trim());
+      }
+      deferredLogs.push({ message: "menu_reply_deduped", meta: {
+        to: msg.from || "",
+        msg_id: replyMessageId,
+        phone_id: toPhoneId
+      }});
+      deferredLogs.push({ message: "menu_perf_summary", meta: {
+        from: msg.from || "",
+        msg_id: replyMessageId,
+        text: String(msg.text || "").trim(),
+        is_explicit_trigger: !!isExplicitTrigger,
+        is_hard_override_command: !!isHardOverrideCommand,
+        hard_command_fast_lane: !!hardCommandReply,
+        hard_command_kind: String(immediateReply.command || "").trim(),
+        passive_wake_fast_lane: !!passiveWakeReply,
+        candidate_count: normalized.length,
+        pre_menu_elapsed_ms: preMenuElapsedMs,
+        webhook_elapsed_ms: preMenuElapsedMs,
+        match_elapsed_ms: matchedElapsedMs,
+        match_stage_ms: matchedElapsedMs,
+        hard_command_stage_ms: hardCommandElapsedMs,
+        passive_wake_stage_ms: passiveWakeElapsedMs,
+        backend_pre_send_ms: Date.now() - tryStartedMs,
+        meta_roundtrip_ms: 0,
+        time_to_meta_accept_ms: 0,
+        send_elapsed_ms: 0,
+        reply_sent_elapsed_ms: Date.now() - tryStartedMs,
+        post_send_tail_ms: 0,
+        post_send_append_stage_ms: 0,
+        post_send_prewarm_stage_ms: 0,
+        total_elapsed_ms: Date.now() - Number(opts.doPostStartedMs || tryStartedMs),
+        result: "deduped",
+        send_status: 0
+      }});
+      TLW_logBatch_(TLW_PENDING_LOGS.concat(deferredLogs));
+      TLW_PENDING_LOGS = [];
+      return { handled: true, sent: false, deduped: true };
+    }
+
+    const sendStartedMs = Date.now();
+    const backendPreSendMs = sendStartedMs - tryStartedMs;
+    deferredLogs.push({ message: "menu_send_attempt", meta: {
+      msg_id: replyMessageId,
+      to: msg.from || "",
+      phone_id: toPhoneId
+    }});
+    const sent = TLW_sendText_(toPhoneId, msg.from, replyText, { skipLog: true });
+    const sendFinishedMs = Date.now();
+    const metaRoundtripMs = sendFinishedMs - sendStartedMs;
+    if (!(sent && sent.ok)) TLW_releaseReplySend_("menu_text", replyMessageId);
+    deferredLogs.push({ message: "menu_reply", meta: {
+      to: msg.from || "",
+      phone_id: toPhoneId,
+      ok: !!(sent && sent.ok),
+      status: sent && sent.status ? sent.status : 0,
+      body: sent && sent.body ? sent.body : ""
+    }});
+    const replySentElapsedMs = sendFinishedMs - tryStartedMs;
+
+    const postSendAppendStartedMs = Date.now();
+    let appendWriteElapsedMs = 0;
+    let duplicateElapsedMs = 0;
+    let duplicateCheckMode = "cache";
+    let enrichElapsedMs = 0;
+    let inboxRow = null;
+    const enrichStartedMs = Date.now();
+    const enriched = TLW_enrichEvent_(msg, new Date());
+    enrichElapsedMs = Date.now() - enrichStartedMs;
+    if (enriched) {
+      const existingNotes = String(enriched.notes || "").trim();
+      enriched.execution_status = "interface_handled";
+      enriched.notes = [
+        existingNotes,
+        "menu_interface_handled=true",
+        "menu_interface_kind=menu_text",
+        "menu_interface_text=" + String(msg.text || "").trim().replace(/\n+/g, " ").replace(/[;]+/g, ",")
+      ].filter(Boolean).join(";");
+
+      const duplicateStartedMs = Date.now();
+      let isDuplicate = TLW_hasRecentMessageIdHint_(enriched);
+      if (!isDuplicate) {
+        duplicateCheckMode = "sheet";
+        isDuplicate = TLW_isDuplicate_(enriched);
+      }
+      duplicateElapsedMs = Date.now() - duplicateStartedMs;
+      if (isDuplicate) {
+        const existing = TLW_findRowByMessageId_(enriched.phone_number_id || "", enriched.message_id || "");
+        if (existing) inboxRow = { row: existing.row };
+      } else {
+        const appendWriteStartedMs = Date.now();
+        const appended = TLW_appendInboxRow_(enriched, "");
+        appendWriteElapsedMs = Date.now() - appendWriteStartedMs;
+        if (appended) {
+          inboxRow = { row: appended.row };
+          TLW_rememberRecentMessageId_(enriched);
+        }
+      }
+    }
+    const postSendAppendStageMs = Date.now() - postSendAppendStartedMs;
+
+    const postSendPrewarmStartedMs = Date.now();
+    let prewarm = null;
+    if (sent && sent.ok && immediateReply.should_warm && typeof TL_Menu_TryWarmLikelyNextSteps_ === "function") {
+      prewarm = TL_Menu_TryWarmLikelyNextSteps_(String(msg.from || "").trim(), {
+        source: passiveWakeReply ? "passive_wake_fast_lane" : "hard_command_fast_lane",
+        command: String(immediateReply.command || "").trim()
+      });
+      deferredLogs.push({ message: "menu_prefetch_summary", meta: prewarm });
+    }
+    const postSendPrewarmStageMs = Date.now() - postSendPrewarmStartedMs;
+    if (typeof TL_Menu_TouchLastInteraction_ === "function") {
+      TL_Menu_TouchLastInteraction_(String(msg.from || "").trim(), String(msg.text || "").trim());
+    }
+    const totalElapsedMs = Date.now() - Number(opts.doPostStartedMs || tryStartedMs);
+    const postSendTailMs = Math.max(0, totalElapsedMs - replySentElapsedMs);
+
+    deferredLogs.push({ message: "menu_perf_summary", meta: {
+      from: msg.from || "",
+      msg_id: replyMessageId,
+      text: String(msg.text || "").trim(),
+      is_explicit_trigger: !!isExplicitTrigger,
+      is_hard_override_command: !!isHardOverrideCommand,
+      hard_command_fast_lane: !!hardCommandReply,
+      hard_command_kind: String(immediateReply.command || "").trim(),
+      passive_wake_fast_lane: !!passiveWakeReply,
+      candidate_count: normalized.length,
+      pre_menu_elapsed_ms: preMenuElapsedMs,
+      webhook_elapsed_ms: preMenuElapsedMs,
+      match_elapsed_ms: matchedElapsedMs,
+      match_stage_ms: matchedElapsedMs,
+      hard_command_stage_ms: hardCommandElapsedMs,
+      passive_wake_stage_ms: passiveWakeElapsedMs,
+      backend_pre_send_ms: backendPreSendMs,
+      meta_roundtrip_ms: metaRoundtripMs,
+      time_to_meta_accept_ms: replySentElapsedMs,
+      send_elapsed_ms: metaRoundtripMs,
+      reply_sent_elapsed_ms: replySentElapsedMs,
+      post_send_tail_ms: postSendTailMs,
+      enrich_stage_ms: enrichElapsedMs,
+      dedupe_stage_ms: duplicateElapsedMs,
+      dedupe_check_mode: duplicateCheckMode,
+      append_write_stage_ms: appendWriteElapsedMs,
+      status_repair_stage_ms: 0,
+      post_send_append_stage_ms: postSendAppendStageMs,
+      post_send_prewarm_stage_ms: postSendPrewarmStageMs,
+      total_elapsed_ms: totalElapsedMs,
+      result: sent && sent.ok ? "sent" : "send_failed",
+      send_status: sent && sent.status ? sent.status : 0
+    }});
+    TLW_logBatch_(TLW_PENDING_LOGS.concat(deferredLogs));
+    TLW_PENDING_LOGS = [];
+    return {
+      handled: true,
+      sent: !!(sent && sent.ok),
+      deduped: false,
+      response: sent
+    };
+  }
+
+  const enrichStartedMs = Date.now();
   const enriched = TLW_enrichEvent_(msg, new Date());
+  const enrichElapsedMs = Date.now() - enrichStartedMs;
+  if (enriched && isHardOverrideCommand) {
+    const existingNotes = String(enriched.notes || "").trim();
+    enriched.execution_status = "interface_handled";
+    enriched.notes = [
+      existingNotes,
+      "menu_interface_handled=true",
+      "menu_interface_kind=menu_text",
+      "menu_interface_text=" + String(msg.text || "").trim().replace(/\n+/g, " ").replace(/[;]+/g, ",")
+    ].filter(Boolean).join(";");
+  }
   let inboxRow = null;
+  let duplicateElapsedMs = 0;
+  let appendWriteElapsedMs = 0;
+  let statusRepairElapsedMs = 0;
+  let duplicateCheckMode = "sheet";
   if (enriched) {
-    if (TLW_isDuplicate_(enriched)) {
+    const duplicateStartedMs = Date.now();
+    let isDuplicate = false;
+    if (isHardOverrideCommand && TLW_hasRecentMessageIdHint_(enriched)) {
+      isDuplicate = true;
+      duplicateCheckMode = "cache";
+    } else {
+      isDuplicate = TLW_isDuplicate_(enriched);
+    }
+    duplicateElapsedMs = Date.now() - duplicateStartedMs;
+    if (isDuplicate) {
       const existing = TLW_findRowByMessageId_(enriched.phone_number_id || "", enriched.message_id || "");
       if (existing) inboxRow = { row: existing.row };
     } else {
+      const appendWriteStartedMs = Date.now();
       const appended = TLW_appendInboxRow_(enriched, "");
+      appendWriteElapsedMs = Date.now() - appendWriteStartedMs;
       if (appended) {
         inboxRow = { row: appended.row };
-        TLW_tryApplyCachedStatuses_(enriched.phone_number_id || "", enriched.message_id || "", appended.row);
+        TLW_rememberRecentMessageId_(enriched);
+        if (!isHardOverrideCommand) {
+          const statusRepairStartedMs = Date.now();
+          TLW_tryApplyCachedStatuses_(enriched.phone_number_id || "", enriched.message_id || "", appended.row);
+          statusRepairElapsedMs = Date.now() - statusRepairStartedMs;
+        }
       }
     }
   }
+  const appendElapsedMs = Date.now() - tryStartedMs;
 
   // log trigger detection
   TLW_logInfo_("menu_trigger", { from: msg.from, text: msg.text || "", phone_id: msg.phone_number_id || "" });
@@ -341,15 +609,12 @@ function TLW_tryBossMenu_(events) {
     recipient_id: msg.recipient_id || "",
     phone_number_id: msg.phone_number_id || ""
   }, inboxRow);
+  const handlerElapsedMs = Date.now() - tryStartedMs;
 
-  if (inboxRow && inboxRow.row) {
+  if (inboxRow && inboxRow.row && !isHardOverrideCommand) {
     TLW_markInterfaceHandledRow_(inboxRow.row, "menu_text", String(msg.text || "").trim());
   }
 
-  const normalizedText = String(msg.text || "").trim().toLowerCase();
-  const isExplicitTrigger = TL_MENU && TL_MENU.TRIGGERS && TL_MENU.TRIGGERS.some(function(t) {
-    return normalizedText === String(t || "").trim().toLowerCase();
-  });
   const fallbackReply = isExplicitTrigger
     ? (TL_MENU && TL_MENU.HELP_TRIGGERS && TL_MENU.HELP_TRIGGERS.some(function(t) {
         return normalizedText === String(t || "").trim().toLowerCase();
@@ -360,20 +625,177 @@ function TLW_tryBossMenu_(events) {
     : String(replyText);
 
   if (!finalReplyText) {
+    const readyElapsedMs = Date.now() - tryStartedMs;
     TLW_logInfo_("menu_reply_empty", {
       from: msg.from || "",
       msg_id: msg.message_id || "",
       text: String(msg.text || "").trim()
     });
+    TLW_logInfo_("menu_perf_summary", {
+      result: "empty_reply",
+      from: msg.from || "",
+      msg_id: msg.message_id || "",
+      text: String(msg.text || "").trim(),
+      is_explicit_trigger: !!isExplicitTrigger,
+      is_hard_override_command: !!isHardOverrideCommand,
+      candidate_count: normalized.length,
+      pre_menu_elapsed_ms: preMenuElapsedMs,
+      webhook_elapsed_ms: preMenuElapsedMs,
+      match_elapsed_ms: matchedElapsedMs,
+      match_stage_ms: matchedElapsedMs,
+      append_elapsed_ms: appendElapsedMs,
+      append_stage_ms: Math.max(0, appendElapsedMs - matchedElapsedMs),
+      handler_elapsed_ms: handlerElapsedMs,
+      handler_stage_ms: Math.max(0, handlerElapsedMs - appendElapsedMs),
+      ready_elapsed_ms: readyElapsedMs,
+      finalize_stage_ms: Math.max(0, readyElapsedMs - handlerElapsedMs),
+      total_elapsed_ms: readyElapsedMs
+    });
     return null;
   }
   const toPhoneId = msg.phone_number_id || TLW_getSetting_("BUSINESS_PHONE_ID") || TLW_getSetting_("BUSINESS_PHONEID") || TLW_getSetting_("BUSINESS_PHONE");
+  const readyElapsedMs = Date.now() - tryStartedMs;
   TLW_logInfo_("menu_reply_ready", {
     to: msg.from || "",
     msg_id: msg.message_id || "",
     text: String(msg.text || "").trim()
   });
-  return { toSend: true, toPhoneId, toWaId: msg.from, text: finalReplyText, messageId: String(msg.message_id || "").trim() };
+  const trace = {
+    from: msg.from || "",
+    msg_id: msg.message_id || "",
+    text: String(msg.text || "").trim(),
+    is_explicit_trigger: !!isExplicitTrigger,
+    is_hard_override_command: !!isHardOverrideCommand,
+    candidate_count: normalized.length,
+    pre_menu_elapsed_ms: preMenuElapsedMs,
+    webhook_elapsed_ms: preMenuElapsedMs,
+    match_elapsed_ms: matchedElapsedMs,
+    match_stage_ms: matchedElapsedMs,
+    append_elapsed_ms: appendElapsedMs,
+    append_stage_ms: Math.max(0, appendElapsedMs - matchedElapsedMs),
+    enrich_stage_ms: enrichElapsedMs,
+    dedupe_stage_ms: duplicateElapsedMs,
+    dedupe_check_mode: duplicateCheckMode,
+    append_write_stage_ms: appendWriteElapsedMs,
+    status_repair_stage_ms: statusRepairElapsedMs,
+    handler_elapsed_ms: handlerElapsedMs,
+    handler_stage_ms: Math.max(0, handlerElapsedMs - appendElapsedMs),
+    ready_elapsed_ms: readyElapsedMs,
+    finalize_stage_ms: Math.max(0, readyElapsedMs - handlerElapsedMs),
+    backend_pre_send_ms: 0,
+    meta_roundtrip_ms: 0,
+    time_to_meta_accept_ms: 0,
+    post_send_tail_ms: 0
+  };
+  const replyMessageId = String(msg.message_id || "").trim();
+  let alreadyClaimed = false;
+  try {
+    alreadyClaimed = TLW_claimReplySend_("menu_text", replyMessageId);
+    TLW_logInfo_("menu_send_claim", {
+      msg_id: replyMessageId,
+      to: msg.from || "",
+      deduped: !!alreadyClaimed
+    });
+  } catch (claimErr) {
+    TLW_logInfo_("menu_send_claim_error", {
+      msg_id: replyMessageId,
+      to: msg.from || "",
+      err: String(claimErr && claimErr.stack ? claimErr.stack : claimErr)
+    });
+    alreadyClaimed = false;
+  }
+  if (alreadyClaimed) {
+    TLW_logInfo_("menu_reply_deduped", {
+      to: msg.from || "",
+      msg_id: replyMessageId,
+      phone_id: toPhoneId
+    });
+    TLW_logInfo_("menu_perf_summary", Object.assign({}, trace, {
+      result: "deduped",
+      backend_pre_send_ms: Date.now() - tryStartedMs,
+      meta_roundtrip_ms: 0,
+      time_to_meta_accept_ms: 0,
+      send_elapsed_ms: 0,
+      post_send_tail_ms: 0,
+      total_elapsed_ms: Date.now() - Number(opts.doPostStartedMs || tryStartedMs),
+      send_status: 0
+    }));
+    return { handled: true, sent: false, deduped: true };
+  }
+
+  const sendStartedMs = Date.now();
+  const backendPreSendMs = sendStartedMs - tryStartedMs;
+  TLW_logInfo_("menu_send_attempt", {
+    msg_id: replyMessageId,
+    to: msg.from || "",
+    phone_id: toPhoneId
+  });
+  const sent = TLW_sendText_(toPhoneId, msg.from, finalReplyText, { skipLog: true });
+  const sendFinishedMs = Date.now();
+  const metaRoundtripMs = sendFinishedMs - sendStartedMs;
+  if (!(sent && sent.ok)) TLW_releaseReplySend_("menu_text", replyMessageId);
+  TLW_logInfo_("menu_reply", {
+    to: msg.from || "",
+    phone_id: toPhoneId,
+    ok: !!(sent && sent.ok),
+    status: sent && sent.status ? sent.status : 0,
+    body: sent && sent.body ? sent.body : ""
+  });
+  const totalElapsedMs = Date.now() - Number(opts.doPostStartedMs || tryStartedMs);
+  const timeToMetaAcceptMs = sendFinishedMs - tryStartedMs;
+  TLW_logInfo_("menu_perf_summary", Object.assign({}, trace, {
+    result: sent && sent.ok ? "sent" : "send_failed",
+    backend_pre_send_ms: backendPreSendMs,
+    meta_roundtrip_ms: metaRoundtripMs,
+    time_to_meta_accept_ms: timeToMetaAcceptMs,
+    send_elapsed_ms: metaRoundtripMs,
+    post_send_tail_ms: Math.max(0, totalElapsedMs - timeToMetaAcceptMs),
+    total_elapsed_ms: totalElapsedMs,
+    send_status: sent && sent.status ? sent.status : 0
+  }));
+  return {
+    handled: true,
+    sent: !!(sent && sent.ok),
+    deduped: false,
+    response: sent
+  };
+}
+
+function TLW_recentMessageIdCacheKey_(phoneId, messageId) {
+  return [
+    "TLW_RECENT_MSG",
+    String(phoneId || "").trim(),
+    String(messageId || "").trim()
+  ].join("|");
+}
+
+function TLW_hasRecentMessageIdHint_(enriched) {
+  try {
+    if (!enriched) return false;
+    const messageId = String(enriched.message_id || "").trim();
+    const phoneId = String(enriched.phone_number_id || "").trim();
+    if (!messageId) return false;
+    const cache = CacheService.getScriptCache();
+    const key = TLW_recentMessageIdCacheKey_(phoneId, messageId);
+    return String(cache.get(key) || "").trim() === "1";
+  } catch (e) {
+    return false;
+  }
+}
+
+function TLW_rememberRecentMessageId_(enriched) {
+  try {
+    if (!enriched) return false;
+    const messageId = String(enriched.message_id || "").trim();
+    const phoneId = String(enriched.phone_number_id || "").trim();
+    if (!messageId) return false;
+    const cache = CacheService.getScriptCache();
+    const key = TLW_recentMessageIdCacheKey_(phoneId, messageId);
+    cache.put(key, "1", 21600);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function TLW_markInterfaceHandledRow_(rowNumber, kind, textValue) {
@@ -472,7 +894,7 @@ function TLW_tryBossMenuFromTextRow_(enriched, appendedRow, options) {
       TLW_getSetting_("BUSINESS_PHONE_ID") ||
       TLW_getSetting_("BUSINESS_PHONEID") ||
       TLW_getSetting_("BUSINESS_PHONE");
-    const sent = TLW_sendText_(toPhoneId, sender, finalReplyText);
+    const sent = TLW_sendText_(toPhoneId, sender, finalReplyText, { skipLog: true });
     if (!(sent && sent.ok)) TLW_releaseReplySend_("menu_text", textMessageId);
     TLW_logInfo_("menu_text_fallback_reply", {
       row: appendedRow.row,
@@ -595,7 +1017,7 @@ function TLW_tryBossMenuFromInboxRow_(enriched, appendedRow, options) {
       });
       return { sent: false, deduped: true, text: finalReplyText };
     }
-    const sent = TLW_sendText_(toPhoneId, sender, finalReplyText);
+    const sent = TLW_sendText_(toPhoneId, sender, finalReplyText, { skipLog: true });
     if (!(sent && sent.ok)) TLW_releaseReplySend_("menu_voice", voiceMessageId);
     TLW_logInfo_("menu_voice_reply_ready", {
       row: appendedRow.row,
@@ -721,11 +1143,8 @@ function TLW_enrichEvent_(ev, ts) {
 }
 
 function TLW_appendInboxRow_(obj, rawJson) {
-  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
-  if (!ss) throw new Error("Missing Script Property TL_SHEET_ID");
-
-  let sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
-  if (!sh) sh = ss.insertSheet(TL_WEBHOOK.INBOX_SHEET);
+  const sh = TLW_getSheetCached_(TL_WEBHOOK.INBOX_SHEET);
+  if (!sh) throw new Error("Missing inbox sheet");
 
   const range = sh.getRange(1,1,1,TL_WEBHOOK.INBOX_HEADERS.length);
   const existing = range.getValues()[0];
@@ -752,8 +1171,7 @@ function TLW_appendInboxRow_(obj, rawJson) {
 function TLW_getRecentMessageIdSet_() {
   const set = new Set();
   try {
-    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
-    const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+    const sh = TLW_getSheetCached_(TL_WEBHOOK.INBOX_SHEET);
     if (!sh) return set;
 
     const lastRow = sh.getLastRow();
@@ -837,8 +1255,7 @@ function TLW_tryApplyCachedStatuses_(phoneId, messageId, rowNumber) {
     return 0;
   }
 
-  const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
-  const sh = ss.getSheetByName(TL_WEBHOOK.INBOX_SHEET);
+  const sh = TLW_getSheetCached_(TL_WEBHOOK.INBOX_SHEET);
   if (!sh) return 0;
 
   let applied = 0;
@@ -979,28 +1396,63 @@ function TLW_findRowByMessageId_(phoneId, messageId) {
 
 function TLW_logInfo_(label, data) {
   try {
-    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
-    let sh = ss.getSheetByName("LOG");
-    if (!sh) sh = ss.insertSheet("LOG");
-    const headers = ["timestamp","level","component","message","meta_json"];
-    const existing = sh.getRange(1,1,1,headers.length).getValues()[0];
-    const needs = existing.some((v,i)=>String(v||"")!==String(headers[i]||""));
-    if (needs) { sh.getRange(1,1,1,headers.length).setValues([headers]); sh.setFrozenRows(1); }
-    sh.appendRow([new Date(), "info", "webhook", String(label||""), TLW_safeStringify_(data, 4000)]);
+    TLW_logBatch_([{ level: "info", message: String(label || ""), meta: data }]);
   } catch(e) {}
 }
 
 function TLW_logDebug_(label, data) {
   try {
-    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
-    let sh = ss.getSheetByName("LOG");
-    if (!sh) sh = ss.insertSheet("LOG");
+    TLW_logBatch_([{ level: "debug", message: String(label || ""), meta: data }]);
+  } catch(e) {}
+}
+
+function TLW_logBatch_(entries) {
+  const list = Array.isArray(entries) ? entries.filter(function(entry) {
+    return entry && String(entry.message || "").trim();
+  }) : [];
+  if (!list.length) return false;
+  try {
+    const sh = TLW_getSheetCached_("LOG");
+    if (!sh) return false;
     const headers = ["timestamp","level","component","message","meta_json"];
     const existing = sh.getRange(1,1,1,headers.length).getValues()[0];
-    const needs = existing.some((v,i)=>String(v||"")!==String(headers[i]||""));
-    if (needs) { sh.getRange(1,1,1,headers.length).setValues([headers]); sh.setFrozenRows(1); }
-    sh.appendRow([new Date(), "debug", "webhook", String(label||""), TLW_safeStringify_(data, 4000)]);
-  } catch(e) {}
+    const needs = existing.some(function(v, i) {
+      return String(v || "") !== String(headers[i] || "");
+    });
+    if (needs) {
+      sh.getRange(1,1,1,headers.length).setValues([headers]);
+      sh.setFrozenRows(1);
+    }
+    const rows = list.map(function(entry) {
+      return [
+        new Date(),
+        String(entry.level || "info"),
+        String(entry.component || "webhook"),
+        String(entry.message || ""),
+        TLW_safeStringify_(entry.meta || {}, 4000)
+      ];
+    });
+    const startRow = Math.max(2, sh.getLastRow() + 1);
+    sh.getRange(startRow, 1, rows.length, headers.length).setValues(rows);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function TLW_deferLog_(level, message, meta) {
+  TLW_PENDING_LOGS.push({
+    level: String(level || "info"),
+    message: String(message || ""),
+    meta: meta || {}
+  });
+}
+
+function TLW_flushDeferredLogs_() {
+  if (!TLW_PENDING_LOGS.length) return false;
+  const copy = TLW_PENDING_LOGS.slice();
+  TLW_PENDING_LOGS = [];
+  return TLW_logBatch_(copy);
 }
 
 function TLW_safeStringify_(obj, maxLen) {
@@ -1042,7 +1494,8 @@ function TLW_claimReplySend_(scope, messageId) {
   const key = TLW_replySendKey_(scope, messageId);
   if (!key) return false;
   const lock = LockService.getScriptLock();
-  lock.waitLock(5000);
+  const locked = lock.tryLock(250);
+  if (!locked) return false;
   try {
     const props = PropertiesService.getScriptProperties();
     if (props.getProperty(key)) return true;
@@ -1076,10 +1529,34 @@ function TLW_normalizeSettingKey_(key) {
   return String(key || "").trim().replace(/\s+/g, " ").toUpperCase();
 }
 
+function TLW_getSpreadsheetCached_() {
+  if (TLW_SPREADSHEET_CACHE) return TLW_SPREADSHEET_CACHE;
+  const sheetId = String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim();
+  if (!sheetId) throw new Error("Missing Script Property TL_SHEET_ID");
+  TLW_SPREADSHEET_CACHE = SpreadsheetApp.openById(sheetId);
+  return TLW_SPREADSHEET_CACHE;
+}
+
+function TLW_getSheetCached_(name) {
+  const key = String(name || "").trim();
+  if (!key) return null;
+  if (Object.prototype.hasOwnProperty.call(TLW_SHEET_CACHE, key)) return TLW_SHEET_CACHE[key];
+  const ss = TLW_getSpreadsheetCached_();
+  let sh = ss.getSheetByName(key);
+  if (!sh && key === TL_WEBHOOK.INBOX_SHEET) {
+    sh = ss.insertSheet(key);
+  }
+  TLW_SHEET_CACHE[key] = sh || null;
+  return TLW_SHEET_CACHE[key];
+}
+
 function TLW_getSetting_(key) {
   const rawKey = String(key || "").trim();
   const normalizedKey = TLW_normalizeSettingKey_(rawKey);
   if (!normalizedKey) return "";
+  if (Object.prototype.hasOwnProperty.call(TLW_SETTINGS_CACHE, normalizedKey)) {
+    return TLW_SETTINGS_CACHE[normalizedKey];
+  }
 
   try {
     const props = PropertiesService.getScriptProperties().getProperties();
@@ -1087,24 +1564,28 @@ function TLW_getSetting_(key) {
     for (let i = 0; i < propKeys.length; i++) {
       const candidateKey = propKeys[i];
       if (TLW_normalizeSettingKey_(candidateKey) === normalizedKey) {
-        return String(props[candidateKey] || "").trim();
+        const value = String(props[candidateKey] || "").trim();
+        TLW_SETTINGS_CACHE[normalizedKey] = value;
+        return value;
       }
     }
   } catch (e) {}
 
   try {
-    const ss = SpreadsheetApp.openById(String(PropertiesService.getScriptProperties().getProperty("TL_SHEET_ID") || "").trim());
-    const sh = ss.getSheetByName("SETTINGS");
+    const sh = TLW_getSheetCached_("SETTINGS");
     if (!sh) return "";
     const lastRow = sh.getLastRow();
     if (lastRow < 2) return "";
     const vals = sh.getRange(2, 1, lastRow - 1, 2).getValues(); // key,value
     for (let i = 0; i < vals.length; i++) {
       if (TLW_normalizeSettingKey_(vals[i][0]) === normalizedKey) {
-        return String(vals[i][1] || "").trim();
+        const value = String(vals[i][1] || "").trim();
+        TLW_SETTINGS_CACHE[normalizedKey] = value;
+        return value;
       }
     }
   } catch (e) {}
+  TLW_SETTINGS_CACHE[normalizedKey] = "";
   return "";
 }
 
@@ -1117,6 +1598,7 @@ function TLW_isDuplicate_(enriched) {
 }
 
 function TLW_getMetaAccessToken_() {
+  if (TLW_META_TOKEN_CACHE) return TLW_META_TOKEN_CACHE;
   const scriptProps = PropertiesService.getScriptProperties();
   const preferred = [
     "TL_META_SYSTEM_USER_TOKEN",
@@ -1127,10 +1609,65 @@ function TLW_getMetaAccessToken_() {
 
   for (let i = 0; i < preferred.length; i++) {
     const token = String(scriptProps.getProperty(preferred[i]) || "").trim();
-    if (token) return token;
+    if (token) {
+      TLW_META_TOKEN_CACHE = token;
+      return token;
+    }
   }
 
-  return TLW_getSetting_("API TOKEN");
+  TLW_META_TOKEN_CACHE = TLW_getSetting_("API TOKEN");
+  return TLW_META_TOKEN_CACHE;
+}
+
+function TLW_getReplyPhoneId_(msg) {
+  const direct = String(msg && msg.phone_number_id || "").trim();
+  if (direct) return direct;
+  if (TLW_REPLY_PHONE_ID_CACHE) return TLW_REPLY_PHONE_ID_CACHE;
+  TLW_REPLY_PHONE_ID_CACHE = String(
+    TLW_getSetting_("BUSINESS_PHONE_ID") ||
+    TLW_getSetting_("BUSINESS_PHONEID") ||
+    TLW_getSetting_("BUSINESS_PHONE") ||
+    ""
+  ).trim();
+  return TLW_REPLY_PHONE_ID_CACHE;
+}
+
+function TLW_bossSendPaceKey_(toWaId) {
+  return "TLW_BOSS_LAST_SEND_AT_" + String(toWaId || "").trim();
+}
+
+function TLW_maybePaceBossReply_(toWaId) {
+  try {
+    const target = TLW_normalizePhone_(toWaId || "");
+    const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
+    if (!target || !bossPhone || target !== bossPhone) return 0;
+    const cache = CacheService.getScriptCache();
+    const lastMs = Number(String(cache.get(TLW_bossSendPaceKey_(target)) || "").trim() || 0);
+    const nowMs = Date.now();
+    const minGapMs = 6200;
+    if (isFinite(lastMs) && lastMs > 0) {
+      const waitMs = minGapMs - (nowMs - lastMs);
+      if (waitMs > 0) {
+        Utilities.sleep(waitMs);
+        return waitMs;
+      }
+    }
+    return 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function TLW_noteBossReplySent_(toWaId) {
+  try {
+    const target = TLW_normalizePhone_(toWaId || "");
+    const bossPhone = TLW_normalizePhone_(TLW_getSetting_("BOSS_PHONE") || "");
+    if (!target || !bossPhone || target !== bossPhone) return false;
+    CacheService.getScriptCache().put(TLW_bossSendPaceKey_(target), String(Date.now()), 21600);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function TLW_parseSendTextResponse_(body, fallbackWaId) {
@@ -1182,7 +1719,8 @@ function TLW_logOutboundTextSend_(phoneNumberId, toWaId, text, responseBody) {
   }
 }
 
-function TLW_sendText_(phoneNumberId, toWaId, text) {
+function TLW_sendText_(phoneNumberId, toWaId, text, options) {
+  const opts = options && typeof options === "object" ? options : {};
   if (typeof TL_Automation_IsEnabled_ === "function" && !TL_Automation_IsEnabled_()) {
     const blocked = {
       ok: false,
@@ -1207,6 +1745,7 @@ function TLW_sendText_(phoneNumberId, toWaId, text) {
     text: { body: text }
   };
   try {
+    const pacedMs = TLW_maybePaceBossReply_(toWaId);
     const res = UrlFetchApp.fetch(url, {
       method: "post",
       contentType: "application/json",
@@ -1216,6 +1755,16 @@ function TLW_sendText_(phoneNumberId, toWaId, text) {
     });
     const result = { ok: res.getResponseCode() === 200, status: res.getResponseCode(), body: res.getContentText() };
     if (result.ok) {
+      TLW_noteBossReplySent_(toWaId);
+      if (pacedMs > 0) {
+        TLW_deferLog_("info", "menu_send_paced", {
+          to: String(toWaId || "").trim(),
+          phone_id: String(phoneNumberId || "").trim(),
+          paced_ms: pacedMs
+        });
+      }
+    }
+    if (result.ok && !opts.skipLog) {
       TLW_logOutboundTextSend_(phoneNumberId, toWaId, text, result.body);
     }
     return result;
