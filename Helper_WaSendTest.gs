@@ -10,7 +10,7 @@ function Helper_WaSendTestMessage() {
     to: "972552360035",
     type: "text",
     text: {
-      body: "TaskLess POC message"
+      body: "DealWise POC message"
     }
   };
 

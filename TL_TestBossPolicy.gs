@@ -7,6 +7,7 @@
 
 function TL_TestBossPolicy_RunAll() {
   return {
+    proactive_blocked: TL_TestBossPolicy_ProactiveBlockedByDefaultRun(),
     digest: TL_TestBossPolicy_DigestRun(),
     decision: TL_TestBossPolicy_DecisionRequestRun(),
     urgent: TL_TestBossPolicy_UrgentPushRun(),
@@ -16,6 +17,39 @@ function TL_TestBossPolicy_RunAll() {
     duplicate: TL_TestBossPolicy_DuplicateSignatureRun(),
     interval: TL_TestBossPolicy_IntervalGateRun()
   };
+}
+
+function TL_TestBossPolicy_ProactiveBlockedByDefaultRun() {
+  const captured = [];
+  const rows = TL_TestBossPolicy_buildMixedPriorityRows_();
+  const state = TL_TestBossPolicy_buildFreshState_();
+
+  const result = TL_BossPolicy_Run({
+    rows: rows,
+    settings: TL_TestBossPolicy_settings_({
+      BOSS_PROACTIVE_UPDATES_ENABLED: "false",
+      URGENT_PUSH_ENABLED: "true",
+      BOSS_INTERRUPT_LEVEL: "all_action_items",
+      DO_NOT_DISTURB_ENABLED: "false",
+      BOSS_PHONE: "972500000999",
+      BUSINESS_PHONE_ID: "896133996927016"
+    }),
+    state: state,
+    persistState: false,
+    now: new Date("2026-03-19T09:30:00.000Z"),
+    sendFn: TL_TestBossPolicy_captureSend_(captured)
+  });
+
+  const output = {
+    ok: true,
+    case: "proactive_blocked_by_default",
+    sent_count: captured.length,
+    skipped: result.skipped,
+    reason: result.reason,
+    result: result
+  };
+  Logger.log("TL_TestBossPolicy_ProactiveBlockedByDefaultRun: %s", JSON.stringify(output, null, 2));
+  return output;
 }
 
 function TL_TestBossPolicy_DigestRun() {
@@ -677,6 +711,7 @@ function TL_TestBossPolicy_settings_(overrides) {
   return Object.assign({
     BOSS_PHONE: "972500000999",
     BUSINESS_PHONE_ID: "896133996927016",
+    BOSS_PROACTIVE_UPDATES_ENABLED: "true",
     URGENT_PUSH_ENABLED: "true",
     BOSS_INTERRUPT_LEVEL: "all_action_items",
     BOSS_UPDATE_INTERVAL_MINUTES: "60",

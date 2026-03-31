@@ -117,17 +117,16 @@ function TL_Capabilities_BuildBossFacingSummary_() {
   const lines = [
     TL_Language_UiText_("מה אני יכולה לעזור לך לעשות כרגע:", "What I can help you do right now:"),
     "",
-    "1. " + TL_Language_UiText_("לפתוח ולנהל משימות", "Open and manage tasks"),
-    "2. " + TL_Language_UiText_("ליצור ולסקור תזכורות", "Create and review reminders"),
-    "3. " + TL_Language_UiText_("לתאם פגישות ואירועים", "Coordinate meetings and events"),
-    "4. " + TL_Language_UiText_("להכין הודעות וטיוטות לאישור", "Prepare messages and drafts for approval"),
-    "5. " + TL_Language_UiText_("לרכז מה פתוח, מה דחוף ומה ממתין לאישור", "Show what is open, urgent, or waiting for approval"),
-    "6. " + TL_Language_UiText_("לשמור מידע חשוב על אנשי קשר", "Save important contact memory"),
+    "1. " + TL_Language_UiText_("לפתוח את תור התשובות ולהכין טיוטות לאישור", "Open the reply queue and prepare drafts for approval"),
+    "2. " + TL_Language_UiText_("לשמור ולהעשיר מידע חשוב על אנשי קשר ב-CRM", "Save and enrich important contact memory in the CRM"),
+    "3. " + TL_Language_UiText_("להציג הזדמנויות ולהכין ניסוחים לפעולה יזומה", "Show opportunities and prepare drafts for proactive follow-up"),
+    "4. " + TL_Language_UiText_("לאתר איש קשר, הקשר אחרון או תשובות דומות מהעבר", "Find a contact, recent context, or similar past replies"),
+    "5. " + TL_Language_UiText_("להציג מה פתוח, דחוף או ממתין לאישור", "Show what is open, urgent, or waiting for approval"),
     "",
     TL_Language_UiText_("אפשר פשוט לכתוב חופשי, למשל:", "You can also just ask naturally, for example:"),
-    TL_Language_UiText_("\"תפתחי לי משימה להתקשר לדנה מחר\"", "\"Create a task to call Dana tomorrow\""),
-    TL_Language_UiText_("\"מה ממתין לאישור שלי?\"", "\"What is waiting for my approval?\""),
-    TL_Language_UiText_("\"תכיני הודעה ללקוח שאני מאחר בעשר דקות\"", "\"Draft a message telling the client I'm 10 minutes late\"")
+    TL_Language_UiText_("\"מה מחכה לי למענה?\"", "\"What is waiting for my reply?\""),
+    TL_Language_UiText_("\"תוסיפי שדנה רגישה למחיר\"", "\"Add that Dana is price sensitive\""),
+    TL_Language_UiText_("\"על מי כדאי לי לעבוד עכשיו?\"", "\"Who should I work on now?\"")
   ];
   return lines.join("\n");
 }
@@ -236,16 +235,6 @@ function TL_Capabilities_registryDefs_() {
       writes: ["INBOX"],
       channels: ["email"],
       description: "Send an approved email message."
-    },
-    {
-      id: "FINALIZE_APPROVED_CAPTURE",
-      category: "execute",
-      fn: "TL_Orchestrator_FinalizeCaptureApproval_",
-      approval_required: true,
-      reads: ["INBOX"],
-      writes: ["INBOX"],
-      channels: ["whatsapp","email","task","reminder","schedule","journal"],
-      description: "Finalize an approved capture item into its deterministic stored form."
     },
     {
       id: "ACTIVE_ITEM_STATE",

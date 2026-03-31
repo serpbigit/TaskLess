@@ -5,7 +5,7 @@ This folder is for helper scripts / runbooks.
 - dump-files.ps1: emits a single combined text snapshot of the repo files
 - clasp.ps1: repo-local wrapper for `clasp` that resolves the executable explicitly instead of depending on shell PATH/profile state
 
-Usage from `C:\dev\gas\TaskLess`:
+Usage from the repo root:
 
 ```powershell
 .\scripts\clasp.ps1 push

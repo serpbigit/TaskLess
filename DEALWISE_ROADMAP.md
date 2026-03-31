@@ -56,10 +56,18 @@ Scope:
 Status: `pending`
 
 Scope:
+- rename the lane in product and boss UX to `Messages That Need Your Reply`
+- start with a short digest before opening one-by-one cards
 - show one real reply-needed item at a time
+- default the queue to `Chronological` so the boss gets the first card immediately after the digest
 - reuse contact state and recent activity
-- allow approve, edit, discard, next
+- show card identity clearly: contact name, alternate display name when different, phone, email, channel
+- show a one-line `Waiting for` summary and a short excerpt
+- offer `1-3` concrete reply choices when possible
+- allow `Edit`, `Archive`, and `Later`
 - never draft replies for FYI or low-signal items
+- keep `Messages That Need Your Reply` conservative and trust-oriented: chronology-first mode must always be available
+- add a later `SETTINGS` override for default reply-queue ordering: always `Chronological`, always `Most Important First`, or ask each time
 - add passive reply-personalization learning later via a `Personal Style Directory` built from sent-message prompt/response pairs, intent and recipient labeling, weighted phrase retrieval, and a minimum-sample confidence threshold before style-based drafting is allowed
 
 ### Step 5 — Safe Send Path Rebuild
@@ -77,6 +85,7 @@ Status: `pending`
 
 Scope:
 - surface the best business-progress items, not only inbox replies
+- keep this lane aggressively ranked by impact, urgency, and leverage
 - combine CRM state, open loops, and recent signals into a useful owner view
 
 ### Step 7 — Manual Contact Update
@@ -86,6 +95,21 @@ Status: `pending`
 Scope:
 - let the boss update contact memory directly
 - keep manual updates lightweight and immediately reusable by the rest of the system
+
+## Future Moat Direction
+
+Parked for later, not for the current implementation pass:
+- passive context refresh: keep re-evaluating unresolved inbound items when later inbound messages from the same sender add new context, change urgency, cancel the ask, or close the loop
+- passive manual-reply learning: learn from real boss/business replies even when they were not sent through DealWise
+- phrase-pattern mining: detect repeated boss wording across different contacts, then classify reusable language patterns such as excitement, agreement, reassurance, delay, scheduling, and objection-handling
+
+Sheet-design implication to keep in mind now:
+- when changing `ACTIVITY` or related sheets, preserve enough structure for future learning instead of storing only final AI interpretations
+- important future-safe fields include: thread/group id, contact id, sender role, receiver role, direction, raw text, normalized text, channel, timestamp, message id, reply linkage when available, grouped interaction id, manual-reply flags, DealWise-reply flags, external-resolution flags, and open-loop/reply-needed state markers
+
+Working rule:
+- do not pivot to implementing this moat now
+- but do avoid sheet/header decisions that would make this future learning layer harder to build later
 
 ## Working Rule
 

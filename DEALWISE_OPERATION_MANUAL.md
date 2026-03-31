@@ -42,9 +42,9 @@ Global command rules:
 - `help` always opens contextual help
 - command words should be matched as standalone messages only, not as substrings inside a normal sentence
 
-## 3. Easy Replies
+## 3. Messages That Need Your Reply
 
-`Easy Replies` should surface only items that genuinely deserve a reply.
+`Messages That Need Your Reply` should surface only items that genuinely deserve a reply.
 
 It should usually work on grouped interaction units:
 - WhatsApp: grouped inbound burst from one contact over the configured quiet/max window, then expanded into a short mixed conversation window with both sides of the thread
@@ -65,9 +65,36 @@ It should not surface:
 - noise that does not require attention, decision, or opportunity handling
 
 Current boss UX target:
+- start with a short digest before showing one-by-one cards
+- digest should show: total open reply items, urgent-today count, channel split, oldest waiting
+- after the digest, start immediately in `Chronological` order by default
+- the reason for the default is speed: the boss should get to the first actionable card with the fewest possible round trips and the highest chance of meeting his expectation quickly
 - show one real reply-needed item at a time
 - when possible, offer `2-3` plausible reply options that move the thread forward
+- separate reply choices from management actions
 - allow the boss to choose one directly, or use `Edit`, `Later`, or `Archive`
+
+Reply-card structure:
+- always show: best-known contact name from `CONTACTS`, alternate WhatsApp display name if different, phone and/or email when available, channel, waiting-for summary, short excerpt
+- `Who` should optimize for recognition, not elegance
+- if the CRM name and channel display name are effectively the same, show one name only
+- if phone or email help disambiguate identity, show them
+- prefer a short excerpt by default, not the full message
+- for Gmail, add an original-thread link later only if it is reliable and clean
+- format the interpretation line as `Waiting for: ...`
+
+Reply-card actions:
+- reply choices: `1-3`
+- management actions: `4. Edit`, `5. Archive`, `6. Later`
+- keep these action numbers stable across WhatsApp and Gmail where possible
+
+Ordering policy:
+- `Messages That Need Your Reply` should not silently bury items because AI guessed wrong
+- `Chronological` should be the default queue mode
+- `Chronological` should mean oldest unanswered first, with only limited bump-ups for obvious urgency such as a meeting today, explicit urgency language, or repeated follow-up
+- `Most Important First` may use AI ranking by explicit urgency, dependency on the boss, relationship importance, and opportunity size, with chronology as a tie-break
+- expose a future `SETTINGS` override so the boss can set a preferred default ordering mode without being asked every time
+- supported future override modes should be: always `Chronological`, always `Most Important First`, or `Ask Each Time`
 
 Boss timeout rule:
 - keep a short `fresh root-menu choice` window for numeric menu replies right after `Menu`
@@ -90,12 +117,14 @@ Expected behavior:
 
 This rule is critical for trust.
 
-## 5. Priority / Next Steps
+## 5. Next Steps To Close Deals
 
-`Priority / Next Steps` should show only what deserves attention now.
+`Next Steps To Close Deals` should show only what deserves attention now.
 
 Main rule:
 - do not waste the boss's attention on low-value noise
+- this lane may include both reply-related and non-reply-related actions
+- unlike the reply lane, this lane should be explicitly business-ranked by impact, urgency, leverage, and expected deal progress
 
 The boss can always read raw email or WhatsApp directly if needed.
 DealWise should surface only:

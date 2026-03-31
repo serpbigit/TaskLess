@@ -298,6 +298,9 @@ function TL_TestWebhook_BossVoiceCaptureHandoffRun() {
     root_id: rootId
   }, 2000));
   const loc = TL_AI_getInboxRow_(appended.row);
+  if (typeof TL_Menu_SetState_ === "function" && TL_MENU && TL_MENU_STATES) {
+    TL_Menu_SetState_(bossPhone, TL_MENU_STATES.CAPTURE_CONTACT_ENRICH);
+  }
   const captured = [];
   const packetStash = [];
   const result = TLW_tryAutoBossCapture_({
@@ -364,6 +367,67 @@ function TL_TestWebhook_BossVoiceCaptureHandoffRun() {
     child_count: childRows.length
   };
   Logger.log("TL_TestWebhook_BossVoiceCaptureHandoffRun: %s", JSON.stringify(output, null, 2));
+  return output;
+}
+
+function TL_TestWebhook_BossVoicePassiveRootRun() {
+  const bossPhone = String(TLW_getSetting_("BOSS_PHONE") || "").trim();
+  if (!bossPhone) throw new Error("Missing BOSS_PHONE");
+  if (typeof TL_Menu_ResetSession_ === "function") TL_Menu_ResetSession_(bossPhone);
+
+  const row = {
+    timestamp: new Date(),
+    root_id: "ROOT_test_voice_passive_" + Date.now(),
+    event_id: "EVT_test_voice_passive_" + Date.now(),
+    parent_event_id: "",
+    record_id: "record:test:voice:passive:" + Date.now(),
+    record_version: 1,
+    record_class: "communication",
+    channel: "whatsapp",
+    direction: "incoming",
+    phone_number_id: "896133996927016",
+    display_phone_number: "",
+    sender: bossPhone,
+    receiver: TLW_getSetting_("BUSINESS_PHONE") || "",
+    message_id: "wamid.test.voice.passive." + Date.now(),
+    message_type: "voice",
+    text: "what needs attention",
+    contact_id: "",
+    raw_payload_ref: "",
+    notes: "",
+    task_due: "",
+    task_status: "",
+    task_priority: "",
+    topic_id: "",
+    topic_tagged_at: "",
+    media_id: "media.test.voice.passive",
+    media_mime_type: "audio/ogg",
+    media_sha256: "",
+    media_caption: "",
+    media_filename: "",
+    media_is_voice: true
+  };
+
+  const appended = TLW_appendInboxRow_(row, TLW_safeStringify_({ source: "TL_TestWebhook_BossVoicePassiveRootRun" }, 2000));
+  const result = TLW_tryBossMenuFromInboxRow_({
+    direction: "incoming",
+    record_class: "communication",
+    sender: bossPhone,
+    message_id: row.message_id,
+    message_type: "voice",
+    text: row.text,
+    media_id: row.media_id,
+    media_is_voice: true
+  }, {
+    row: appended.row
+  });
+
+  const output = {
+    ok: result === null,
+    source_row: appended.row,
+    result: result
+  };
+  Logger.log("TL_TestWebhook_BossVoicePassiveRootRun: %s", JSON.stringify(output, null, 2));
   return output;
 }
 

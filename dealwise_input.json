@@ -1,0 +1,12 @@
+{
+  "channel": "whatsapp",
+  "customerMessage": "Hi, just checking if you saw my message and whether we can move forward this week.",
+  "contactName": "John",
+  "contactStage": "warm lead",
+  "ownerStyle": "warm and concise",
+  "knownContext": [
+    "No price was discussed yet",
+    "Owner is interested in moving conversation forward"
+  ],
+  "availableActions": ["reply", "wait", "ask_user", "ignore"]
+}

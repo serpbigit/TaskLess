@@ -21,9 +21,9 @@ DealWise is not a generic assistant and not a general task manager.
 ## 2. Main Menu
 
 The main DealWise menu is:
-1. `Easy Replies`
-2. `Priority / Next Steps`
-3. `Manual Contact Update`
+1. `Messages That Need Your Reply`
+2. `Update Contact Info`
+3. `Next Steps To Close Deals`
 4. `Help`
 
 Anything outside these four lanes is secondary or out of scope for the current product.
@@ -41,30 +41,52 @@ Anything outside these four lanes is secondary or out of scope for the current p
 
 ## 4. Main Menu Behavior
 
-### 4.1 `Easy Replies`
+### 4.1 `Messages That Need Your Reply`
 
 Purpose:
 - clear only the messages that really need a reply
 - show one item at a time
 - keep the boss in a lightweight WhatsApp flow
+- start with a short digest before opening one-by-one cards
+- keep the default path as fast as possible after entering the lane
+
+Default review flow:
+1. show digest: total items, urgent-today count, channel split, oldest waiting
+2. start the queue immediately in `Chronological` order
+3. show one card at a time
+
+Card structure:
+- always show: best-known contact name, alternate display name if different, phone and/or email when available, channel, waiting-for summary, short excerpt
+- prefer a short excerpt by default, not the full raw message
+- for Gmail, add an original-thread link later if it is reliable and clean
 
 Boss actions:
-1. approve
-2. edit
-3. discard
-4. next
-5. menu/help as needed
+1. choose reply option `1-3`
+2. `Edit`
+3. `Archive`
+4. `Later`
+5. `menu/help/back/end` as needed
 
 Edit must stay lightweight:
 - one short text instruction, or
 - one voice note
 
-### 4.2 `Priority / Next Steps`
+Ordering rule:
+- default initial behavior should be conservative, transparent, and fast
+- `Chronological` should be the default ordering mode
+- `Most Important First` may use AI scoring by urgency, explicit dependency, relationship importance, and opportunity value, with chronology as a tie-break
+- expose a future `SETTINGS` override so the boss can choose one of three default behaviors:
+  - always `Chronological`
+  - always `Most Important First`
+  - ask each time how to review the queue
+
+### 4.2 `Next Steps To Close Deals`
 
 Purpose:
 - show what deserves attention now
 - primarily from the contact CRM snapshot
 - include reply-related and non-reply-related progress items only when they truly deserve attention
+- rank primarily by business impact, urgency, and leverage, not by inbox chronology
 
 Examples:
 - send quote for 20k
@@ -72,7 +94,7 @@ Examples:
 - finalize contract revision
 - customer waiting on promised material
 
-### 4.3 `Manual Contact Update`
+### 4.3 `Update Contact Info`
 
 Purpose:
 - let the boss update CRM memory directly
@@ -150,8 +172,9 @@ In scope:
 - CRM enrichment from conversations
 - score/state revision from meaningful signals
 - `Easy Replies`
-- `Priority / Next Steps`
-- `Manual Contact Update`
+- `Messages That Need Your Reply`
+- `Next Steps To Close Deals`
+- `Update Contact Info`
 - safety and schema work directly required for these lanes
 
 Out of scope unless explicitly approved:

@@ -18,12 +18,16 @@ What is already aligned:
 - the boss-facing root menu in code is moving toward `Reply`, `Enrich CRM`, `Opportunities`, `Help`
 - approval-based outbound sends are blocked by default in local code
 - proactive boss digests and decision packets are now blocked by default in local code
+- the boss command fast lane for `menu`, `help`, `back`, and `end` is implemented and instrumented with timing benchmarks
+- the menu-speed tracer now separates backend pre-send time, Meta roundtrip time, time to Meta accept, and post-send tail
 
 What is not yet aligned:
 - the repo still uses `INBOX` and `ARCHIVE` as the active operational ledger
 - `ACTIVITY` is the target product contract, not the current implemented tab
 - `CONTACTS` still carries older schema baggage and needs a cleaner snapshot-oriented model
 - older TaskLess branches and secretary-loop behavior still exist in the codebase
+- the reply lane digest-first flow and queue-order choice are documented, but not yet implemented in code
+- the future `SETTINGS` override for default reply-queue ordering is documented, but not yet implemented
 
 ## 3. Sheet Reality
 

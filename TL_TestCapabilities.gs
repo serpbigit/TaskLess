@@ -35,7 +35,7 @@ function TL_TestCapabilities_PacketRun() {
 function TL_TestCapabilities_PromptBriefRun() {
   const brief = TL_Capabilities_BuildPromptBrief_();
   return {
-    ok: brief.indexOf("Current TaskLess capability packet:") !== -1 &&
+    ok: brief.indexOf("Current DealWise capability packet:") !== -1 &&
       brief.indexOf("query:") !== -1 &&
       brief.indexOf("QUERY_CONTACTS_SEARCH") !== -1 &&
       brief.indexOf("SEND_APPROVED_EMAIL") !== -1 &&
@@ -47,7 +47,7 @@ function TL_TestCapabilities_PromptBriefRun() {
 function TL_TestCapabilities_BossPromptRun() {
   const prompt = TL_AI_buildBossIntentPrompt_("show me my approvals", "Hebrew", "Boss");
   return {
-    ok: prompt.indexOf("Current TaskLess capability packet:") !== -1 &&
+    ok: prompt.indexOf("Current DealWise capability packet:") !== -1 &&
       prompt.indexOf("QUERY_CONTACTS_SEARCH") !== -1 &&
       prompt.indexOf("active_item_state_supported=false") !== -1,
     prompt_preview: prompt.slice(0, 1200)

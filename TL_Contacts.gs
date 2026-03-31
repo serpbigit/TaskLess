@@ -138,9 +138,11 @@ function TL_Contacts_headers_() {
     return TL_SCHEMA.CONTACTS_HEADERS.slice();
   }
   return [
-    "contact_id","name","alias","org","website","phone1","phone2","email","role","tags","last_note","last_enriched_at",
-    "source_system","source_id","phone1_normalized","phone2_normalized","email_normalized","labels","sync_status","last_synced_at","notes_internal",
-    "crm_id","display_name","identity_terms","phones","emails","personal_summary","business_summary","current_state","next_action","last_contact_at","last_updated"
+    "contact_id","display_name","relationship_type","phones","emails","identity_terms","org","role","tags",
+    "personal_history","business_history","deal_stage","deal_score","priority_score",
+    "next_step_summary","next_step_due","next_step_channel","waiting_on","open_loop_status",
+    "last_signal_summary","last_signal_at","last_inbound_at","last_outbound_at","last_replied_at","unreplied_inbound_count",
+    "source_system","source_id","notes_internal","last_updated"
   ];
 }
 
@@ -342,7 +344,13 @@ function TL_Contacts_DebugPeopleApi() {
 
   const result = {
     ok: true,
-    account_email_hint: Session.getActiveUser().getEmail(),
+    account_email_hint: (function() {
+      try {
+        return String((Session.getActiveUser && Session.getActiveUser().getEmail && Session.getActiveUser().getEmail()) || "").trim();
+      } catch (e) {
+        return "";
+      }
+    })(),
     contact_groups_count: (groupResponse.contactGroups || []).length,
     contact_group_names: (groupResponse.contactGroups || []).slice(0, 10).map(function(group) {
       return String(group && group.name ? group.name : "");
@@ -577,6 +585,26 @@ function TL_Contacts_mergeRow_(existingRow, mapped, nowIso) {
     existingSafe.business_summary,
     mappedSafe.business_summary || TL_Contacts_composeBusinessSummary_(mappedSafe.org, mappedSafe.role, [mappedSafe.website])
   );
+  merged.relationship_type = String(existingSafe.relationship_type || mappedSafe.relationship_type || "").trim();
+  merged.personal_history = String(existingSafe.personal_history || existingSafe.personal_summary || "").trim();
+  merged.business_history = TL_Contacts_chooseSyncValue_(
+    existingSafe.business_history || existingSafe.business_summary,
+    mappedSafe.business_history || mappedSafe.business_summary
+  );
+  merged.deal_stage = String(existingSafe.deal_stage || "").trim();
+  merged.deal_score = String(existingSafe.deal_score || "").trim();
+  merged.priority_score = String(existingSafe.priority_score || "").trim();
+  merged.next_step_summary = String(existingSafe.next_step_summary || existingSafe.next_action || "").trim();
+  merged.next_step_due = String(existingSafe.next_step_due || "").trim();
+  merged.next_step_channel = String(existingSafe.next_step_channel || "").trim();
+  merged.waiting_on = String(existingSafe.waiting_on || "").trim();
+  merged.open_loop_status = String(existingSafe.open_loop_status || "").trim();
+  merged.last_signal_summary = String(existingSafe.last_signal_summary || existingSafe.current_state || existingSafe.business_summary || "").trim();
+  merged.last_signal_at = String(existingSafe.last_signal_at || existingSafe.last_contact_at || "").trim();
+  merged.last_inbound_at = String(existingSafe.last_inbound_at || "").trim();
+  merged.last_outbound_at = String(existingSafe.last_outbound_at || "").trim();
+  merged.last_replied_at = String(existingSafe.last_replied_at || "").trim();
+  merged.unreplied_inbound_count = String(existingSafe.unreplied_inbound_count || "").trim();
   merged.current_state = String(existingSafe.current_state || "").trim();
   merged.next_action = String(existingSafe.next_action || "").trim();
   merged.last_contact_at = String(existingSafe.last_contact_at || "").trim();
@@ -597,6 +625,23 @@ function TL_Contacts_buildNewRow_(mapped, nowIso) {
   row.emails = TL_Contacts_stringifyMultiValueField_(TL_Contacts_extractEmailsFromRow_(row));
   row.personal_summary = String(row.personal_summary || "").trim();
   row.business_summary = String(row.business_summary || "").trim();
+  row.relationship_type = String(row.relationship_type || "").trim();
+  row.personal_history = String(row.personal_history || row.personal_summary || "").trim();
+  row.business_history = String(row.business_history || row.business_summary || "").trim();
+  row.deal_stage = String(row.deal_stage || "").trim();
+  row.deal_score = String(row.deal_score || "").trim();
+  row.priority_score = String(row.priority_score || "").trim();
+  row.next_step_summary = String(row.next_step_summary || row.next_action || "").trim();
+  row.next_step_due = String(row.next_step_due || "").trim();
+  row.next_step_channel = String(row.next_step_channel || "").trim();
+  row.waiting_on = String(row.waiting_on || "").trim();
+  row.open_loop_status = String(row.open_loop_status || "").trim();
+  row.last_signal_summary = String(row.last_signal_summary || row.current_state || row.business_summary || "").trim();
+  row.last_signal_at = String(row.last_signal_at || row.last_contact_at || "").trim();
+  row.last_inbound_at = String(row.last_inbound_at || "").trim();
+  row.last_outbound_at = String(row.last_outbound_at || "").trim();
+  row.last_replied_at = String(row.last_replied_at || "").trim();
+  row.unreplied_inbound_count = String(row.unreplied_inbound_count || "").trim();
   row.current_state = String(row.current_state || "").trim();
   row.next_action = String(row.next_action || "").trim();
   row.last_contact_at = String(row.last_contact_at || "").trim();
@@ -753,6 +798,34 @@ function TL_Contacts_attachLegacyAliases_(row) {
   safe.phone1_normalized = TL_Contacts_normalizePhoneField_(safe.phone1 || phones[0] || "");
   safe.phone2_normalized = TL_Contacts_normalizePhoneField_(safe.phone2 || phones[1] || "");
   safe.email_normalized = TL_Contacts_normalizeEmail_(safe.email || emails[0] || "");
+  safe.relationship_type = String(safe.relationship_type || "").trim();
+  safe.personal_history = String(safe.personal_history || safe.personal_summary || "").trim();
+  safe.business_history = String(safe.business_history || safe.business_summary || "").trim();
+  safe.deal_stage = String(safe.deal_stage || "").trim();
+  safe.deal_score = String(safe.deal_score || "").trim();
+  safe.priority_score = String(safe.priority_score || "").trim();
+  safe.next_step_summary = String(safe.next_step_summary || safe.next_action || "").trim();
+  safe.next_step_due = String(safe.next_step_due || "").trim();
+  safe.next_step_channel = String(safe.next_step_channel || "").trim();
+  safe.waiting_on = String(safe.waiting_on || "").trim();
+  safe.open_loop_status = String(safe.open_loop_status || "").trim();
+  safe.last_signal_summary = String(safe.last_signal_summary || safe.current_state || safe.business_summary || "").trim();
+  safe.last_signal_at = String(safe.last_signal_at || safe.last_contact_at || "").trim();
+  safe.last_inbound_at = String(safe.last_inbound_at || "").trim();
+  safe.last_outbound_at = String(safe.last_outbound_at || "").trim();
+  safe.last_replied_at = String(safe.last_replied_at || safe.last_outbound_at || "").trim();
+  safe.unreplied_inbound_count = String(safe.unreplied_inbound_count || "").trim();
+  safe.personal_summary = String(safe.personal_summary || safe.personal_history || "").trim();
+  safe.business_summary = String(safe.business_summary || safe.business_history || "").trim();
+  safe.current_state = String(safe.current_state || safe.last_signal_summary || "").trim();
+  safe.next_action = String(safe.next_action || safe.next_step_summary || "").trim();
+  safe.last_contact_at = TL_Contacts_firstNonEmpty_([
+    safe.last_contact_at,
+    safe.last_signal_at,
+    safe.last_outbound_at,
+    safe.last_inbound_at,
+    safe.last_replied_at
+  ]);
   if (safe.last_updated === undefined) safe.last_updated = String(safe.last_synced_at || "").trim();
   return safe;
 }
@@ -767,6 +840,8 @@ function TL_Contacts_buildSearchContactFromRow_(row) {
   const businessSummary = String(safe.business_summary || "").trim();
   const currentState = String(safe.current_state || "").trim();
   const nextAction = String(safe.next_action || "").trim();
+  const nextStepSummary = String(safe.next_step_summary || nextAction).trim();
+  const lastSignalSummary = String(safe.last_signal_summary || currentState || businessSummary).trim();
   const notesInternal = String(safe.notes_internal || "").trim();
   return {
     contactId: TL_Contacts_rowContactId_(safe),
@@ -779,6 +854,7 @@ function TL_Contacts_buildSearchContactFromRow_(row) {
     emails: emails,
     org: String(safe.org || "").trim(),
     role: String(safe.role || "").trim(),
+    relationshipType: String(safe.relationship_type || "").trim(),
     tags: String(safe.tags || "").trim(),
     labels: String(safe.labels || "").trim(),
     email: emails[0] || "",
@@ -787,6 +863,22 @@ function TL_Contacts_buildSearchContactFromRow_(row) {
     notesInternal: notesInternal,
     personalSummary: personalSummary,
     businessSummary: businessSummary,
+    personalHistory: String(safe.personal_history || personalSummary).trim(),
+    businessHistory: String(safe.business_history || businessSummary).trim(),
+    dealStage: String(safe.deal_stage || "").trim(),
+    dealScore: String(safe.deal_score || "").trim(),
+    priorityScore: String(safe.priority_score || "").trim(),
+    nextStepSummary: nextStepSummary,
+    nextStepDue: String(safe.next_step_due || "").trim(),
+    nextStepChannel: String(safe.next_step_channel || "").trim(),
+    waitingOn: String(safe.waiting_on || "").trim(),
+    openLoopStatus: String(safe.open_loop_status || "").trim(),
+    lastSignalSummary: lastSignalSummary,
+    lastSignalAt: String(safe.last_signal_at || "").trim(),
+    lastInboundAt: String(safe.last_inbound_at || "").trim(),
+    lastOutboundAt: String(safe.last_outbound_at || "").trim(),
+    lastRepliedAt: String(safe.last_replied_at || "").trim(),
+    unrepliedInboundCount: String(safe.unreplied_inbound_count || "").trim(),
     currentState: currentState,
     nextAction: nextAction,
     lastContactAt: String(safe.last_contact_at || "").trim(),
@@ -803,6 +895,8 @@ function TL_Contacts_buildSearchContactFromRow_(row) {
     labelsNorm: TL_Contacts_normalizeSearchText_(String(safe.labels || "").trim()),
     personalSummaryNorm: TL_Contacts_normalizeSearchText_(personalSummary),
     businessSummaryNorm: TL_Contacts_normalizeSearchText_(businessSummary),
+    nextStepSummaryNorm: TL_Contacts_normalizeSearchText_(nextStepSummary),
+    lastSignalSummaryNorm: TL_Contacts_normalizeSearchText_(lastSignalSummary),
     currentStateNorm: TL_Contacts_normalizeSearchText_(currentState),
     nextActionNorm: TL_Contacts_normalizeSearchText_(nextAction)
   };
@@ -1291,6 +1385,15 @@ function TL_Contacts_mergeCsvValues_(existingValue, mappedValue) {
   return out.join(", ");
 }
 
+function TL_Contacts_firstNonEmpty_(values) {
+  const list = Array.isArray(values) ? values : [values];
+  for (let i = 0; i < list.length; i++) {
+    const value = String(list[i] || "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
 function TL_Contacts_mergeInternalNotes_(existingValue, mappedValue) {
   const existing = String(existingValue || "").trim();
   const mapped = String(mappedValue || "").trim();
@@ -1473,8 +1576,25 @@ function TL_Contacts_buildRuntimeBaseRow_(crmId, data, nowIso) {
     ])),
     source_system: "dealwise_runtime",
     source_id: crmId,
+    relationship_type: String(safe.relationship_type || "").trim(),
     personal_summary: String(safe.personal_summary || "").trim(),
     business_summary: String(safe.business_summary || safe.summary || "").trim(),
+    personal_history: String(safe.personal_history || safe.personal_summary || "").trim(),
+    business_history: String(safe.business_history || safe.business_summary || safe.summary || "").trim(),
+    deal_stage: String(safe.deal_stage || "").trim(),
+    deal_score: String(safe.deal_score || "").trim(),
+    priority_score: String(safe.priority_score || "").trim(),
+    next_step_summary: String(safe.next_step_summary || safe.next_action || "").trim(),
+    next_step_due: String(safe.next_step_due || "").trim(),
+    next_step_channel: String(safe.next_step_channel || "").trim(),
+    waiting_on: String(safe.waiting_on || "").trim(),
+    open_loop_status: String(safe.open_loop_status || "").trim(),
+    last_signal_summary: String(safe.last_signal_summary || safe.current_state || safe.business_summary || safe.summary || "").trim(),
+    last_signal_at: String(safe.last_signal_at || safe.last_contact_at || "").trim(),
+    last_inbound_at: String(safe.last_inbound_at || "").trim(),
+    last_outbound_at: String(safe.last_outbound_at || "").trim(),
+    last_replied_at: String(safe.last_replied_at || "").trim(),
+    unreplied_inbound_count: String(safe.unreplied_inbound_count || "").trim(),
     current_state: String(safe.current_state || "").trim(),
     next_action: String(safe.next_action || "").trim(),
     last_contact_at: String(safe.last_contact_at || "").trim(),
@@ -1502,8 +1622,25 @@ function TL_Contacts_applyPatchToRow_(row, patch, nowIso) {
       TL_Contacts_parseMultiValueField_(data.emails),
       [data.email || ""]
     ])),
+    relationship_type: String(data.relationship_type || safeRow.relationship_type || "").trim(),
     personal_summary: TL_Contacts_mergeSummaryText_(safeRow.personal_summary, data.personal_summary || ""),
     business_summary: TL_Contacts_mergeSummaryText_(safeRow.business_summary, data.business_summary || data.summary || ""),
+    personal_history: TL_Contacts_mergeSummaryText_(safeRow.personal_history || safeRow.personal_summary, data.personal_history || data.personal_summary || ""),
+    business_history: TL_Contacts_mergeSummaryText_(safeRow.business_history || safeRow.business_summary, data.business_history || data.business_summary || data.summary || ""),
+    deal_stage: String(data.deal_stage || safeRow.deal_stage || "").trim(),
+    deal_score: String(data.deal_score || safeRow.deal_score || "").trim(),
+    priority_score: String(data.priority_score || safeRow.priority_score || "").trim(),
+    next_step_summary: String(data.next_step_summary || data.next_action || safeRow.next_step_summary || safeRow.next_action || "").trim(),
+    next_step_due: String(data.next_step_due || safeRow.next_step_due || "").trim(),
+    next_step_channel: String(data.next_step_channel || safeRow.next_step_channel || "").trim(),
+    waiting_on: String(data.waiting_on || safeRow.waiting_on || "").trim(),
+    open_loop_status: String(data.open_loop_status || safeRow.open_loop_status || "").trim(),
+    last_signal_summary: TL_Contacts_mergeSummaryText_(safeRow.last_signal_summary || safeRow.current_state || "", data.last_signal_summary || data.current_state || data.business_summary || data.summary || ""),
+    last_signal_at: String(data.last_signal_at || data.last_contact_at || safeRow.last_signal_at || safeRow.last_contact_at || "").trim(),
+    last_inbound_at: String(data.last_inbound_at || safeRow.last_inbound_at || "").trim(),
+    last_outbound_at: String(data.last_outbound_at || safeRow.last_outbound_at || "").trim(),
+    last_replied_at: String(data.last_replied_at || safeRow.last_replied_at || "").trim(),
+    unreplied_inbound_count: String(data.unreplied_inbound_count || safeRow.unreplied_inbound_count || "").trim(),
     current_state: String(data.current_state || safeRow.current_state || "").trim(),
     next_action: String(data.next_action || safeRow.next_action || "").trim(),
     last_contact_at: String(data.last_contact_at || safeRow.last_contact_at || "").trim(),
@@ -1542,19 +1679,43 @@ function TL_Contacts_ApplyCrmPatch_(contactId, payload) {
   return { ok: true, rowNumber: rowNumber, crmId: crmId };
 }
 
-function TL_Contacts_buildGroupedInteractionPatch_(payload) {
+function TL_Contacts_buildInboundInteractionWritebackPatch_(payload) {
   const data = payload && typeof payload === "object" ? payload : {};
   return {
-    source_type: "grouped_inbound",
+    source_type: String(data.source_type || "inbound").trim() || "inbound",
     display_name: String(data.display_name || data.name || "").trim(),
     phone: String(data.phone || "").trim(),
     email: String(data.email || "").trim(),
+    relationship_type: String(data.relationship_type || "business").trim(),
     business_summary: String(data.business_summary || data.summary || "").trim(),
-    current_state: String(data.current_state || "").trim(),
+    business_history: String(data.business_history || data.business_summary || data.summary || "").trim(),
+    last_signal_summary: String(data.last_signal_summary || data.current_state || data.business_summary || data.summary || "").trim(),
+    last_signal_at: String(data.last_signal_at || data.last_contact_at || "").trim(),
+    last_inbound_at: String(data.last_inbound_at || data.last_contact_at || "").trim(),
+    current_state: String(data.current_state || data.business_summary || data.summary || "").trim(),
     next_action: String(data.next_action || "").trim(),
+    next_step_summary: String(data.next_step_summary || data.next_action || "").trim(),
+    next_step_due: String(data.next_step_due || "").trim(),
+    next_step_channel: String(data.next_step_channel || "").trim(),
+    waiting_on: String(data.waiting_on || "").trim(),
+    open_loop_status: String(data.open_loop_status || (String(data.next_action || data.next_step_summary || "").trim() ? "open" : "")).trim(),
     last_contact_at: String(data.last_contact_at || "").trim(),
     last_updated: String(data.last_updated || "").trim()
   };
+}
+
+function TL_Contacts_buildGroupedInteractionPatch_(payload) {
+  const data = payload && typeof payload === "object" ? payload : {};
+  return TL_Contacts_buildInboundInteractionWritebackPatch_(Object.assign({}, data, {
+    source_type: "grouped_inbound"
+  }));
+}
+
+function TL_Contacts_buildEmailInboundWritebackPatch_(payload) {
+  const data = payload && typeof payload === "object" ? payload : {};
+  return TL_Contacts_buildInboundInteractionWritebackPatch_(Object.assign({}, data, {
+    source_type: "email_inbound"
+  }));
 }
 
 function TL_Contacts_buildManualEnrichmentWritebackPatch_(payload) {
@@ -1572,16 +1733,28 @@ function TL_Contacts_buildManualEnrichmentWritebackPatch_(payload) {
     display_name: String(data.display_name || data.name || "").trim(),
     phone: String(data.phone || "").trim(),
     email: String(data.email || "").trim(),
+    relationship_type: String(data.relationship_type || "").trim(),
     current_state: String(data.current_state || "").trim(),
     next_action: String(data.next_action || "").trim(),
+    next_step_summary: String(data.next_step_summary || data.next_action || "").trim(),
+    next_step_due: String(data.next_step_due || "").trim(),
+    next_step_channel: String(data.next_step_channel || "").trim(),
+    waiting_on: String(data.waiting_on || "").trim(),
+    open_loop_status: String(data.open_loop_status || "").trim(),
     last_updated: String(data.last_updated || "").trim()
   };
 
-  if (personalTypes[noteType]) patch.personal_summary = noteText;
-  else patch.business_summary = noteText;
+  if (personalTypes[noteType]) {
+    patch.personal_summary = noteText;
+    patch.personal_history = noteText;
+  } else {
+    patch.business_summary = noteText;
+    patch.business_history = noteText;
+  }
 
   if (noteType === "followup_context" && noteText && !patch.next_action) {
     patch.next_action = noteText;
+    patch.next_step_summary = noteText;
   }
 
   return patch;
@@ -1600,9 +1773,20 @@ function TL_Contacts_buildOutboundWritebackPatch_(payload, overrideLanguage) {
     display_name: String(data.display_name || data.name || "").trim(),
     phone: String(data.phone || "").trim(),
     email: String(data.email || "").trim(),
+    relationship_type: String(data.relationship_type || "business").trim(),
     business_summary: explicitSummary || fallbackSummary,
+    business_history: explicitSummary || fallbackSummary,
+    last_signal_summary: explicitSummary || fallbackSummary,
+    last_signal_at: String(data.last_contact_at || new Date().toISOString()).trim(),
+    last_outbound_at: String(data.last_outbound_at || data.last_contact_at || new Date().toISOString()).trim(),
+    last_replied_at: String(data.last_replied_at || data.last_contact_at || new Date().toISOString()).trim(),
     current_state: String(data.current_state || TL_Contacts_internalText_("ממתינים לתגובה.", "Waiting for reply.", language)).trim(),
     next_action: String(data.next_action || TL_Contacts_internalText_("להמתין לתגובה ולבדוק אם נדרש מעקב.", "Wait for reply and check whether follow-up is needed.", language)).trim(),
+    next_step_summary: String(data.next_step_summary || data.next_action || TL_Contacts_internalText_("להמתין לתגובה ולבדוק אם נדרש מעקב.", "Wait for reply and check whether follow-up is needed.", language)).trim(),
+    next_step_due: String(data.next_step_due || "").trim(),
+    next_step_channel: String(data.next_step_channel || "").trim(),
+    waiting_on: String(data.waiting_on || "contact").trim(),
+    open_loop_status: String(data.open_loop_status || "waiting_for_reply").trim(),
     last_contact_at: String(data.last_contact_at || new Date().toISOString()).trim(),
     last_updated: String(data.last_updated || new Date().toISOString()).trim()
   };
@@ -1610,6 +1794,10 @@ function TL_Contacts_buildOutboundWritebackPatch_(payload, overrideLanguage) {
 
 function TL_Contacts_ApplyGroupedInteractionWriteback_(contactId, payload) {
   return TL_Contacts_ApplyCrmPatch_(contactId, TL_Contacts_buildGroupedInteractionPatch_(payload));
+}
+
+function TL_Contacts_ApplyEmailInboundWriteback_(contactId, payload) {
+  return TL_Contacts_ApplyCrmPatch_(contactId, TL_Contacts_buildEmailInboundWritebackPatch_(payload));
 }
 
 function TL_Contacts_ApplyManualEnrichmentWriteback_(contactId, payload) {

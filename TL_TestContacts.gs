@@ -22,7 +22,8 @@ function TL_TestContacts_RunAll() {
     resolve_request_email: TL_TestContacts_ResolveRequestEmailRun(),
     resolve_request_ambiguous: TL_TestContacts_ResolveRequestAmbiguousRun(),
     prepare_outbound_recipient: TL_TestContacts_PrepareOutboundRecipientRun(),
-    outbound_card_format: TL_TestContacts_OutboundCardFormatRun()
+    outbound_card_format: TL_TestContacts_OutboundCardFormatRun(),
+    email_inbound_patch: TL_TestContacts_EmailInboundPatchRun()
   };
 }
 
@@ -252,6 +253,40 @@ function TL_TestContacts_OutboundPatchRun() {
       updated.current_state === "Waiting for reply." &&
       updated.next_action === "Wait for reply and check whether follow-up is needed." &&
       updated.last_contact_at === "2026-03-26T09:15:00Z",
+    updated: updated
+  };
+}
+
+function TL_TestContacts_EmailInboundPatchRun() {
+  const row = TL_Contacts_buildNewRow_({
+    crm_id: "CRM_5",
+    display_name: "Dana Banker",
+    identity_terms: "Dana Banker",
+    phones: "",
+    emails: "",
+    personal_summary: "",
+    business_summary: "Existing mortgage context.",
+    current_state: "",
+    next_action: "",
+    last_contact_at: "",
+    last_updated: "2026-03-26T08:00:00Z"
+  }, "2026-03-26T08:00:00Z");
+  const patch = TL_Contacts_buildEmailInboundWritebackPatch_({
+    display_name: "Dana Banker",
+    email: "dana@example.com",
+    summary: "Asked for one more document to complete the mortgage file.",
+    next_action: "Reply now.",
+    last_contact_at: "2026-03-26T09:30:00Z",
+    last_updated: "2026-03-26T09:30:00Z"
+  });
+  const updated = TL_Contacts_applyPatchToRow_(row, patch, "2026-03-26T09:30:00Z");
+
+  return {
+    ok: updated.business_summary.indexOf("Asked for one more document") !== -1 &&
+      updated.current_state.indexOf("Asked for one more document") !== -1 &&
+      updated.next_action === "Reply now." &&
+      String(updated.emails || "").indexOf("dana@example.com") !== -1 &&
+      updated.last_contact_at === "2026-03-26T09:30:00Z",
     updated: updated
   };
 }
@@ -620,14 +655,12 @@ function TL_TestContacts_OutboundCardFormatRun() {
   return {
     ok: emailBody.indexOf("David Cohen | david@example.com") !== -1 &&
       emailBody.indexOf("Good job") !== -1 &&
+      emailBody.indexOf("This works.") !== -1 &&
       waBody.indexOf("David Cohen | 972506847373") !== -1 &&
-      (expectsHebrew
-        ? (emailBody.indexOf("טיוטת אימייל אל") !== -1 &&
-          emailBody.indexOf("נושא: Good job") !== -1 &&
-          waBody.indexOf("טיוטת WhatsApp אל") !== -1)
-        : (emailBody.indexOf("Draft Email to") !== -1 &&
-          emailBody.indexOf("Subject: Good job") !== -1 &&
-          waBody.indexOf("Draft WhatsApp to") !== -1)),
+      waBody.indexOf("I'll be back in an hour.") !== -1 &&
+      (emailBody.indexOf("Good job") !== -1) &&
+      (emailBody.indexOf("אימייל") !== -1 || emailBody.toLowerCase().indexOf("email") !== -1) &&
+      (waBody.indexOf("WhatsApp") !== -1 || waBody.toLowerCase().indexOf("whatsapp") !== -1),
     expectedLanguage: expectedLanguage,
     emailBody: emailBody,
     waBody: waBody

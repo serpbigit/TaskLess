@@ -20,7 +20,7 @@ $files = Get-ChildItem -Path $Root -Recurse -File |
   Sort-Object FullName
 
 $sb = New-Object System.Text.StringBuilder
-$null = $sb.AppendLine("## TaskLess file dump  " + (Get-Date).ToString("s"))
+$null = $sb.AppendLine("## DealWise file dump  " + (Get-Date).ToString("s"))
 $null = $sb.AppendLine("root: " + $Root)
 $null = $sb.AppendLine("")
 

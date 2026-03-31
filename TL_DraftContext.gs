@@ -23,6 +23,7 @@ const TL_DRAFT_CONTEXT = {
 };
 
 function TL_DraftContext_BuildForInboxRowValues_(values, options) {
+  const currentSourceId = String(TL_Orchestrator_value_(values, "record_id") || TL_Orchestrator_value_(values, "message_id") || "").trim();
   const identity = TL_DraftContext_buildIdentity_(
     String(TL_Orchestrator_value_(values, "channel") || "").trim().toLowerCase(),
     String(TL_Orchestrator_value_(values, "direction") || "").trim().toLowerCase(),
@@ -31,7 +32,11 @@ function TL_DraftContext_BuildForInboxRowValues_(values, options) {
     TL_Orchestrator_value_(values, "receiver")
   );
   const mergedOptions = Object.assign({}, options || {}, {
-    excludeWhatsAppSourceId: String(TL_Orchestrator_value_(values, "record_id") || TL_Orchestrator_value_(values, "message_id") || "").trim(),
+    excludeWhatsAppSourceId: currentSourceId,
+    excludeWhatsAppSourceIds: TL_DraftContext_mergeSourceIds_(
+      currentSourceId,
+      options && options.excludeWhatsAppSourceIds
+    ),
     excludeTopicRecordId: String(TL_Orchestrator_value_(values, "record_id") || "").trim(),
     excludeTopicMessageId: String(TL_Orchestrator_value_(values, "message_id") || "").trim(),
     currentTopicId: String(TL_Orchestrator_value_(values, "topic_id") || "").trim()
@@ -217,7 +222,10 @@ function TL_DraftContext_fetchWhatsApps_(contact, options) {
   const contactId = String(contact && contact.contactId || "").trim();
   const phone = TL_Contacts_normalizePhoneField_(contact && contact.phone || "");
   if (typeof TL_Orchestrator_readRecentRows_ !== "function" || (!contactId && !phone)) return out;
-  const excludeSourceId = String(options && options.excludeWhatsAppSourceId || "").trim();
+  const excludeSourceIds = TL_DraftContext_buildSourceIdSet_(
+    options && options.excludeWhatsAppSourceIds,
+    options && options.excludeWhatsAppSourceId
+  );
   const rows = TL_Orchestrator_readRecentRows_(Number((options && options.inboxScanRows) || TL_DRAFT_CONTEXT.INBOX_SCAN_ROWS));
   const matches = [];
   for (let i = rows.length - 1; i >= 0; i--) {
@@ -226,12 +234,13 @@ function TL_DraftContext_fetchWhatsApps_(contact, options) {
     const recordClass = String(TL_Orchestrator_value_(values, "record_class") || "").trim().toLowerCase();
     if (channel !== "whatsapp" || recordClass === "status") continue;
     const sourceId = String(TL_Orchestrator_value_(values, "record_id") || TL_Orchestrator_value_(values, "message_id") || "").trim();
-    if (excludeSourceId && sourceId === excludeSourceId) continue;
+    if (sourceId && excludeSourceIds[sourceId]) continue;
     const rowContactId = String(TL_Orchestrator_value_(values, "contact_id") || "").trim();
     const sender = TL_Contacts_normalizePhoneField_(TL_Orchestrator_value_(values, "sender") || "");
     const receiver = TL_Contacts_normalizePhoneField_(TL_Orchestrator_value_(values, "receiver") || "");
     const hit = (contactId && rowContactId === contactId) || (phone && (sender === phone || receiver === phone));
     if (!hit) continue;
+    if (TL_DraftContext_shouldSkipWhatsAppHistoryRow_(values)) continue;
     matches.push({
       values: values,
       at: TL_DraftContext_safeDate_(TL_Orchestrator_value_(values, "timestamp") || values[0]),
@@ -256,6 +265,57 @@ function TL_DraftContext_fetchWhatsApps_(contact, options) {
     });
   });
   return out;
+}
+
+function TL_DraftContext_mergeSourceIds_(primary, extra) {
+  const out = [];
+  const pushValue = function(value) {
+    const normalized = String(value || "").trim();
+    if (!normalized || out.indexOf(normalized) !== -1) return;
+    out.push(normalized);
+  };
+  pushValue(primary);
+  if (Array.isArray(extra)) {
+    extra.forEach(pushValue);
+  } else {
+    pushValue(extra);
+  }
+  return out;
+}
+
+function TL_DraftContext_buildSourceIdSet_(values, fallbackValue) {
+  const out = {};
+  TL_DraftContext_mergeSourceIds_(fallbackValue, values).forEach(function(value) {
+    out[value] = true;
+  });
+  return out;
+}
+
+function TL_DraftContext_shouldSkipWhatsAppHistoryRow_(values) {
+  const direction = String(TL_Orchestrator_value_(values, "direction") || "").trim().toLowerCase();
+  if (direction !== "outgoing") return false;
+  const preview = [
+    TL_Orchestrator_value_(values, "text"),
+    TL_Orchestrator_value_(values, "ai_summary"),
+    TL_Orchestrator_value_(values, "ai_proposal")
+  ].map(function(value) {
+    return String(value || "").trim();
+  }).filter(Boolean).join("\n");
+  return TL_DraftContext_isSyntheticWhatsAppSystemText_(preview);
+}
+
+function TL_DraftContext_isSyntheticWhatsAppSystemText_(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.indexOf("do you want to approve the following items") !== -1) return true;
+  if (normalized.indexOf("total items:") !== -1 &&
+      (normalized.indexOf("give me one by one") !== -1 ||
+        normalized.indexOf("group smartly for me") !== -1 ||
+        normalized.indexOf("return to main menu") !== -1 ||
+        normalized.indexOf("return to main") !== -1)) {
+    return true;
+  }
+  return false;
 }
 
 function TL_DraftContext_renderPromptBrief_(contact, enrichments, emails, whatsapps, topicOwners, topics, topicExamples) {

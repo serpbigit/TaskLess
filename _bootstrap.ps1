@@ -1,6 +1,6 @@
-# TaskLess bootstrap (safe overwrite)
+# DealWise bootstrap (safe overwrite)
 $ErrorActionPreference="Stop"
-Set-Location "C:\dev\gas\TaskLess"
+Set-Location $PSScriptRoot
 
 # --- 1) Ensure .gitignore includes local dump
 if (!(Test-Path ".\.gitignore")) { New-Item -ItemType File ".\.gitignore" | Out-Null }

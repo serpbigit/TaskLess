@@ -5,6 +5,10 @@
  * for the production quiet window to expire.
  */
 
+const HELPER_TEST_WHATSAPP = {
+  MR_T_PHONE: "972552630029"
+};
+
 function Helper_TestWhatsApp_SealBurstsNow(batchSize) {
   const limit = Number(batchSize || 20);
   const futureNow = new Date(Date.now() + (30 * 60000));
@@ -79,6 +83,32 @@ function Helper_TestWhatsApp_SealBurstsNowForContactAndExport(contactPhone, batc
     helper: "Helper_TestWhatsApp_SealBurstsNowForContactAndExport",
     seal: seal,
     schema: schema
+  };
+}
+
+function Helper_TestWhatsApp_SealBurstsNowForMrT() {
+  return Helper_TestWhatsApp_SealBurstsNowForContact(HELPER_TEST_WHATSAPP.MR_T_PHONE);
+}
+
+function Helper_TestWhatsApp_SealBurstsNowForMrTAndExport() {
+  return Helper_TestWhatsApp_SealBurstsNowForContactAndExport(HELPER_TEST_WHATSAPP.MR_T_PHONE);
+}
+
+function Helper_PrepareMrTReplyTest() {
+  const seal = Helper_TestWhatsApp_SealBurstsNowForContact(HELPER_TEST_WHATSAPP.MR_T_PHONE);
+  const prepareBoss = typeof Helper_PrepareBossSnapshotsNow === "function"
+    ? Helper_PrepareBossSnapshotsNow()
+    : { ok: false, reason: "boss_snapshot_helper_unavailable" };
+  const bossStatus = typeof Helper_BossSessionStatus === "function"
+    ? Helper_BossSessionStatus()
+    : { ok: false, reason: "boss_session_status_unavailable" };
+  return {
+    ok: !!(seal && seal.ok),
+    helper: "Helper_PrepareMrTReplyTest",
+    target_contact_phone: HELPER_TEST_WHATSAPP.MR_T_PHONE,
+    seal: seal,
+    prepare_boss: prepareBoss,
+    boss_status: bossStatus
   };
 }
 

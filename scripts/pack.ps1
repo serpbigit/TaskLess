@@ -41,7 +41,7 @@ $logicPath  = Join-Path $Root "BUSINESS_LOGIC.md"
 $schemaPath = Join-Path $Root "SCHEMA.json"
 
 $pack = @()
-$pack += "===== TASKLESS PACK ====="
+$pack += "===== DEALWISE PACK ====="
 $pack += ("Generated: " + (Get-Date).ToString("s"))
 $pack += ("RepoRoot: " + $Root)
 $pack += ("GitHead: " + $git)

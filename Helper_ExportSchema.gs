@@ -41,3 +41,95 @@ function Helper_ExportSchemaJson() {
   return json;
 }
 
+function Helper_RunGate() {
+  return Helper_RunDealWiseReleaseGate();
+}
+
+function Helper_RunGateReadOnly() {
+  return Helper_RunDealWiseReleaseGate_ReadOnly();
+}
+
+function Helper_EmailPullAndExportSchema() {
+  var pull = typeof TL_Email_RunScheduled === "function"
+    ? TL_Email_RunScheduled()
+    : { ok: false, error: "missing TL_Email_RunScheduled" };
+  var schemaJson = Helper_ExportSchemaJson();
+  var schema = {};
+  try {
+    schema = JSON.parse(String(schemaJson || "{}"));
+  } catch (e) {
+    schema = { ok: false, error: "schema_json_parse_failed" };
+  }
+  return {
+    ok: !!(pull && pull.ok),
+    pull: pull,
+    schema: schema
+  };
+}
+
+function Helper_ApplyStep2SchemaAndExport() {
+  var reset = typeof TL_ResetDealWiseOperationalSheets === "function"
+    ? TL_ResetDealWiseOperationalSheets(true)
+    : { ok: false, error: "missing TL_ResetDealWiseOperationalSheets" };
+  var ensure = typeof TL_EnsureSchema === "function"
+    ? TL_EnsureSchema()
+    : { ok: false, error: "missing TL_EnsureSchema" };
+  var normalize = typeof TL_Schema_NormalizeDealWiseLayout === "function"
+    ? TL_Schema_NormalizeDealWiseLayout()
+    : { ok: false, error: "missing TL_Schema_NormalizeDealWiseLayout" };
+  var schemaJson = Helper_ExportSchemaJson();
+  var schema = {};
+  try {
+    schema = JSON.parse(String(schemaJson || "{}"));
+  } catch (e) {
+    schema = { ok: false, error: "schema_json_parse_failed" };
+  }
+  return {
+    ok: !!(
+      (reset === undefined || reset === null || reset.ok !== false) &&
+      (ensure === undefined || ensure === null || ensure.ok !== false) &&
+      (normalize === undefined || normalize === null || normalize.ok !== false)
+    ),
+    reset: reset,
+    ensure: ensure,
+    normalize: normalize,
+    schema: schema
+  };
+}
+
+function Helper_NormalizeDealWiseLayoutAndExport() {
+  var normalize = typeof TL_Schema_NormalizeDealWiseLayout === "function"
+    ? TL_Schema_NormalizeDealWiseLayout()
+    : { ok: false, error: "missing TL_Schema_NormalizeDealWiseLayout" };
+  var schemaJson = Helper_ExportSchemaJson();
+  var schema = {};
+  try {
+    schema = JSON.parse(String(schemaJson || "{}"));
+  } catch (e) {
+    schema = { ok: false, error: "schema_json_parse_failed" };
+  }
+  return {
+    ok: !!(normalize === undefined || normalize === null || normalize.ok !== false),
+    normalize: normalize,
+    schema: schema
+  };
+}
+
+function Helper_RepairNoReplyApprovalStatesAndExport() {
+  var repair = typeof TL_Email_ReconcileNoReplyApprovalStates === "function"
+    ? TL_Email_ReconcileNoReplyApprovalStates({ dryRun: false, batchSize: 80 })
+    : { ok: false, error: "missing TL_Email_ReconcileNoReplyApprovalStates" };
+  var schemaJson = Helper_ExportSchemaJson();
+  var schema = {};
+  try {
+    schema = JSON.parse(String(schemaJson || "{}"));
+  } catch (e) {
+    schema = { ok: false, error: "schema_json_parse_failed" };
+  }
+  return {
+    ok: !!(repair === undefined || repair === null || repair.ok !== false),
+    repair: repair,
+    schema: schema
+  };
+}
+

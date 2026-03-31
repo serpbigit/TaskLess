@@ -4,6 +4,18 @@
  * Dry-run runners for the Gmail sidecar.
  */
 
+function TL_TestEmail_RunAll() {
+  return {
+    pull_preview: TL_Email_TestPullImportantPreview(),
+    pull_checkpoint_query_preview: TL_Email_TestPullCheckpointQueryPreview(),
+    pull_checkpoint_round_trip: TL_Email_TestPullCheckpointRoundTrip(),
+    approval_snapshot_shape: TL_Email_TestApprovalSnapshotShape(),
+    reply_proposal_refine_dry_run: TL_Email_TestReplyProposalRefineDryRun(),
+    boss_card_explanation_shape: TL_Email_TestBossCardExplanationShape(),
+    approved_send_dry_run: TL_Email_TestApprovedSendDryRun()
+  };
+}
+
 function TL_Email_SmokeTest() {
   return TL_Email_TestSmokeTest();
 }
@@ -28,14 +40,14 @@ function TL_Email_TestPullFromBizLatest() {
   return result;
 }
 
-function TL_Email_TestPullTasklessDirect() {
-  const query = 'is:important from:reuven.cohen@aismart.solutions subject:"taskless direct test" newer_than:14d';
+function TL_Email_TestPullDealWiseDirect() {
+  const query = 'is:important from:reuven.cohen@aismart.solutions subject:"dealwise direct test" newer_than:14d';
   const result = TL_Email_PullImportant_Run({
     query: query,
     maxThreads: 5
   });
   if (typeof TL_Email_logExecution_ === "function") {
-    TL_Email_logExecution_("TL_Email_TestPullTasklessDirect", result);
+    TL_Email_logExecution_("TL_Email_TestPullDealWiseDirect", result);
   }
   return result;
 }

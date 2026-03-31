@@ -9,7 +9,7 @@ function TL_TestEmailInbox_BuildInboxRecordRun() {
   const payload = {
     refId: "gmail:thread:123",
     threadId: "123",
-    subject: "Quick TaskLess thought",
+    subject: "Quick DealWise thought",
     latestMsgId: "abc",
     latestMsgDateIso: "2026-03-21T12:00:00.000Z",
     ownerEmail: "owner@example.com",
@@ -27,7 +27,7 @@ function TL_TestEmailInbox_BuildInboxRecordRun() {
       row.message_type === "email_thread" &&
       row.contact_id === "CI_123" &&
       row.thread_id === "123" &&
-      row.thread_subject === "Quick TaskLess thought" &&
+      row.thread_subject === "Quick DealWise thought" &&
       row.external_url.indexOf("#imp/123") !== -1,
     row: row
   };

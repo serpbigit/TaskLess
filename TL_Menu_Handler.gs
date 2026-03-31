@@ -647,12 +647,9 @@ function TL_Menu_OpenReplyHome_(waId) {
     }
   }
   TL_Menu_SetState_(waId, TL_MENU_STATES.ROOT, { source: "decision_packet" });
-  return [
-    TL_Menu_T_("פותח את תור התשובות.", "Opening the reply queue."),
-    TL_Menu_T_("ממתינות לתשובה: ", "Reply items waiting: ") + items.length,
-    "",
-    packet ? TL_Menu_BuildDecisionPacketOneByOneReply_(packet) : TL_Menu_T_("לא הצלחתי לפתוח את תור התשובות.", "I couldn't open the reply queue.")
-  ].join("\n");
+  return packet
+    ? TL_Menu_BuildReplyQueueOpenReply_(packet)
+    : TL_Menu_T_("לא הצלחתי לפתוח את תור התשובות.", "I couldn't open the reply queue.");
 }
 
 function TL_Menu_ReplyPrepTtlMinutes_() {
@@ -3730,8 +3727,8 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
 
   if (multiReplyOptions.length) {
     const editChoice = String(multiReplyOptions.length + 1);
-    const laterChoice = String(multiReplyOptions.length + 2);
-    const archiveChoice = String(multiReplyOptions.length + 3);
+    const archiveChoice = String(multiReplyOptions.length + 2);
+    const laterChoice = String(multiReplyOptions.length + 3);
     const selectedIndex = Number(choice) - 1;
     if (selectedIndex >= 0 && selectedIndex < multiReplyOptions.length) {
       const selectedText = String(multiReplyOptions[selectedIndex] || "").trim();
@@ -3756,8 +3753,6 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
       packet.stage = "edit";
       TL_Menu_SetDecisionPacket_(waId, packet);
       return TL_Menu_BuildDecisionPacketEditReply_(packet);
-    } else if (choice === laterChoice) {
-      packet.cursor = Number(packet.cursor || 0) + 1;
     } else if (choice === archiveChoice) {
       const archivedMulti = TL_Menu_ArchiveDecisionRow_(current.rowNumber);
       packet.cursor = Number(packet.cursor || 0) + 1;
@@ -3774,6 +3769,8 @@ function TL_Menu_HandleDecisionPacketOneByOneReply_(waId, packet, choice) {
         archivedReceipt,
         TL_Menu_BuildDecisionPacketOneByOneReply_(packet)
       ].filter(Boolean).join("\n\n");
+    } else if (choice === laterChoice) {
+      packet.cursor = Number(packet.cursor || 0) + 1;
     } else {
       return TL_Menu_BuildDecisionPacketOneByOneReply_(packet);
     }
@@ -4535,16 +4532,16 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     return TL_Menu_BuildDecisionPacketRecipientReply_(packet, current, index, total, arguments.length > 1 ? arguments[1] : "");
   }
   const actionSpec = TL_Menu_GetDecisionPacketActionSpec_(current);
-  const summary = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 220);
+  const waitingFor = TL_Menu_Preview_(current.summary || current.proposal || current.taskStatus || "", 220);
   const proposalBody = TL_Menu_BuildDecisionPacketProposalBody_(current, actionSpec);
   const multiReplyOptions = TL_Menu_GetDecisionPacketReplyOptions_(current);
   const rawSnippet = TL_Menu_Preview_(String(current.rawSnippet || "").trim(), 220);
-  const senderLabel = String(current.senderLabel || current.sender || "").trim();
-  const channelLabel = String(current.channelLabel || current.channel || "").trim();
+  const senderLabel = TL_Menu_BuildReplyWhoLine_(current) || String(current.senderLabel || current.sender || "").trim();
+  const channelLabel = TL_Menu_BuildHumanChannelLabel_(current);
   const subjectLabel = TL_Menu_Preview_(String(current.subject || "").trim(), 160);
   const duePreview = String(current.duePreview || "").trim();
   const dueLabel = String(current.dueLabel || "").trim();
-  const reminderMessage = TL_Menu_Preview_(current.reminderMessage || summary, 220);
+  const reminderMessage = TL_Menu_Preview_(current.reminderMessage || waitingFor, 220);
   const isReminder = String(current.captureKind || "").trim().toLowerCase() === "reminder";
   const isSchedule = String(current.captureKind || "").trim().toLowerCase() === "schedule";
   const option1Label = String(actionSpec.primaryLabel || TL_Menu_T_("אשר")).trim();
@@ -4552,8 +4549,8 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   const option3Label = String(actionSpec.option3Label || TL_Menu_T_("אחר כך", "Later")).trim();
   const option4Label = String(actionSpec.option4Label || TL_Menu_T_("ארכב")).trim();
   const editOptionNumber = multiReplyOptions.length ? (multiReplyOptions.length + 1) : 2;
-  const laterOptionNumber = multiReplyOptions.length ? (multiReplyOptions.length + 2) : 3;
-  const archiveOptionNumber = multiReplyOptions.length ? (multiReplyOptions.length + 3) : 4;
+  const archiveOptionNumber = multiReplyOptions.length ? (multiReplyOptions.length + 2) : 4;
+  const laterOptionNumber = multiReplyOptions.length ? (multiReplyOptions.length + 3) : 3;
   const styleShortcutLine = TL_Menu_IsOutboundCommunicationItem_(current) && !TL_Menu_ItemNeedsRecipientResolution_(current)
     ? TL_Menu_T_("קיצורי ניסוח/פעולה: קצר יותר | יותר אישי | יותר פורמלי | נסח מחדש | אחר כך | בטל", "Shortcuts: shorter | warmer | more formal | rewrite | later | discard")
     : (TL_Menu_IsContinuableCaptureItem_(current)
@@ -4564,6 +4561,32 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
   if (current.isUrgent) meta.push("דחוף");
   else if (current.isHigh) meta.push("חשוב");
   const label = meta.length ? ("[" + meta.join(" · ") + "]") : "";
+  if (TL_Menu_IsReplyPacketItem_(current)) {
+    const lines = [
+      TL_Menu_T_("Reply ") + index + "/" + total,
+      label ? label : "",
+      senderLabel ? (TL_Menu_T_("Who: ", "Who: ") + senderLabel) : "",
+      channelLabel ? (TL_Menu_T_("Channel: ", "Channel: ") + channelLabel) : "",
+      subjectLabel ? (TL_Menu_T_("Subject: ", "Subject: ") + subjectLabel) : "",
+      waitingFor ? (TL_Menu_T_("Waiting for: ", "Waiting for: ") + waitingFor) : "",
+      rawSnippet ? (TL_Menu_T_("Message: ", "Message: ") + rawSnippet) : "",
+      "",
+      multiReplyOptions.length
+        ? (TL_Menu_T_("Choose a reply option:", "Choose a reply option:") + "\n" +
+          multiReplyOptions.map(function(value, idx) { return String(idx + 1) + ". " + String(value || "").trim(); }).join("\n"))
+        : (proposalBody ? (TL_Menu_T_("Suggested reply:", "Suggested reply:") + "\n" + proposalBody) : ""),
+      "",
+      TL_Menu_T_("Other actions:", "Other actions:"),
+      String(editOptionNumber) + ". " + TL_Menu_T_("Edit", "Edit"),
+      String(archiveOptionNumber) + ". " + TL_Menu_T_("Archive", "Archive"),
+      String(laterOptionNumber) + ". " + TL_Menu_T_("Later", "Later"),
+      TL_Menu_T_("Send the number of your choice.", "Send the number of your choice.")
+    ];
+    if (arguments.length > 1 && arguments[1]) {
+      lines.unshift(String(arguments[1]));
+    }
+    return lines.filter(Boolean).join("\n");
+  }
   const lines = [
     TL_Menu_T_("סקירת תשובה ") + index + "/" + total,
     label ? label : "",
@@ -4592,6 +4615,14 @@ function TL_Menu_BuildDecisionPacketOneByOneReply_(packet) {
     lines.unshift(String(arguments[1]));
   }
   return lines.filter(Boolean).join("\n");
+}
+
+function TL_Menu_BuildHumanChannelLabel_(item) {
+  const safe = item && typeof item === "object" ? item : {};
+  const channel = String(safe.channel || "").trim().toLowerCase();
+  if (channel === "email") return "Gmail";
+  if (channel === "whatsapp") return "WhatsApp";
+  return String(safe.channelLabel || safe.channel || "").trim();
 }
 
 function TL_Menu_SyncOutboundDraftActiveItem_(packet, current) {
@@ -5628,6 +5659,9 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
       ? TL_Email_parseInboxPayload_(String(TL_Orchestrator_value_(values, "raw_payload_ref") || ""))
       : {};
     const approval = payload && payload.approvalSnapshot ? payload.approvalSnapshot : {};
+    const contactRecord = contactsIndex && contactsIndex.byContactId
+      ? contactsIndex.byContactId[String(contactId || "").trim()]
+      : null;
     const captureKind = typeof TL_Orchestrator_captureKindFromNotes_ === "function"
       ? TL_Orchestrator_captureKindFromNotes_(notes)
       : "";
@@ -5658,6 +5692,7 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
     const packetItem = {
       key: key,
       rowNumber: item.rowNumber,
+      timestamp: values[0] instanceof Date ? values[0].toISOString() : String(values[0] || "").trim(),
       recordId: String(TL_Orchestrator_value_(values, "record_id") || "").trim(),
       rootId: String(TL_Orchestrator_value_(values, "root_id") || "").trim(),
       recordClass: recordClass,
@@ -5667,6 +5702,12 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
       proposalOptions: TL_Menu_ExtractProposalOptions_(channel, values, payload, String(TL_Orchestrator_value_(values, "ai_proposal") || "").trim()),
       sender: sender,
       senderLabel: TL_Menu_BuildPacketSenderLabel_(senderProfile, sender, receiver, contactId, channel, direction, displayPhoneNumber, contactsIndex, notes),
+      contactName: String(contactRecord && (contactRecord.display_name || contactRecord.name) || "").trim(),
+      displayNameAlt: String(TL_Menu_GetNoteKeyValue_(notes, "wa_contact_name") || (senderProfile && senderProfile.displayName) || "").trim(),
+      contactPhone: String(contactRecord && (contactRecord.phone1 || contactRecord.phone2 || "") || "").trim(),
+      contactEmail: String(contactRecord && (contactRecord.email || "") || "").trim(),
+      senderPhone: TLW_normalizePhone_(sender || ""),
+      senderEmail: channel === "email" ? String(sender || "").trim() : "",
       receiver: receiver,
       channel: channel,
       channelLabel: TL_Menu_BuildPacketChannelLabel_(channel, messageType),
@@ -5707,10 +5748,7 @@ function TL_Menu_CollectApprovalPacketItems_(mode) {
   });
   items.sort(function(a, b) {
     if (normalizedMode === "reply") {
-      const aReplyScore = TL_Menu_ReplyPriorityScore_(a);
-      const bReplyScore = TL_Menu_ReplyPriorityScore_(b);
-      if (bReplyScore !== aReplyScore) return bReplyScore - aReplyScore;
-      return Number(b.rowNumber || 0) - Number(a.rowNumber || 0);
+      return Number(a.rowNumber || 0) - Number(b.rowNumber || 0);
     }
     const aRank = (a.contactId ? 2 : 0) + (a.channel === "email" ? 1 : 0) - (/noreply|no-reply|no_reply|donotreply|postmaster|mailer-daemon/i.test(String(a.sender || "")) ? 2 : 0);
     const bRank = (b.contactId ? 2 : 0) + (b.channel === "email" ? 1 : 0) - (/noreply|no-reply|no_reply|donotreply|postmaster|mailer-daemon/i.test(String(b.sender || "")) ? 2 : 0);
@@ -5806,8 +5844,88 @@ function TL_Menu_ExtractProposalOptions_(channel, values, payload, fallbackPropo
 function TL_Menu_GetDecisionPacketReplyOptions_(item) {
   const safe = item && typeof item === "object" ? item : {};
   if (!TL_Menu_IsReplyPacketItem_(safe)) return [];
-  const options = Array.isArray(safe.proposalOptions) ? safe.proposalOptions : [];
+  const options = Array.isArray(safe.proposalOptions) && safe.proposalOptions.length
+    ? safe.proposalOptions
+    : (String(safe.proposal || "").trim() ? [String(safe.proposal || "").trim()] : []);
   return options.map(function(value) { return String(value || "").trim(); }).filter(Boolean).slice(0, 3);
+}
+
+function TL_Menu_BuildReplyQueueOpenReply_(packet) {
+  const lines = [
+    TL_Menu_BuildReplyDigest_(packet),
+    "",
+    TL_Menu_BuildDecisionPacketOneByOneReply_(packet)
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
+function TL_Menu_BuildReplyDigest_(packet) {
+  const items = packet && Array.isArray(packet.items) ? packet.items : [];
+  const total = items.length;
+  if (!total) {
+    return TL_Menu_T_("אין כרגע פריטי תשובה פתוחים.", "There are no open reply items right now.");
+  }
+  const whatsappCount = items.filter(function(item) {
+    return String(item && item.channel || "").trim().toLowerCase() === "whatsapp";
+  }).length;
+  const emailCount = items.filter(function(item) {
+    return String(item && item.channel || "").trim().toLowerCase() === "email";
+  }).length;
+  const urgentTodayCount = items.filter(function(item) {
+    return !!(item && item.isUrgent);
+  }).length;
+  const oldestLabel = TL_Menu_BuildOldestWaitingLabel_(items);
+  return [
+    TL_Menu_T_("Messages needing reply: ", "Messages needing reply: ") + total,
+    TL_Menu_T_("Urgent today: ", "Urgent today: ") + urgentTodayCount,
+    "WhatsApp: " + whatsappCount + " | Gmail: " + emailCount,
+    TL_Menu_T_("Oldest waiting: ", "Oldest waiting: ") + oldestLabel
+  ].join("\n");
+}
+
+function TL_Menu_BuildOldestWaitingLabel_(items) {
+  const list = Array.isArray(items) ? items : [];
+  const timestamps = list.map(function(item) {
+    const value = item && item.timestamp ? Date.parse(String(item.timestamp || "")) : NaN;
+    return isFinite(value) ? value : NaN;
+  }).filter(function(value) {
+    return isFinite(value) && value > 0;
+  });
+  if (!timestamps.length) return TL_Menu_T_("לא ידוע", "unknown");
+  const oldestMs = Math.min.apply(null, timestamps);
+  const diffMs = Math.max(0, Date.now() - oldestMs);
+  const totalMinutes = Math.floor(diffMs / 60000);
+  if (totalMinutes < 60) {
+    return totalMinutes <= 1
+      ? TL_Menu_T_("כ-דקה", "about 1 minute")
+      : TL_Menu_T_("כ-", "about ") + totalMinutes + TL_Menu_T_(" דקות", " minutes");
+  }
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) {
+    return totalHours === 1
+      ? TL_Menu_T_("כ-שעה", "about 1 hour")
+      : TL_Menu_T_("כ-", "about ") + totalHours + TL_Menu_T_(" שעות", " hours");
+  }
+  const totalDays = Math.floor(totalHours / 24);
+  return totalDays === 1
+    ? TL_Menu_T_("כ-יום", "about 1 day")
+    : TL_Menu_T_("כ-", "about ") + totalDays + TL_Menu_T_(" ימים", " days");
+}
+
+function TL_Menu_BuildReplyWhoLine_(item) {
+  const safe = item && typeof item === "object" ? item : {};
+  const parts = [];
+  const primaryName = String(safe.contactName || safe.senderLabel || "").trim();
+  const alternateName = String(safe.displayNameAlt || "").trim();
+  const phone = String(safe.contactPhone || safe.senderPhone || "").trim();
+  const email = String(safe.contactEmail || safe.senderEmail || "").trim();
+  if (primaryName) parts.push(primaryName);
+  if (alternateName && alternateName.toLowerCase() !== primaryName.toLowerCase()) {
+    parts.push("WA: " + alternateName);
+  }
+  if (phone) parts.push(phone);
+  if (email) parts.push(email);
+  return parts.join(" | ");
 }
 
 function TL_Menu_RefreshWhatsAppReplyPacketItem_(packetItem, values, recentRows, contactsIndex) {

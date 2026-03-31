@@ -1,14 +1,15 @@
 /**
- * Onboarding_TaskLessClientSetup
+ * Onboarding_DealWiseClientSetup
  *
  * Canonical client setup helpers for future commercial onboarding.
  * POC can still run these manually, but this file should remain the
  * single place to evolve spreadsheet/runtime bootstrapping.
  */
 
-const ONBOARDING_TASKLESS = {
+const ONBOARDING_DEALWISE = {
   SHEET_ID_PROP: "TL_SHEET_ID",
-  DEFAULT_CONTACT_SYNC_MODE: "both_only"
+  DEFAULT_CONTACT_SYNC_MODE: "both_only",
+  DEFAULT_EMAIL_OWNER: "reuven007@gmail.com"
 };
 
 function Onboarding_SetClientSheet(sheetId) {
@@ -16,7 +17,7 @@ function Onboarding_SetClientSheet(sheetId) {
   if (!normalizedId) throw new Error("Onboarding_SetClientSheet: missing spreadsheet ID");
 
   const ss = SpreadsheetApp.openById(normalizedId);
-  PropertiesService.getScriptProperties().setProperty(ONBOARDING_TASKLESS.SHEET_ID_PROP, normalizedId);
+  PropertiesService.getScriptProperties().setProperty(ONBOARDING_DEALWISE.SHEET_ID_PROP, normalizedId);
 
   return {
     ok: true,
@@ -27,16 +28,37 @@ function Onboarding_SetClientSheet(sheetId) {
 }
 
 function Onboarding_ConnectAndBootstrap(sheetId) {
+  return Onboarding_FinalizePocSetup(sheetId);
+}
+
+function Onboarding_FinalizePocSetup(sheetId) {
   const connected = Onboarding_SetClientSheet(sheetId);
-  TL_EnsureSchema();
+  const schema = TL_EnsureSchema();
+  const layoutNormalized = typeof TL_Schema_NormalizeDealWiseLayout === "function"
+    ? TL_Schema_NormalizeDealWiseLayout()
+    : { ok: false, reason: "missing_layout_normalizer" };
+  const emailOwner = typeof TL_Orchestrator_setSettingValue_ === "function"
+    ? TL_Orchestrator_setSettingValue_("EMAIL_OWNER_EMAIL", ONBOARDING_DEALWISE.DEFAULT_EMAIL_OWNER)
+    : { ok: false, reason: "missing_set_setting_helper", key: "EMAIL_OWNER_EMAIL" };
+  const emailTrigger = typeof TL_Email_InstallTrigger_5m === "function"
+    ? TL_Email_InstallTrigger_5m()
+    : { ok: false, reason: "missing_email_trigger_installer" };
+  const orchestratorTrigger = typeof TL_Orchestrator_EnsureTrigger_5m === "function"
+    ? TL_Orchestrator_EnsureTrigger_5m()
+    : { ok: false, reason: "missing_orchestrator_trigger_installer" };
   const summary = Onboarding_RuntimeSummary();
   summary.connected = connected;
+  summary.schema = schema;
+  summary.layout_normalized = layoutNormalized;
+  summary.email_owner_setting = emailOwner;
+  summary.email_trigger = emailTrigger;
+  summary.orchestrator_trigger = orchestratorTrigger;
   return summary;
 }
 
 function Onboarding_RuntimeSummary() {
   const props = PropertiesService.getScriptProperties();
-  const sheetId = String(props.getProperty(ONBOARDING_TASKLESS.SHEET_ID_PROP) || "").trim();
+  const sheetId = String(props.getProperty(ONBOARDING_DEALWISE.SHEET_ID_PROP) || "").trim();
   const out = {
     ok: true,
     sheet_id: sheetId,
@@ -97,7 +119,7 @@ function Onboarding_GetTemplateConfig() {
       "TL_WEBHOOK_URL",
       "TL_ONBOARDING_REDIRECT_URL"
     ],
-    default_contact_sync_mode: ONBOARDING_TASKLESS.DEFAULT_CONTACT_SYNC_MODE,
+    default_contact_sync_mode: ONBOARDING_DEALWISE.DEFAULT_CONTACT_SYNC_MODE,
     required_tabs: (typeof TL_SCHEMA !== "undefined" && TL_SCHEMA.ALLOWED_TABS)
       ? TL_SCHEMA.ALLOWED_TABS.slice()
       : []

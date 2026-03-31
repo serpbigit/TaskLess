@@ -359,6 +359,76 @@ function TL_TestMenu_GetDecisionPacketReplyOptions_Multi() {
   return out;
 }
 
+function TL_TestMenu_GetDecisionPacketReplyOptions_FallbackToProposal() {
+  const out = {
+    ok: false,
+    options: TL_Menu_GetDecisionPacketReplyOptions_({
+      channel: "whatsapp",
+      proposal: "Sure, I can join."
+    })
+  };
+  out.ok = Array.isArray(out.options) && out.options.length === 1 && out.options[0] === "Sure, I can join.";
+  Logger.log("TL_TestMenu_GetDecisionPacketReplyOptions_FallbackToProposal: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
+function TL_TestMenu_ReplyQueueOpenReply_IncludesDigestAndCard() {
+  const reply = TL_Menu_BuildReplyQueueOpenReply_({
+    kind: "decision",
+    stage: "one_by_one",
+    cursor: 0,
+    items: [{
+      rowNumber: 10,
+      timestamp: new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString(),
+      channel: "whatsapp",
+      contactName: "Dana Levi",
+      displayNameAlt: "Dana L",
+      contactPhone: "972500000001",
+      contactEmail: "dana@example.com",
+      summary: "Confirmation whether you are joining today's meeting",
+      rawSnippet: "Are you joining the weekly meeting later today?",
+      proposal: "Sure, I'll be there.",
+      proposalOptions: ["Sure, I'll be there.", "Can you remind me what time it is?", "Sorry, I can't make it today."]
+    }]
+  });
+  const safe = String(reply || "");
+  const out = {
+    ok: safe.indexOf("Messages needing reply: 1") !== -1 &&
+      safe.indexOf("Reply 1/1") !== -1 &&
+      safe.indexOf("Who: Dana Levi") !== -1 &&
+      safe.indexOf("Waiting for: Confirmation whether you are joining today's meeting") !== -1,
+    preview: safe.slice(0, 420)
+  };
+  Logger.log("TL_TestMenu_ReplyQueueOpenReply_IncludesDigestAndCard: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
+function TL_TestMenu_ReplyCard_ActionOrder() {
+  const reply = TL_Menu_BuildDecisionPacketOneByOneReply_({
+    kind: "decision",
+    stage: "one_by_one",
+    cursor: 0,
+    items: [{
+      rowNumber: 10,
+      channel: "whatsapp",
+      contactName: "Dana Levi",
+      summary: "Confirmation whether you are joining today's meeting",
+      rawSnippet: "Are you joining the weekly meeting later today?",
+      proposal: "Sure, I'll be there.",
+      proposalOptions: ["Sure, I'll be there.", "Can you remind me what time it is?", "Sorry, I can't make it today."]
+    }]
+  });
+  const safe = String(reply || "");
+  const out = {
+    ok: safe.indexOf("4. Edit") !== -1 &&
+      safe.indexOf("5. Archive") !== -1 &&
+      safe.indexOf("6. Later") !== -1,
+    preview: safe.slice(0, 420)
+  };
+  Logger.log("TL_TestMenu_ReplyCard_ActionOrder: %s", JSON.stringify(out, null, 2));
+  return out;
+}
+
 function TL_TestMenu_DecisionPacketRoundTrip_PreservesProposalOptions() {
   const waId = "972552630035";
   TL_Menu_ClearDecisionPacket_(waId);

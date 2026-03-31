@@ -18,6 +18,10 @@ function TL_ActiveItem_Get_(waId) {
     const raw = PropertiesService.getScriptProperties().getProperty(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    if (!TL_ActiveItem_IsValid_(parsed)) {
+      TL_ActiveItem_Clear_(waId);
+      return null;
+    }
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch (e) {
     return null;
@@ -138,6 +142,7 @@ function TL_ActiveItem_normalize_(waId, item) {
   return {
     item_id: String(safe.item_id || ("AI_" + Utilities.getUuid())).trim(),
     wa_id: String(waId || safe.wa_id || "").trim(),
+    session_version: String(safe.session_version || (typeof TL_Menu_SessionRuntimeVersion_ === "function" ? TL_Menu_SessionRuntimeVersion_() : "menu_runtime_v1")).trim(),
     kind: String(safe.kind || "").trim().toLowerCase(),
     status: String(safe.status || "active").trim().toLowerCase(),
     row_number: Number(safe.row_number || 0),
@@ -176,4 +181,16 @@ function TL_ActiveItem_pausedKey_(waId) {
   const id = String(waId || "").trim();
   if (!id) return "";
   return TL_ACTIVE_ITEM.PAUSED_KEY_PREFIX + id;
+}
+
+function TL_ActiveItem_IsValid_(item) {
+  if (!item || typeof item !== "object") return false;
+  const ttlMinutes = typeof TL_Menu_ActiveFlowTtlMinutes_ === "function" ? TL_Menu_ActiveFlowTtlMinutes_() : 90;
+  const version = typeof TL_Menu_SessionRuntimeVersion_ === "function" ? TL_Menu_SessionRuntimeVersion_() : "menu_runtime_v1";
+  const itemVersion = String(item.session_version || "").trim();
+  if (itemVersion !== version) return false;
+  const timestamp = String(item.updated_at || item.opened_at || "").trim();
+  const ts = Date.parse(timestamp);
+  if (!timestamp || !isFinite(ts)) return false;
+  return (Date.now() - ts) <= (Number(ttlMinutes || 0) * 60 * 1000);
 }

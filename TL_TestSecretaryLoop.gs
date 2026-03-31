@@ -30,20 +30,23 @@ function TL_TestSecretaryLoop_QuietWindowSynthesisRun() {
     }
   });
 
-  const proposal = TL_TestSecretaryLoop_findLatestRow_(fixture.rootId, "proposal");
-  const snapshot = proposal ? proposal.values : [];
+  const synthesized = TL_TestSecretaryLoop_findLatestRow_(fixture.rootId, TL_ORCHESTRATOR.WHATSAPP_GROUP_RECORD_CLASS);
+  const snapshot = synthesized ? synthesized.values : [];
   const result = {
-    ok: !!proposal,
+    ok: !!synthesized &&
+      String(snapshot[TLW_colIndex_("ai_summary") - 1] || "").indexOf("quiet-window-summary:") === 0 &&
+      String(snapshot[TLW_colIndex_("ai_proposal") - 1] || "").indexOf("quiet-window-proposal:") === 0,
     root_id: fixture.rootId,
     seed_row: fixture.rowNumber,
     synth_result: synthResult,
-    proposal_row: proposal ? proposal.rowNumber : "",
-    parent_event_id: proposal ? String(snapshot[TLW_colIndex_("parent_event_id") - 1] || "") : "",
-    approval_status: proposal ? String(snapshot[TLW_colIndex_("approval_status") - 1] || "") : "",
-    execution_status: proposal ? String(snapshot[TLW_colIndex_("execution_status") - 1] || "") : "",
-    task_status: proposal ? String(snapshot[TLW_colIndex_("task_status") - 1] || "") : "",
-    ai_summary: proposal ? String(snapshot[TLW_colIndex_("ai_summary") - 1] || "") : "",
-    ai_proposal: proposal ? String(snapshot[TLW_colIndex_("ai_proposal") - 1] || "") : ""
+    proposal_row: synthesized ? synthesized.rowNumber : "",
+    parent_event_id: synthesized ? String(snapshot[TLW_colIndex_("parent_event_id") - 1] || "") : "",
+    approval_status: synthesized ? String(snapshot[TLW_colIndex_("approval_status") - 1] || "") : "",
+    execution_status: synthesized ? String(snapshot[TLW_colIndex_("execution_status") - 1] || "") : "",
+    task_status: synthesized ? String(snapshot[TLW_colIndex_("task_status") - 1] || "") : "",
+    ai_summary: synthesized ? String(snapshot[TLW_colIndex_("ai_summary") - 1] || "") : "",
+    ai_proposal: synthesized ? String(snapshot[TLW_colIndex_("ai_proposal") - 1] || "") : "",
+    record_class: synthesized ? String(snapshot[TLW_colIndex_("record_class") - 1] || "") : ""
   };
   Logger.log("TL_TestSecretaryLoop_QuietWindowSynthesisRun: %s", JSON.stringify(result, null, 2));
   return result;

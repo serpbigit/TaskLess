@@ -82,7 +82,7 @@ function TL_TestBossDecision_SmartGroupRun() {
   const bossWaId = TL_TestBossDecision_getBossWaId_();
   TL_Menu_ClearDecisionPacket_(bossWaId);
 
-  const urgentItem = TL_TestBossDecision_seedDecisionItem_({
+  const urgentSeed = TL_TestBossDecision_seedDecisionItem_({
     root_id: "root_boss_smart_" + Utilities.getUuid(),
     approval_status: "awaiting_approval",
     execution_status: "awaiting_approval",
@@ -91,7 +91,7 @@ function TL_TestBossDecision_SmartGroupRun() {
     urgency_flag: "true",
     suggested_action: "reply_now"
   });
-  const normalItem = TL_TestBossDecision_seedDecisionItem_({
+  const normalSeed = TL_TestBossDecision_seedDecisionItem_({
     root_id: "root_boss_smart_" + Utilities.getUuid(),
     approval_status: "awaiting_approval",
     execution_status: "awaiting_approval",
@@ -101,11 +101,20 @@ function TL_TestBossDecision_SmartGroupRun() {
     suggested_action: "wait"
   });
 
-  TL_Menu_StoreDecisionPacket_(bossWaId, "decision", [urgentItem.item, normalItem.item]);
+  const urgentItem = Object.assign({}, urgentSeed.item, {
+    isUrgent: true,
+    isHigh: true
+  });
+  const normalItem = Object.assign({}, normalSeed.item, {
+    isUrgent: false,
+    isHigh: false
+  });
+
+  TL_Menu_StoreDecisionPacket_(bossWaId, "decision", [urgentItem, normalItem]);
   const smartReply = TL_Menu_HandleBossMessage_({ from: bossWaId, text: "4" }, null);
   const applyReply = TL_Menu_HandleBossMessage_({ from: bossWaId, text: "1" }, null);
-  const urgentRow = TL_TestBossDecision_getRowSnapshot_(urgentItem.rowNumber);
-  const normalRow = TL_TestBossDecision_getRowSnapshot_(normalItem.rowNumber);
+  const urgentRow = TL_TestBossDecision_getRowSnapshot_(urgentSeed.rowNumber);
+  const normalRow = TL_TestBossDecision_getRowSnapshot_(normalSeed.rowNumber);
 
   const result = {
     ok: String(urgentRow.approval_status || "").toLowerCase() === "approved" && String(normalRow.approval_status || "").toLowerCase() !== "approved",
