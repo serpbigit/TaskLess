@@ -1,116 +1,111 @@
-# DealWise Roadmap
+# DEALWISE MVP ROADMAP
 
-This is the single concise tracker we should keep updating as we move forward.
+---
 
-Product truth stays in [DEALWISE_PRODUCT.md](/C:/dev/gas/TaskLess/DEALWISE_PRODUCT.md).
-Repo snapshot stays in [DEALWISE_STATE.md](/C:/dev/gas/TaskLess/DEALWISE_STATE.md).
-Operational behavior notes stay in [DEALWISE_OPERATION_MANUAL.md](/C:/dev/gas/TaskLess/DEALWISE_OPERATION_MANUAL.md).
+## STEP 1 — MESSAGE SELECTION (INBOX CORRECTNESS)
 
-## Active Steps
+Goal: Show only messages that truly require the boss’s decision.
 
-### Step 0 — Safety Gates
+### Requirements:
+1. Only include messages where:
+   - `response_expected` = true
+   - No manual reply already sent (detect external replies)
+2. Exclude:
+   - FYI messages
+   - Reactions (❤️, 👍, etc.)
+   - Already handled conversations
+3. Output:
+   - A clean list of valid “needs reply” messages
 
-Status: `done in code`, live deploy still needs explicit re-check.
+---
 
-Scope:
-- keep approval-based outbound sends blocked by default
-- keep proactive boss digests and decision packets blocked by default
-- stop unrequested WhatsApp updates while product behavior is still being stabilized
+## STEP 2 — MESSAGE QUEUE (SINGLE CARD FLOW)
 
-### Step 1 — Docs As Contract
+Goal: Present messages one at a time in a clean, sequential decision flow.
 
-Status: `done`
+### Requirements:
+1. Entry point: Single line: "You have X messages that require your response"
+2. Immediately show progress: "1/X"
+3. No additional stats or digests
+4. Each message card contains exactly:
+   - Who
+   - Channel
+   - Waiting for (short summary)
+   - Message (trimmed if needed)
+5. Sequential Flow: After each action → Confirm completion ("1/X completed") → "Next: 2/X" → Show next card.
 
-Scope:
-- lock product direction
-- lock architecture constraints
-- keep roadmap concise
-- record current repo reality separately from product truth
+---
 
-### Step 2 — Sheet Model Alignment
+## STEP 3 — ACTION INTERFACE (STABLE CONTROLS)
 
-Status: `next`
+Goal: Ensure consistent and predictable interaction.
 
-Scope:
-- standardize the target model around `SETTINGS`, `CONTACTS`, `ACTIVITY`, `LOG`, `AI_Cost_Tracker`
-- treat `CONTACTS` as the main business-state sheet
-- treat `ACTIVITY` as the append-only communication and drafting-context ledger
-- preserve useful legacy support tabs while removing dependence on `INBOX`
-- keep `SETTINGS`, `LOG`, and `AI_Cost_Tracker` stable during this phase
-- make grouped WhatsApp bursts and email threads the main interaction units
-- keep WhatsApp conversation-window thresholds configurable in code for now, and expose them in `SETTINGS` later once behavior is stable
-- keep FYI and low-value status pings in history, but do not surface them in boss-facing flows
-- detect manual external replies and suppress stale pending reply items automatically
+### Requirements:
+1. Dynamic Suggested Replies:
+   - Numeric (1, 2, 3...)
+2. Fixed System Actions:
+   - **A** → Archive
+   - **E** → Edit
+   - **L** → Later
+3. Shortcuts: System actions must remain stable letters to avoid confusion with dynamic replies.
 
-### Step 3 — CRM Enrichment And State Revision
+---
 
-Status: `pending`
+## STEP 4 — CONTACT STATE ENGINE
 
-Scope:
-- extract reusable facts from communication once
-- write structured CRM state back into Sheets
-- update `deal_score`, `priority_score`, `waiting_on`, and next-step fields from meaningful business signals
+Goal: `CONTACTS` becomes a reliable, derived snapshot of all interactions.
 
-### Step 4 — Easy Replies
+### Requirements:
+1. Implement canonical function: `TL_Contacts_UpsertFromActivity(activityRow)`
+2. Maintain fields:
+   - `last_inbound_at`
+   - `last_outbound_at`
+   - `unreplied_inbound_count`
+   - `last_signal_summary`
+3. Single Source: `CONTACTS` is fully derived from `ACTIVITY`. Any manual update must be written to `ACTIVITY` first.
 
-Status: `pending`
+---
 
-Scope:
-- rename the lane in product and boss UX to `Messages That Need Your Reply`
-- start with a short digest before opening one-by-one cards
-- show one real reply-needed item at a time
-- default the queue to `Chronological` so the boss gets the first card immediately after the digest
-- reuse contact state and recent activity
-- show card identity clearly: contact name, alternate display name when different, phone, email, channel
-- show a one-line `Waiting for` summary and a short excerpt
-- offer `1-3` concrete reply choices when possible
-- allow `Edit`, `Archive`, and `Later`
-- never draft replies for FYI or low-signal items
-- keep `Messages That Need Your Reply` conservative and trust-oriented: chronology-first mode must always be available
-- add a later `SETTINGS` override for default reply-queue ordering: always `Chronological`, always `Most Important First`, or ask each time
-- add passive reply-personalization learning later via a `Personal Style Directory` built from sent-message prompt/response pairs, intent and recipient labeling, weighted phrase retrieval, and a minimum-sample confidence threshold before style-based drafting is allowed
+## STEP 5 — CONVERSATION CONTEXT BUILDER
 
-### Step 5 — Safe Send Path Rebuild
+Goal: Reconstruct conversation history per contact for drafting.
 
-Status: `pending`
+### Requirements:
+1. Fetching: Ability to fetch last X inbound/outbound messages.
+2. Grouping: Group messages by contact (`root_id`).
+3. Chronology: Preserve strict chronological order.
 
-Scope:
-- rebuild outbound execution only after reply quality and safety are stable
-- separate approval from sending
-- add explicit enable gates and verification before re-opening real sends
+---
 
-### Step 6 — Priority / Next Steps
+## STEP 6 — AI REPLY ENGINE
 
-Status: `pending`
+Goal: Generate high-quality, safe draft replies.
 
-Scope:
-- surface the best business-progress items, not only inbox replies
-- keep this lane aggressively ranked by impact, urgency, and leverage
-- combine CRM state, open loops, and recent signals into a useful owner view
+### Requirements:
+1. Input: Current message + Recent conversation history + `CONTACTS` snapshot.
+2. Output: 2–3 numbered suggested replies.
+3. Strict Rules:
+   - No hallucinations or invented commitments.
+   - Respect tone and prior context.
+   - Neutral forward motion.
 
-### Step 7 — Manual Contact Update
+---
 
-Status: `pending`
+## STEP 7 — NEXT STEP ENGINE
 
-Scope:
-- let the boss update contact memory directly
-- keep manual updates lightweight and immediately reusable by the rest of the system
+Goal: Identify opportunities to move conversations forward.
 
-## Future Moat Direction
+### Requirements:
+1. Input: `CONTACTS` data + `ACTIVITY` history.
+2. Logic: Detect stalled conversations and follow-up opportunities.
+3. Output: Actionable suggestions for the boss.
 
-Parked for later, not for the current implementation pass:
-- passive context refresh: keep re-evaluating unresolved inbound items when later inbound messages from the same sender add new context, change urgency, cancel the ask, or close the loop
-- passive manual-reply learning: learn from real boss/business replies even when they were not sent through DealWise
-- phrase-pattern mining: detect repeated boss wording across different contacts, then classify reusable language patterns such as excitement, agreement, reassurance, delay, scheduling, and objection-handling
+---
 
-Sheet-design implication to keep in mind now:
-- when changing `ACTIVITY` or related sheets, preserve enough structure for future learning instead of storing only final AI interpretations
-- important future-safe fields include: thread/group id, contact id, sender role, receiver role, direction, raw text, normalized text, channel, timestamp, message id, reply linkage when available, grouped interaction id, manual-reply flags, DealWise-reply flags, external-resolution flags, and open-loop/reply-needed state markers
+## SYSTEM STRUCTURE & RULES
 
-Working rule:
-- do not pivot to implementing this moat now
-- but do avoid sheet/header decisions that would make this future learning layer harder to build later
-
-## Working Rule
-
-If a proposed change does not clearly advance one of the active steps above, it is drift until explicitly approved.
+- **ACTIVITY** = Primary source of truth (append-only ledger).
+- **CONTACTS** = Derived snapshot (computed state).
+- **Naming:** All logic follows `TL_*` naming convention.
+- **Safety:** All outbound communication remains **draft-only** (blocked by default).
+- **Status:** Any change that does not advance these steps is considered drift.
